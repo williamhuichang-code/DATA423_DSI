@@ -19,3 +19,7 @@ server <- function(input, output) {
 }
 
 shinyApp(ui, server)
+
+
+# shiny::runApp("D:/DS/VS git code/DATA423_DSI/my_shiny_app/first_app")
+# shiny::runApp("D:/DS/VS git code/DATA423_DSI/my_shiny_app")
