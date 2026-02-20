@@ -85,7 +85,25 @@ server <- function(input, output, session) {
     y_var    <- input$mosaic_y
     shade_on <- isTRUE(input$mosaic_shade)
 
-    tbl <- table(dat[[x_var]], dat[[y_var]])
+    # Drop unused factor levels BEFORE building the table.
+    # Sparse/empty cells cause chisq residuals to be NaN, which makes
+    # vcd::mosaic() crash with "missing value where TRUE/FALSE needed"
+    # when shade = TRUE.
+    x_clean <- droplevels(dat[[x_var]])
+    y_clean <- droplevels(dat[[y_var]])
+    tbl     <- table(x_clean, y_clean)
+    dimnames(tbl) <- list(x_var = levels(x_clean),
+                          y_var = levels(y_clean))
+
+    # If shade is requested but the table is too sparse for chi-sq, fall back
+    # to unshaded so the plot still renders rather than crashing.
+    if (shade_on) {
+      ct <- tryCatch(chisq.test(tbl), error = function(e) NULL)
+      if (is.null(ct) || any(is.nan(ct$residuals))) {
+        shade_on <- FALSE
+        message("Mosaic: shade disabled — table too sparse for chi-sq residuals.")
+      }
+    }
 
     vcd::mosaic(tbl,
                 shade    = shade_on,
