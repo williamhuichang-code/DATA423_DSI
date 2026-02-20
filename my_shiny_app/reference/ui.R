@@ -5,7 +5,7 @@
 # =============================================================================
 
 ui <- navbarPage(
-  title = "DATA423 Assignment 1 — [Your Name]",
+  title = "DATA423 Assignment 1 — William Hui Chang (69051925)",
   theme = NULL,   # swap in shinythemes::shinytheme("flatly") if you install it
 
   # ── 0. DATA OVERVIEW ────────────────────────────────────────────────────────
