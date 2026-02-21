@@ -1,6 +1,12 @@
 # =============================================================================
 # global.R
 # Loaded once when the app starts. Shared across all sessions.
+# Data loading
+# Data cleaning
+# Schema definitions
+# Feature engineering
+# Helper functions
+# Library loading
 # =============================================================================
 
 library(shiny)
