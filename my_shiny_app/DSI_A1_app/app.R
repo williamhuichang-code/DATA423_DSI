@@ -9,8 +9,12 @@ library(dplyr)
 # load the raw dataset
 raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = TRUE)
 
+# should be other steps such as schema
+
 renamed_dataset <- raw_dataset %>% 
   rename_with(~ tools::toTitleCase(.x))  # e.g., sensors have bad names
+
+# should be other steps such as enriching
 
 
 # =============================================================================
@@ -21,15 +25,21 @@ renamed_dataset <- raw_dataset %>%
 # UI
 ui <- fluidPage(
   
-  # global dropdown at the top
+  # global dataset dropdown at the top
   selectInput("dataset_choice", 
               label = "Choose Dataset Stage:", 
               choices = c("Raw Dataset", "Renamed Dataset")),
   
-  # two tabs
+  # tabs
   tabsetPanel(
-    tabPanel("Table", tableOutput("data_table")),
-    tabPanel("Summary", verbatimTextOutput("data_summary"))
+    tabPanel("Data Table",   tableOutput("data_table")),
+    tabPanel("Summary",      verbatimTextOutput("data_summary")),
+    tabPanel("Mosaic",       p("Coming soon")),
+    tabPanel("GGPairs",      p("Coming soon")),
+    tabPanel("Correlation",  p("Coming soon")),
+    tabPanel("Missingness",  p("Coming soon")),
+    tabPanel("Boxplot",      p("Coming soon")),
+    tabPanel("Rising Order", p("Coming soon"))
   )
 )
 
@@ -50,15 +60,18 @@ server <- function(input, output) {
     }
   })
   
-  # tab 0: show table
+  # tab: show table
   output$data_table <- renderTable({
     head(selected_data(), 1000)
   })
   
-  # tab 1: show summary
+  # tab: show summary
   output$data_summary <- renderPrint({
     summarytools::dfSummary(selected_data())
   })
+  
+  # other tabs
+
 }
 
 
