@@ -1,3 +1,5 @@
+# from global dropbox example to my own shiny app
+
 library(shiny)
 
 # --- Load and prepare dataset stages ---
