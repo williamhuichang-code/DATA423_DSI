@@ -71,7 +71,13 @@ server <- function(input, output, session) {
   })
 
   output$overview_summary <- renderPrint({
-    summary(dat[, c(meta_num, factor_cols)])
+    data_subset <- dat[, c(meta_num, factor_cols)]
+    # option 1: base R summary
+    # summary(data_subset)
+    # option 2: tibble::glimpse
+    # tibble::glimpse(data_subset)
+    # option 3: summarytools::dfSummary
+    summarytools::dfSummary(data_subset)
   })
 
   # ---------------------------------------------------------------------------
