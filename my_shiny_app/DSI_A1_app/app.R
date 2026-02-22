@@ -106,7 +106,12 @@ ds_col_enriched <- ds_renamed %>%
 #  - could be clean dataset, since we don't want NA in some cases (place holder)
 enriched_dataset <- ds_col_enriched
 
-# could be subset dataset, since we don't need ID and Date for further modelling (place holder)
+# subset dataset, since we don't need ID, Date and maybe Sensor1-30 as well for further modelling
+subset_dataset <- enriched_dataset %>% 
+  select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols no need for modelling
+  select(Y, IdGroup, Operator, Year, Season, Month, Day, everything())  # reorder
+  
+# subset_dataset <- subset_dataset %>% select(-IdGroup, -Year, -Month) # trial for variable testing
 
 
 # =============================================================================
@@ -122,7 +127,7 @@ ui <- fluidPage(
   # global dropdown choces for dataset at different stages
   selectInput("dataset_choice", 
               label = "Choose Dataset Stage:", 
-              choices = c("Raw Dataset", "Enriched Dataset", "Cleaned Dataset")),
+              choices = c("Raw Dataset", "Enriched Dataset", "Subset Dataset")),
   
   
   # ── TABS ───────────────────────────────────────────────────────────────────
@@ -232,7 +237,7 @@ server <- function(input, output) {
     switch(input$dataset_choice,
            "Raw Dataset"      = raw_dataset,
            "Enriched Dataset" = enriched_dataset,
-           "Cleaned Dataset"  = ds_renamed,  # care! ds_renamed is an trial, should be cleaned_dataset later
+           "Subset Dataset"  = subset_dataset,
            NULL)
     })
   
