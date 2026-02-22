@@ -61,16 +61,22 @@ ds_col_enriched <- ds_renamed %>%
   
   # - derive meaningful cyclic info from Date, including Year, Season, Month, Day
   mutate(
-    Year   = as.integer(format(Date, "%Y")),      # get year value from date
-    Month  = as.integer(format(Date, "%m")),      # get month value from date
-    Day    = as.integer(format(Date, "%d")),      # get day value from date
+    
+    # many years use numeric, for its order, real distance meaning, good for correlation / time trend plots
+    # few years prefer factor, purely categorical regimes, for barchart comparison
+    # month stays categorical, we do not assume January < February < March in a monotonic sense
+    # day mostly noise, but just curious about its day-wise distribution in histogram, so better numeric
+    Year   = factor(format(Date, "%Y")),
+    Month  = as.integer(format(Date, "%m")),
+    Day    = as.integer(format(Date, "%d")),
     Season = factor(
       case_when(
         Month %in% 1:3   ~ "S1",
         Month %in% 4:6   ~ "S2",
         Month %in% 7:9   ~ "S3",
         Month %in% 10:12 ~ "S4"
-      ))                            # get season value from month
+      )),
+    Month  = factor(Month)
   ) %>% 
   
   # - sensor patterns, including grouping and feature scaling
@@ -111,21 +117,71 @@ enriched_dataset <- ds_col_enriched
 # UI
 ui <- fluidPage(
   
+  # ── GLOBAL DS DROPDOWN ─────────────────────────────────────────────────────
+  
   # global dropdown choces for dataset at different stages
   selectInput("dataset_choice", 
               label = "Choose Dataset Stage:", 
               choices = c("Raw Dataset", "Enriched Dataset", "Cleaned Dataset")),
   
-  # tabs
+  
+  # ── TABS ───────────────────────────────────────────────────────────────────
+  
+  # tabs panels
   tabsetPanel(
+    
+    # ── TAB TABLE ────────────────────────────────────────────────────────────
+    
     tabPanel("Data Table",   DT::dataTableOutput("data_table")),
+    
+    
+    # ── TAB SUMMARY ──────────────────────────────────────────────────────────
+    
     tabPanel("Summary",      verbatimTextOutput("data_summary")),
-    tabPanel("Mosaic",       p("Coming soon")),
+    
+    
+    # ── TAB MOSAIC ───────────────────────────────────────────────────────────
+    
+    tabPanel("Mosaic",
+             sidebarLayout(
+               sidebarPanel(width = 2,   # 2/12 = ~17%, narrow sidebar
+                 uiOutput("mosaic_x_ui"),
+                 uiOutput("mosaic_y_ui"),
+                 uiOutput("mosaic_z_ui"),
+                 checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE)
+               ),
+               mainPanel(width = 10,     # must add up to 12
+                 plotOutput("mosaic_plot", height = "90vh")
+               )
+             )
+    ),
+    
+    
+    # ── TAB GGPAIRS ──────────────────────────────────────────────────────────
+    
     tabPanel("GGPairs",      p("Coming soon")),
+    
+    
+    # ── TAB CORRELATION ──────────────────────────────────────────────────────
+    
     tabPanel("Correlation",  p("Coming soon")),
+    
+    
+    # ── TAB MISSINGNESS ──────────────────────────────────────────────────────
+    
     tabPanel("Missingness",  p("Coming soon")),
+    
+    
+    # ── TAB BOXPLOT ──────────────────────────────────────────────────────────
+    
     tabPanel("Boxplot",      p("Coming soon")),
+    
+    
+    # ── TAB RISING ORDER ─────────────────────────────────────────────────────
+    
     tabPanel("Rising Order", p("Coming soon"))
+    
+    
   )
 )
 
@@ -137,30 +193,92 @@ ui <- fluidPage(
 # server
 server <- function(input, output) {
   
-  # reactive: pick dataset based on dropdown
+  # ── GLOBAL REACTIVE ────────────────────────────────────────────────────────
+  
+  # switch dataset based on drop down
   selected_data <- reactive({
     switch(input$dataset_choice,
            "Raw Dataset"      = raw_dataset,
            "Enriched Dataset" = enriched_dataset,
-           "Cleaned Dataset"  = ds_renamed,  # care, ds_renamed is an trial, should be cleaned_dataset later
+           "Cleaned Dataset"  = ds_renamed,  # care! ds_renamed is an trial, should be cleaned_dataset later
            NULL)
     })
   
-  # tab: show table
-  # (renderTable cannot handle date format well, so switched to DT::dataTableOutput)
+  
+  # ── TAB TABLE ──────────────────────────────────────────────────────────────
+  # (renderTable cannot handle date format well, so changed to DT::dataTableOutput)
   output$data_table <- DT::renderDataTable({
-    # instead of head(selected_data(), 1000), new code adds col info as well
+    # instead of head(selected_data(), 1000), this new code adds col info as well
     df <- head(selected_data(), 1000)
     DT::datatable(df, caption = paste0("Dataset Dimensions: ", nrow(df), " × ", ncol(df)))
   })
   
-  # tab: show summary
+  
+  # ── TAB SUMMARY ────────────────────────────────────────────────────────────
+  
   output$data_summary <- renderPrint({
     summarytools::dfSummary(selected_data())
   })
   
-  # other tabs
-
+  
+  # ── TAB MOSAIC ─────────────────────────────────────────────────────────────
+  
+  # only factor/ordered/character cols are valid for mosaic
+  cat_cols <- reactive({
+    df <- selected_data()
+    names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+  })
+  
+  output$mosaic_x_ui <- renderUI({
+    selectInput("mosaic_x", "Variable 1 (columns):", choices = cat_cols())
+  })
+  
+  output$mosaic_y_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_y", "Variable 2 (rows):", choices = cols, selected = cols[2])
+  })
+  
+  output$mosaic_z_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_z", "Variable 3 — optional (sub-rows):",
+                choices = c("None", cols), selected = "None")
+  })
+  
+  output$mosaic_plot <- renderPlot({
+    req(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    df <- selected_data()
+    
+    # build 2-way or 3-way contingency table depending on Variable 3
+    if (input$mosaic_z == "None") {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y)
+    } else {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]], df[[input$mosaic_z]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    }
+    
+    title <- paste("Mosaic:", paste(
+      c(input$mosaic_x, input$mosaic_y,
+        if (input$mosaic_z != "None") input$mosaic_z),
+      collapse = " × "))
+    
+    vcd::mosaic(tbl,
+                shade  = input$mosaic_shade,
+                legend = input$mosaic_shade,
+                main   = title,
+                labeling     = labeling_border(
+                  rot_labels   = c(90, 0, 0, 0),      # rotate axis labels
+                  gp_labels    = gpar(fontsize = 9), # smaller font
+                  abbreviate   = TRUE,               # abbreaviated labels or not
+                ))
+  })
+  
+  
+  # ── TAB GGPAIRS ────────────────────────────────────────────────────────────
+  # ── TAB CORRELATION ────────────────────────────────────────────────────────
+  # ── TAB MISSINGNESS ────────────────────────────────────────────────────────
+  # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
+  # ── TAB RISING ORDER ───────────────────────────────────────────────────────
 }
 
 
