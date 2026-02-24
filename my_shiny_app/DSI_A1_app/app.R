@@ -13,7 +13,7 @@ library(vcd)
 library(DT)
 
 # load the raw dataset
-raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = TRUE)
+raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = FALSE)
 
 # create a copy of raw dataset (R use copy-on-modify)
 ds_copied <- raw_dataset
