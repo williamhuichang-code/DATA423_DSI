@@ -108,12 +108,12 @@ ds_col_enriched <- ds_renamed %>%
 #  - could be clean dataset, since we don't want NA in some cases (place holder)
 enriched_dataset <- ds_col_enriched
 
-# subset dataset, since we don't need ID, Date and maybe Sensor1-30 as well for further modelling
-subset_dataset <- enriched_dataset %>% 
-  select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols no need for modelling
+# model dataset, since we don't need ID, Date and maybe Sensor1-30 as well for further modelling
+model_dataset <- enriched_dataset %>% 
+  select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols not needed for modelling
   select(Y, IdGroup, Operator, Year, Season, Month, Day, everything())  # reorder
   
-# subset_dataset <- subset_dataset %>% select(-IdGroup, -Year, -Month) # trial for variable testing
+# model_dataset <- model_dataset %>% select(-IdGroup, -Year, -Month) # trial for variable testing
 
 
 # =============================================================================
@@ -129,7 +129,7 @@ ui <- fluidPage(
   # global dropdown choces for dataset at different stages
   fluidRow(
     column(2, selectInput("dataset_choice", "Choose Dataset Stage:",
-                          choices = c("Raw Dataset", "Enriched Dataset", "Subset Dataset"))),
+                          choices = c("Raw Dataset", "Enriched Dataset", "model dataset"))),
     column(1, actionButton("dataset_info", label = NULL,
                            icon  = icon("circle-info"),
                            style = "margin-top: 25px; font-size: 20px;
@@ -282,7 +282,7 @@ server <- function(input, output, session) {
     switch(input$dataset_choice,
            "Raw Dataset"      = raw_dataset,
            "Enriched Dataset" = enriched_dataset,
-           "Subset Dataset"  = subset_dataset,
+           "Model Dataset"  = model_dataset,
            NULL)
     })
   
@@ -296,9 +296,10 @@ server <- function(input, output, session) {
         tags$dd("Original CSV as loaded. No modifications — includes ID, Date, all Sensor1–30 columns."),
         tags$dt("Enriched Dataset"),
         tags$dd("Raw + derived columns: IdGroup (from ID prefix), Year/Season/Month/Day (from Date),
-               SensorGroup1–3 (row means of sensor bands), plus centred, standardised, and normalised variants."),
-        tags$dt("Subset Dataset"),
-        tags$dd("Enriched dataset with ID, Date, and Sensor1–30 dropped. Cleaner view for modelling and exploration.")
+                SensorGroup1–3 (row means of sensor bands), plus centred, standardised, and normalised variants.
+                Sensor columns were renamed with consistent initial capitalisation as well."),
+        tags$dt("Model Dataset"),
+        tags$dd("Trimmed dataset from enriched one with ID, Date, and Sensor1–30 dropped. Cleaner view for modelling.")
       ),
       easyClose = TRUE,
       footer = modalButton("Close")
