@@ -153,6 +153,36 @@ ui <- fluidPage(
     tabPanel("Summary",      verbatimTextOutput("data_summary")),  # end of tab panel
     
     
+    # ── LOLLIPOP ─────────────────────────────────────────────────────────────
+    
+    tabPanel("Lollipop",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            
+                            textInput("vc_value", "Value to count:",
+                                      value = "NA",
+                                      placeholder = "e.g. Yes, High, NA"),
+                            
+                            checkboxInput("vc_case", "Case sensitive", value = FALSE),
+                            
+                            selectizeInput("vc_cols", "Search in columns:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            
+                            selectInput("vc_metric", "Show as:",
+                                        choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
+                            
+                            hr(),
+                            checkboxInput("vc_sort", "Sort by value (descending)", value = TRUE)
+                            
+               ),
+               mainPanel(width = 9,
+                         plotOutput("vc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── TAB RISING ORDER ─────────────────────────────────────────────────────
     
     tabPanel("Rising Order",
@@ -190,36 +220,6 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          plotOutput("qq_plot", height = "80vh")
-               )
-             )
-    ),  # end of tab panel
-    
-    
-    # ── LOLLIPOP ─────────────────────────────────────────────────────────────
-    
-    tabPanel("Lollipop",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            
-                            textInput("vc_value", "Value to count:",
-                                      value = "NA",
-                                      placeholder = "e.g. Yes, High, NA"),
-                            
-                            checkboxInput("vc_case", "Case sensitive", value = FALSE),
-                            
-                            selectizeInput("vc_cols", "Search in columns:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            
-                            selectInput("vc_metric", "Show as:",
-                                        choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
-                            
-                            hr(),
-                            checkboxInput("vc_sort", "Sort by value (descending)", value = TRUE)
-                            
-               ),
-               mainPanel(width = 9,
-                         plotOutput("vc_plot", height = "80vh")
                )
              )
     ),  # end of tab panel
@@ -350,6 +350,99 @@ server <- function(input, output, session) {
   
   output$data_summary <- renderPrint({
     summarytools::dfSummary(selected_data())
+  })
+  
+  
+  # ── LOLLIPOP ───────────────────────────────────────────────────────────────
+  
+  observe({
+    df   <- selected_data()
+    req(df)
+    all_cols <- names(df)
+    updateSelectizeInput(session, "vc_cols", choices = all_cols, selected = all_cols)
+  })
+  
+  output$vc_plot <- renderPlot({
+    req(input$vc_value, input$vc_cols)
+    df  <- selected_data()
+    val <- input$vc_value
+    
+    # count occurrences of the value in each selected column
+    results <- lapply(input$vc_cols, function(col) {
+      x     <- df[[col]]
+      total <- length(x)
+      
+      # handle NA as a special keyword
+      n_match <- if (toupper(val) == "NA") {
+        sum(is.na(x))
+      } else if (input$vc_case) {
+        sum(as.character(x) == val, na.rm = TRUE)          # case sensitive
+      } else {
+        sum(tolower(as.character(x)) == tolower(val), na.rm = TRUE)  # case insensitive
+      }
+      
+      data.frame(
+        Column  = col,
+        Count   = n_match,
+        Pct     = round(n_match / total * 100, 1),
+        Total   = total
+      )
+    })
+    
+    plot_df <- do.call(rbind, results)
+    
+    # sort if requested
+    if (input$vc_sort) {
+      sort_col  <- if (input$vc_metric == "count") "Count" else "Pct"
+      plot_df   <- plot_df[order(plot_df[[sort_col]], decreasing = FALSE), ]
+    }
+    
+    # keep column order for plot
+    plot_df$Column <- factor(plot_df$Column, levels = plot_df$Column)
+    
+    y_val   <- if (input$vc_metric == "count") plot_df$Count else plot_df$Pct
+    y_label <- if (input$vc_metric == "count") "Count" else "Percentage (%)"
+    y_max   <- max(y_val, na.rm = TRUE) * 1.15  # headroom for labels
+    
+    # lollipop plot
+    par(mar = c(5, 10, 4, 2))  # wide left margin for column names
+    
+    plot(NULL,
+         xlim = c(0, y_max),
+         ylim = c(0.5, nrow(plot_df) + 0.5),
+         xlab = y_label,
+         ylab = "",
+         main = paste0('Occurrences of "', val, '" across Selected Columns'),
+         yaxt = "n")
+    
+    # y axis labels
+    axis(2, at = seq_len(nrow(plot_df)),
+         labels = levels(plot_df$Column),
+         las = 2, cex.axis = 0.9)
+    
+    # grid lines
+    abline(h = seq_len(nrow(plot_df)), col = "grey90", lty = 1)
+    
+    # stems
+    segments(x0 = 0, x1 = y_val,
+             y0 = seq_len(nrow(plot_df)),
+             y1 = seq_len(nrow(plot_df)),
+             col = "steelblue", lwd = 2)
+    
+    # dots
+    points(y_val, seq_len(nrow(plot_df)),
+           pch = 16, cex = 2.5, col = "steelblue")
+    
+    # value labels on dots
+    label_text <- if (input$vc_metric == "count") {
+      paste0(plot_df$Count, " / ", plot_df$Total)
+    } else {
+      paste0(plot_df$Pct, "%")
+    }
+    
+    text(y_val, seq_len(nrow(plot_df)),
+         labels = label_text,
+         pos = 4, cex = 0.85, col = "grey30")
   })
   
   
@@ -484,99 +577,6 @@ server <- function(input, output, session) {
       int <- y_q[1] - slope * x_q[1]
       abline(int, slope, col = "red", lwd = 2)
     }
-  })
-  
-  
-  # ── LOLLIPOP ───────────────────────────────────────────────────────────────
-  
-  observe({
-    df   <- selected_data()
-    req(df)
-    all_cols <- names(df)
-    updateSelectizeInput(session, "vc_cols", choices = all_cols, selected = all_cols)
-  })
-  
-  output$vc_plot <- renderPlot({
-    req(input$vc_value, input$vc_cols)
-    df  <- selected_data()
-    val <- input$vc_value
-    
-    # count occurrences of the value in each selected column
-    results <- lapply(input$vc_cols, function(col) {
-      x     <- df[[col]]
-      total <- length(x)
-      
-      # handle NA as a special keyword
-      n_match <- if (toupper(val) == "NA") {
-        sum(is.na(x))
-      } else if (input$vc_case) {
-        sum(as.character(x) == val, na.rm = TRUE)          # case sensitive
-      } else {
-        sum(tolower(as.character(x)) == tolower(val), na.rm = TRUE)  # case insensitive
-      }
-      
-      data.frame(
-        Column  = col,
-        Count   = n_match,
-        Pct     = round(n_match / total * 100, 1),
-        Total   = total
-      )
-    })
-    
-    plot_df <- do.call(rbind, results)
-    
-    # sort if requested
-    if (input$vc_sort) {
-      sort_col  <- if (input$vc_metric == "count") "Count" else "Pct"
-      plot_df   <- plot_df[order(plot_df[[sort_col]], decreasing = FALSE), ]
-    }
-    
-    # keep column order for plot
-    plot_df$Column <- factor(plot_df$Column, levels = plot_df$Column)
-    
-    y_val   <- if (input$vc_metric == "count") plot_df$Count else plot_df$Pct
-    y_label <- if (input$vc_metric == "count") "Count" else "Percentage (%)"
-    y_max   <- max(y_val, na.rm = TRUE) * 1.15  # headroom for labels
-    
-    # lollipop plot
-    par(mar = c(5, 10, 4, 2))  # wide left margin for column names
-    
-    plot(NULL,
-         xlim = c(0, y_max),
-         ylim = c(0.5, nrow(plot_df) + 0.5),
-         xlab = y_label,
-         ylab = "",
-         main = paste0('Occurrences of "', val, '" across Selected Columns'),
-         yaxt = "n")
-    
-    # y axis labels
-    axis(2, at = seq_len(nrow(plot_df)),
-         labels = levels(plot_df$Column),
-         las = 2, cex.axis = 0.9)
-    
-    # grid lines
-    abline(h = seq_len(nrow(plot_df)), col = "grey90", lty = 1)
-    
-    # stems
-    segments(x0 = 0, x1 = y_val,
-             y0 = seq_len(nrow(plot_df)),
-             y1 = seq_len(nrow(plot_df)),
-             col = "steelblue", lwd = 2)
-    
-    # dots
-    points(y_val, seq_len(nrow(plot_df)),
-           pch = 16, cex = 2.5, col = "steelblue")
-    
-    # value labels on dots
-    label_text <- if (input$vc_metric == "count") {
-      paste0(plot_df$Count, " / ", plot_df$Total)
-    } else {
-      paste0(plot_df$Pct, "%")
-    }
-    
-    text(y_val, seq_len(nrow(plot_df)),
-         labels = label_text,
-         pos = 4, cex = 0.85, col = "grey30")
   })
   
   
