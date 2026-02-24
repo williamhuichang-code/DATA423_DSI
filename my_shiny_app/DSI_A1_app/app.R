@@ -164,6 +164,39 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
+    # ── TAB Q-Q PLOT ──────────────────────────────────────────────────────────
+    
+    tabPanel("Q-Q Plot",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            selectInput("qq_var", "Select Variable:", choices = NULL),
+                            # add a transformation mechanic
+                            radioButtons("qq_trans", "Apply Transformation:",
+                                         choices = c("None" = "none", 
+                                                     "Log (ln)" = "log", 
+                                                     "Square Root" = "sqrt", 
+                                                     "Yeo-Johnson" = "yj"),
+                                         selected = "none"),
+                            # select for distribution
+                            selectInput("qq_dist", "Distribution:", 
+                                        choices = c("Normal" = "norm", 
+                                                    "Exponential" = "exp", 
+                                                    "Log-normal" = "lnorm", 
+                                                    "Gamma" = "gamma", 
+                                                    "Weibull" = "weibull")),
+                            hr(),
+                            h4("Distribution Parameters"),
+                            uiOutput("qq_params"), # dynamic UI for parameters
+                            hr(),
+                            checkboxInput("qq_line", "Show Reference Line", value = TRUE)
+               ),
+               mainPanel(width = 9,
+                         plotOutput("qq_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── TAB MOSAIC ───────────────────────────────────────────────────────────
     
     tabPanel("Mosaic",
@@ -321,6 +354,106 @@ server <- function(input, output, session) {
     
     legend("topleft", legend = input$rising_var,
            col = colors, lwd = 2, lty = ltypes, bty = "n")
+  })
+  
+  
+  # ── TAB Q-Q PLOT ───────────────────────────────────────────────────────────
+  # update variable choices for QQ Plot
+  observe({
+    df <- selected_data()
+    req(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectInput(session, "qq_var", choices = numeric_vars)
+  })
+  
+  # dynamic UI for distribution parameters
+  output$qq_params <- renderUI({
+    req(input$qq_dist)
+    
+    switch(input$qq_dist,
+           "norm" = tagList(
+             numericInput("qq_mean", "Mean", value = 0),
+             numericInput("qq_sd", "SD", value = 1, min = 0.01)
+           ),
+           "exp" = tagList(
+             numericInput("qq_rate", "Rate (λ)", value = 1, min = 0.01)
+           ),
+           "lnorm" = tagList(
+             numericInput("qq_meanlog", "Meanlog", value = 0),
+             numericInput("qq_sdlog", "SDlog", value = 1, min = 0.01)
+           ),
+           "gamma" = tagList(
+             numericInput("qq_shape", "Shape (α)", value = 1, min = 0.01),
+             numericInput("qq_rate_g", "Rate (β)", value = 1, min = 0.01)
+           ),
+           "weibull" = tagList(
+             numericInput("qq_shape_w", "Shape (k)", value = 1, min = 0.01),
+             numericInput("qq_scale_w", "Scale (λ)", value = 1, min = 0.01)
+           )
+    )
+  })
+  
+  # render the QQ Plot
+  output$qq_plot <- renderPlot({
+    req(input$qq_var, input$qq_dist)
+    df <- selected_data()
+    
+    # get raw values and remove NAs to ensure successful transformations
+    val <- df[[input$qq_var]]
+    val <- val[!is.na(val)]
+    
+    # apply transformation logic
+    val <- switch(input$qq_trans,
+                  "log"   = if(all(val > 0)) log(val) else { 
+                    showNotification("Log requires all values > 0", type="error", position = "top-left"); val 
+                  },
+                  "sqrt"  = if(all(val >= 0)) sqrt(val) else { 
+                    showNotification("Sqrt requires all values >= 0", type="error", position = "top-left"); val 
+                  },
+                  "yj"    = car::yjPower(val, lambda = 0), # Lambda = 0 is similar to Log
+                  "none"  = val)
+    
+    # ascending order/quantiles
+    val <- sort(val)
+    
+    # define distribution arguments based on user input
+    dist_args <- switch(input$qq_dist,
+                        "norm"    = list(mean = input$qq_mean, sd = input$qq_sd),
+                        "exp"     = list(rate = input$qq_rate),
+                        "lnorm"   = list(meanlog = input$qq_meanlog, sdlog = input$qq_sdlog),
+                        "gamma"   = list(shape = input$qq_shape, rate = input$qq_rate_g),
+                        "weibull" = list(shape = input$qq_shape_w, scale = input$qq_scale_w)
+    )
+    
+    # validate that args are not null
+    if (any(sapply(dist_args, is.null))) return(NULL)
+    
+    # generate theoretical quantiles
+    n <- length(val)
+    probs <- (1:n - 0.5) / n
+    
+    # map string distribution names to their quantile functions (qnorm, qexp, etc)
+    q_func <- match.fun(paste0("q", input$qq_dist))
+    theoretical_quantiles <- do.call(q_func, c(list(p = probs), dist_args))
+    
+    # plot with updated axis label
+    y_label <- if(input$qq_trans == "none") input$qq_var else paste0(input$qq_trans, "(", input$qq_var, ")")
+    
+    plot(theoretical_quantiles, val,
+         xlab = paste("Theoretical Quantiles (", input$qq_dist, ")"),
+         ylab = paste("Sample Quantiles:", y_label),
+         main = paste("Q-Q Plot:", y_label, "vs", input$qq_dist),
+         pch = 20, col = "steelblue")
+    
+    # reference Line logic
+    if (input$qq_line) {
+      # adding a reference line passing through 1st and 3rd quartiles
+      y_q <- quantile(val, c(0.25, 0.75))
+      x_q <- do.call(q_func, c(list(p = c(0.25, 0.75)), dist_args))
+      slope <- diff(y_q) / diff(x_q)
+      int <- y_q[1] - slope * x_q[1]
+      abline(int, slope, col = "red", lwd = 2)
+    }
   })
   
   
