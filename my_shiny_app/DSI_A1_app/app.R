@@ -170,14 +170,6 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 3,
                             selectInput("qq_var", "Select Variable:", choices = NULL),
-                            # add a transformation mechanic
-                            radioButtons("qq_trans", "Apply Transformation:",
-                                         choices = c("None" = "none", 
-                                                     "Log (ln)" = "log", 
-                                                     "Square Root" = "sqrt", 
-                                                     "Yeo-Johnson" = "yj"),
-                                         selected = "none"),
-                            # select for distribution
                             selectInput("qq_dist", "Distribution:", 
                                         choices = c("Normal" = "norm", 
                                                     "Exponential" = "exp", 
@@ -186,7 +178,7 @@ ui <- fluidPage(
                                                     "Weibull" = "weibull")),
                             hr(),
                             h4("Distribution Parameters"),
-                            uiOutput("qq_params"), # dynamic UI for parameters
+                            uiOutput("qq_params"), # Dynamic UI for parameters
                             hr(),
                             checkboxInput("qq_line", "Show Reference Line", value = TRUE)
                ),
@@ -397,24 +389,8 @@ server <- function(input, output, session) {
   output$qq_plot <- renderPlot({
     req(input$qq_var, input$qq_dist)
     df <- selected_data()
-    
-    # get raw values and remove NAs to ensure successful transformations
     val <- df[[input$qq_var]]
-    val <- val[!is.na(val)]
-    
-    # apply transformation logic
-    val <- switch(input$qq_trans,
-                  "log"   = if(all(val > 0)) log(val) else { 
-                    showNotification("Log requires all values > 0", type="error", position = "top-left"); val 
-                  },
-                  "sqrt"  = if(all(val >= 0)) sqrt(val) else { 
-                    showNotification("Sqrt requires all values >= 0", type="error", position = "top-left"); val 
-                  },
-                  "yj"    = car::yjPower(val, lambda = 0), # Lambda = 0 is similar to Log
-                  "none"  = val)
-    
-    # ascending order/quantiles
-    val <- sort(val)
+    val <- sort(val[!is.na(val)]) # ascending order/quantile
     
     # define distribution arguments based on user input
     dist_args <- switch(input$qq_dist,
@@ -437,17 +413,15 @@ server <- function(input, output, session) {
     theoretical_quantiles <- do.call(q_func, c(list(p = probs), dist_args))
     
     # plot with updated axis label
-    y_label <- if(input$qq_trans == "none") input$qq_var else paste0(input$qq_trans, "(", input$qq_var, ")")
-    
     plot(theoretical_quantiles, val,
          xlab = paste("Theoretical Quantiles (", input$qq_dist, ")"),
-         ylab = paste("Sample Quantiles:", y_label),
-         main = paste("Q-Q Plot:", y_label, "vs", input$qq_dist),
+         ylab = paste("Sample Quantiles:", input$qq_var),
+         main = paste("Q-Q Plot:", input$qq_var, "vs", input$qq_dist),
          pch = 20, col = "steelblue")
     
-    # reference Line logic
     if (input$qq_line) {
-      # adding a reference line passing through 1st and 3rd quartiles
+      # Adding a reference line passing through 1st and 3rd quartiles
+      # (Similar to qqline logic)
       y_q <- quantile(val, c(0.25, 0.75))
       x_q <- do.call(q_func, c(list(p = c(0.25, 0.75)), dist_args))
       slope <- diff(y_q) / diff(x_q)
