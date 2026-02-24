@@ -9,6 +9,8 @@
 
 library(shiny)
 library(dplyr)
+library(vcd)
+library(DT)
 
 # load the raw dataset
 raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = TRUE)
