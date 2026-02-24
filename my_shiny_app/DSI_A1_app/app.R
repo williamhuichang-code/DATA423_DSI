@@ -18,10 +18,44 @@ raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = FALSE)
 # create a copy of raw dataset (R use copy-on-modify)
 ds_copied <- raw_dataset
 
+# standardise all the col names with initial capital naming style
+ds_renamed <- ds_copied %>% 
+  rename_with(~ tools::toTitleCase(.x))  # e.g., sensors have bad names
+
+# master column order — all datasets follow this, skipping cols that don't exist
+master_col_order <- c(
+  # target
+  "Y",
+  # identifiers and operators
+  "IdGroup", "ID", "Operator", 
+  # date and derived factors
+  "Date", "Year", "Season", "Month", "Day",
+  # context
+  "Priority", "Price", "Speed", "Duration", "Temp",
+  "Location", "Agreed", "State", "Class", "Surface",
+  # raw sensors
+  paste0("Sensor", 1:30),
+  # sensor group 1 (averaged raw)
+  "SensorGroup1", "SensorGroup2", "SensorGroup3",
+  # centred sensor group (subtract mean)
+  "CenterSG1", "CenterSG2", "CenterSG3",
+  # standardised sensor group (z-score)
+  "StandardisedSG1", "StandardisedSG2", "StandardisedSG3",
+  # normalised sensor group (min-max)
+  "NormalisedSG1", "NormalisedSG2", "NormalisedSG3"
+)
+
+# helper function: reorder a df by master order, skipping missing cols
+reorder_cols <- function(df) {
+  keep <- master_col_order[master_col_order %in% names(df)]  # only cols that exist
+  df[, keep]
+}
+
+
 # validate dataset with schema
 # - predefine a schema
 schema <- list(
-  numeric_cols = c("Y", grep("^sensor", names(ds_copied), value = TRUE)),
+  numeric_cols = c("Y", grep("^Sensor", names(ds_copied), value = TRUE)),
   date_cols    = "Date",
   factor_cols  = c("ID", "Operator", "Priority", "Price",
                    "Speed", "Duration", "Temp", "Location",
@@ -29,7 +63,7 @@ schema <- list(
 )
 
 # - explicitly apply proper schema to our dataset, and solve name issues
-ds_typed <- ds_copied %>%
+ds_typed <- ds_renamed %>%
   
   # - assigning schema
   mutate(
@@ -49,12 +83,9 @@ ds_typed <- ds_copied %>%
     Agreed   = factor(Agreed,   levels = c("No", "Yes"))
   )
 
-# standardise all the col names with initial capital naming style
-ds_renamed <- ds_typed %>% 
-  rename_with(~ tools::toTitleCase(.x))  # e.g., sensors have bad names
 
 # enrich the dataset with new cols
-ds_col_enriched <- ds_renamed %>%
+ds_col_enriched <- ds_typed %>%
   
   # - derive IdGroup, ID values start with significant pattern of G type and D type
   mutate(
@@ -106,12 +137,13 @@ ds_col_enriched <- ds_renamed %>%
 
 # enrich the dataset by examining proper rows (place holder)
 #  - could be clean dataset, since we don't want NA in some cases (place holder)
-enriched_dataset <- ds_col_enriched
+enriched_dataset <- ds_col_enriched %>% 
+  reorder_cols()
 
 # model dataset, since we don't need ID, Date and maybe Sensor1-30 as well for further modelling
 model_dataset <- enriched_dataset %>% 
   select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols not needed for modelling
-  select(Y, IdGroup, Operator, Year, Season, Month, Day, everything())  # reorder
+  reorder_cols()
   
 # model_dataset <- model_dataset %>% select(-IdGroup, -Year, -Month) # trial for variable testing
 
@@ -129,7 +161,8 @@ ui <- fluidPage(
   # global dropdown choces for dataset at different stages
   fluidRow(
     column(2, selectInput("dataset_choice", "Choose Dataset Stage:",
-                          choices = c("Raw Dataset", "Enriched Dataset", "Model Dataset"))),
+                          choices = c("Raw Dataset", "Enriched Dataset", "Model Dataset"),
+                          selected = "Enriched Dataset")),
     column(1, actionButton("dataset_info", label = NULL,
                            icon  = icon("circle-info"),
                            style = "margin-top: 25px; font-size: 20px;
@@ -150,7 +183,20 @@ ui <- fluidPage(
     
     # ── TAB SUMMARY ──────────────────────────────────────────────────────────
     
-    tabPanel("Summary",      verbatimTextOutput("data_summary")),  # end of tab panel
+    tabPanel("Summary",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            radioButtons("summary_style", "Summary Style:",
+                                         choices = c("Base R"      = "base",
+                                                     "Glimpse"     = "glimpse",
+                                                     "dfSummary"   = "dfsummary"),
+                                         selected = "glimpse")
+               ),
+               mainPanel(width = 10,
+                         verbatimTextOutput("data_summary")
+               )
+             )
+    ),  # end of tab panel
     
     
     # ── LOLLIPOP ─────────────────────────────────────────────────────────────
@@ -214,7 +260,7 @@ ui <- fluidPage(
                                                     "Weibull" = "weibull")),
                             hr(),
                             h4("Distribution Parameters"),
-                            uiOutput("qq_params"), # Dynamic UI for parameters
+                            uiOutput("qq_params"), # dynamic UI for parameters
                             hr(),
                             checkboxInput("qq_line", "Show Reference Line", value = TRUE)
                ),
@@ -342,14 +388,20 @@ server <- function(input, output, session) {
   output$data_table <- DT::renderDataTable({
     # instead of head(selected_data(), 1000), this new code adds col info as well
     df <- head(selected_data(), 1000)
-    DT::datatable(df, caption = paste0("Dataset Dimensions: ", nrow(df), " × ", ncol(df)))
+    # can add "switch dataset stage to explore different dimensional views"
+    DT::datatable(df, caption = paste0(input$dataset_choice, " Dimensions: ", nrow(df), " × ", ncol(df)))
   })
   
   
   # ── TAB SUMMARY ────────────────────────────────────────────────────────────
   
   output$data_summary <- renderPrint({
-    summarytools::dfSummary(selected_data())
+    df <- selected_data()
+    switch(input$summary_style,
+           "base"      = summary(df),
+           "glimpse"   = tibble::glimpse(df),
+           "dfsummary" = summarytools::dfSummary(df)
+    )
   })
   
   
