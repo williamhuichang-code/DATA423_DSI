@@ -304,7 +304,7 @@ server <- function(input, output, session) {
     req(df)
     
     numeric_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectInput(session, "rising_var", choices = numeric_vars)
+    updateSelectInput(session, "rising_var", choices = numeric_vars, selected = numeric_vars[1])
   })
   
   output$rising_plot <- renderPlot({
