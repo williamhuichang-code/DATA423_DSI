@@ -127,9 +127,15 @@ ui <- fluidPage(
   # ── GLOBAL DS DROPDOWN ─────────────────────────────────────────────────────
   
   # global dropdown choces for dataset at different stages
-  selectInput("dataset_choice", 
-              label = "Choose Dataset Stage:", 
-              choices = c("Raw Dataset", "Enriched Dataset", "Subset Dataset")),
+  fluidRow(
+    column(2, selectInput("dataset_choice", "Choose Dataset Stage:",
+                          choices = c("Raw Dataset", "Enriched Dataset", "Subset Dataset"))),
+    column(1, actionButton("dataset_info", label = NULL,
+                           icon  = icon("circle-info"),
+                           style = "margin-top: 25px; font-size: 20px;
+                                color: #0d6efd; background: none;
+                                border: none; padding: 0;"))
+  ),
   
   
   # ── TABS ───────────────────────────────────────────────────────────────────
@@ -279,6 +285,25 @@ server <- function(input, output, session) {
            "Subset Dataset"  = subset_dataset,
            NULL)
     })
+  
+  observeEvent(input$dataset_info, {
+    showModal(modalDialog(
+      title = "Dataset Stages Explained",
+      tags$dl(
+        tags$dt("Note: Dataset selection is global and applies consistently across all tabs in the app."),
+        tags$br(),
+        tags$dt("Raw Dataset"),
+        tags$dd("Original CSV as loaded. No modifications — includes ID, Date, all Sensor1–30 columns."),
+        tags$dt("Enriched Dataset"),
+        tags$dd("Raw + derived columns: IdGroup (from ID prefix), Year/Season/Month/Day (from Date),
+               SensorGroup1–3 (row means of sensor bands), plus centred, standardised, and normalised variants."),
+        tags$dt("Subset Dataset"),
+        tags$dd("Enriched dataset with ID, Date, and Sensor1–30 dropped. Cleaner view for modelling and exploration.")
+      ),
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
+  })
   
   
   # ── TAB TABLE ──────────────────────────────────────────────────────────────
