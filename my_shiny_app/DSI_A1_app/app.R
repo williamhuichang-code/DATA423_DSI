@@ -147,6 +147,23 @@ ui <- fluidPage(
     tabPanel("Summary",      verbatimTextOutput("data_summary")),  # end of tab panel
     
     
+    # ── TAB RISING ORDER ─────────────────────────────────────────────────────
+    
+    tabPanel("Rising Order",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectizeInput("rising_var",
+                                           "Select numeric variable:",
+                                           choices = NULL,
+                                           multiple = TRUE)
+               ),
+               mainPanel(width = 10,
+                         plotOutput("rising_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── TAB MOSAIC ───────────────────────────────────────────────────────────
     
     tabPanel("Mosaic",
@@ -216,18 +233,6 @@ ui <- fluidPage(
     tabPanel("Boxplot",      p("Coming soon")),  # end of tab panel
     
     
-    # ── TAB RISING ORDER ─────────────────────────────────────────────────────
-    
-    tabPanel("Rising Order",
-             
-             selectInput("rising_var",
-                         "Select numeric variable:",
-                         choices = NULL,
-                         multiple = TRUE),
-             
-             plotOutput("rising_plot", height = "600px")
-    )  # end of tab panel
-    
   ) # end tabsetPanel
 )   # end fluidPage
 
@@ -264,6 +269,58 @@ server <- function(input, output, session) {
   
   output$data_summary <- renderPrint({
     summarytools::dfSummary(selected_data())
+  })
+  
+  
+  # ── TAB RISING ORDER ───────────────────────────────────────────────────────
+  # update choices
+  observe({
+    df <- selected_data()
+    req(df)
+    
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectInput(session, "rising_var", choices = numeric_vars)
+  })
+  
+  output$rising_plot <- renderPlot({
+    req(input$rising_var)
+    df <- selected_data()
+    
+    n <- length(input$rising_var)
+    
+    # better palettes depending on number of vars
+    if (n <= 8) {
+      colors <- RColorBrewer::brewer.pal(max(n, 3), "Set1")[1:n]
+    } else {
+      colors <- rainbow(n)
+    }
+    
+    # vary line types as well for extra differentiation
+    ltypes <- rep(1:6, length.out = n)  # cycles through solid, dashed, dotted, etc.
+    
+    all_vals <- unlist(lapply(input$rising_var, function(v) df[[v]][!is.na(df[[v]])]))
+    y_range  <- range(all_vals)
+    
+    for (i in seq_along(input$rising_var)) {
+      v        <- input$rising_var[i]
+      y        <- df[[v]]
+      y        <- y[!is.na(y)]
+      y_sorted <- sort(y)
+      pct      <- seq_along(y_sorted) / length(y_sorted) * 100
+      
+      if (i == 1) {
+        plot(pct, y_sorted,
+             type = "l", col = colors[i], lwd = 2, lty = ltypes[i],
+             xlab = "Percentile", ylab = "Value",
+             main = "Rising Value Chart",
+             ylim = y_range)
+      } else {
+        lines(pct, y_sorted, col = colors[i], lwd = 2, lty = ltypes[i])
+      }
+    }
+    
+    legend("topleft", legend = input$rising_var,
+           col = colors, lwd = 2, lty = ltypes, bty = "n")
   })
   
   
@@ -421,56 +478,6 @@ server <- function(input, output, session) {
   # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
   
   
-  # ── TAB RISING ORDER ───────────────────────────────────────────────────────
-  # update choices
-  observe({
-    df <- selected_data()
-    req(df)
-    
-    numeric_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectInput(session, "rising_var", choices = numeric_vars)
-  })
-  
-  output$rising_plot <- renderPlot({
-    req(input$rising_var)
-    df <- selected_data()
-    
-    n <- length(input$rising_var)
-    
-    # better palettes depending on number of vars
-    if (n <= 8) {
-      colors <- RColorBrewer::brewer.pal(max(n, 3), "Set1")[1:n]
-    } else {
-      colors <- rainbow(n)
-    }
-    
-    # vary line types as well for extra differentiation
-    ltypes <- rep(1:6, length.out = n)  # cycles through solid, dashed, dotted, etc.
-    
-    all_vals <- unlist(lapply(input$rising_var, function(v) df[[v]][!is.na(df[[v]])]))
-    y_range  <- range(all_vals)
-    
-    for (i in seq_along(input$rising_var)) {
-      v        <- input$rising_var[i]
-      y        <- df[[v]]
-      y        <- y[!is.na(y)]
-      y_sorted <- sort(y)
-      pct      <- seq_along(y_sorted) / length(y_sorted) * 100
-      
-      if (i == 1) {
-        plot(pct, y_sorted,
-             type = "l", col = colors[i], lwd = 2, lty = ltypes[i],
-             xlab = "Percentile", ylab = "Value",
-             main = "Rising Value Chart",
-             ylim = y_range)
-      } else {
-        lines(pct, y_sorted, col = colors[i], lwd = 2, lty = ltypes[i])
-      }
-    }
-    
-    legend("topleft", legend = input$rising_var,
-           col = colors, lwd = 2, lty = ltypes, bty = "n")
-  })
   
 } # end server
 
