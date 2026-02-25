@@ -407,7 +407,30 @@ ui <- fluidPage(
     
     # ── TAB BOXPLOT ──────────────────────────────────────────────────────────
     
-    tabPanel("Boxplot",      p("Coming soon")),  # end of tab panel
+    tabPanel("Boxplot",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectizeInput("box_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            checkboxInput("box_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.box_group_on == true",
+                              selectInput("box_group_var", "Group by:", choices = NULL),
+                              selectizeInput("box_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),
+                            hr(),
+                            checkboxInput("box_violin", "Show as violin", value = FALSE),
+               ),
+               mainPanel(width = 10,
+                         plotlyOutput("box_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
     
     
     # ── TAB OTHERS ───────────────────────────────────────────────────────────
@@ -1003,6 +1026,74 @@ server <- function(input, output, session) {
   
   # ── TAB CORRELATION ────────────────────────────────────────────────────────
   # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
+  
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectizeInput(session, "box_vars",      choices = num_vars, selected = intersect(paste0("Sensor", 1:30), num_vars))
+    updateSelectInput(   session, "box_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # add an observer to populate levels
+  observeEvent(input$box_group_var, {
+    req(input$box_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$box_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "box_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  output$box_plot <- renderPlotly({
+    req(input$box_vars)
+    df <- display_data()
+    validate(need(length(input$box_vars) >= 1, "Please select at least 1 variable."))
+    
+    plot_df <- tidyr::pivot_longer(df, cols = all_of(input$box_vars),
+                                   names_to = "Variable", values_to = "Value")
+    plot_df$Variable <- factor(plot_df$Variable, levels = input$box_vars)
+    
+    # build geom layer separately to avoid inline if/else issue
+    geom_layer <- if (input$box_violin) {
+      geom_violin(alpha = 0.7, trim = FALSE)
+    } else {
+      geom_boxplot(alpha = 0.7, outlier.size = 0.8)
+    }
+    
+    if (input$box_group_on && !is.null(input$box_group_var)) {
+      grp <- input$box_group_var
+      plot_df[[grp]] <- as.factor(plot_df[[grp]])
+      
+      if (!is.null(input$box_group_levels) && length(input$box_group_levels) > 0) {
+        plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$box_group_levels, ]
+        plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))
+      }
+      
+      validate(need(nrow(plot_df) > 0, ""))
+      
+      p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
+        geom_layer +
+        facet_wrap(as.formula(paste("~", grp)), scales = "free_y") +
+        labs(title = paste("Boxplot grouped by", grp), x = NULL, y = "Value") +
+        theme_minimal(base_size = 11) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              legend.position = "none")
+      
+    } else {
+      p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
+        geom_layer +
+        labs(title = if (input$box_violin) "Violin — variable comparison" else "Boxplot — variable comparison",
+             x = NULL, y = "Value") +
+        theme_minimal(base_size = 11) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              legend.position = "none")
+    }
+    
+    ggplotly(p) %>% layout(showlegend = FALSE)
+  })
+  
+  
   # ── TAB OTHERS ─────────────────────────────────────────────────────────────
   
   
