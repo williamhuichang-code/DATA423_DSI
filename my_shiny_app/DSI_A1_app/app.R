@@ -13,6 +13,7 @@ library(vcd)
 library(DT)
 library(GGally)
 library(ggplot2)
+library(plotly)
 
 
 # load the raw dataset
@@ -150,7 +151,7 @@ enriched_dataset <- ds_col_enriched %>%
 model_dataset <- enriched_dataset %>% 
   select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols not needed for modelling
   reorder_cols()
-  
+
 # model_dataset <- model_dataset %>% select(-IdGroup, -Year, -Month) # trial for variable testing
 
 
@@ -244,11 +245,15 @@ ui <- fluidPage(
                                         choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
                             
                             hr(),
-                            checkboxInput("vc_sort", "Sort by value (descending)", value = TRUE)
+                            radioButtons("vc_sort", "Sort by:",
+                                         choices  = c("Column order"     = "col",
+                                                      "Ascending value"  = "asc",
+                                                      "Descending value" = "desc"),
+                                         selected = "desc")
                             
                ),
                mainPanel(width = 9,
-                         plotOutput("vc_plot", height = "80vh")
+                         plotlyOutput("vc_plot", height = "80vh")  # was plotOutput
                )
              )
     ),  # end of tab panel
@@ -265,28 +270,9 @@ ui <- fluidPage(
                                            multiple = TRUE)
                ),
                mainPanel(width = 10,
-                         plotOutput("rising_plot", height = "80vh")
+                         plotlyOutput("rising_plot", height = "80vh")  # was plotOutput
                )
              )
-    ),  # end of tab panel
-    
-    
-    # ── TAB BARCHART ───────────────────────────────────────────────────────────
-    
-    tabPanel("Bar",
-             sidebarLayout(
-               sidebarPanel(width = 2,
-                            selectInput("card_var", "Select variable:", choices = NULL),
-                            numericInput("card_top", "Show top N values:", value = 20, min = 1),
-                            checkboxInput("card_sort", "Sort by frequency", value = TRUE),
-                            hr(),
-                            checkboxInput("card_imbalance", "Show imbalance view", value = FALSE)
-               ),
-               mainPanel(width = 10,
-                         verbatimTextOutput("card_info"),
-                         plotOutput("card_plot", height = "70vh")
-               )
-             ),
     ),  # end of tab panel
     
     
@@ -309,7 +295,7 @@ ui <- fluidPage(
                             checkboxInput("qq_line", "Show Reference Line", value = TRUE)
                ),
                mainPanel(width = 9,
-                         plotOutput("qq_plot", height = "80vh")
+                         plotlyOutput("qq_plot", height = "80vh")  # was plotOutput
                )
              )
     ),  # end of tab panel
@@ -320,27 +306,27 @@ ui <- fluidPage(
     tabPanel("Mosaic",
              sidebarLayout(
                sidebarPanel(width = 2,   # 2/12 = ~17%, narrow sidebar
-                 
-                 # side bar for mosaic plot controls
-                 uiOutput("mosaic_x_ui"),
-                 uiOutput("mosaic_y_ui"),
-                 uiOutput("mosaic_z_ui"),
-                 checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
-                 
-                 hr(),
-                 
-                 # side bar for mosaic pair advisor controls
-                 strong("Pair Advisor"),
-                 br(),
-                 helpText("Ranks variable combinations by Cramér's V (effect size). Higher = stronger association."),
-                 br(),
-                 radioButtons("pairs_way", "Combinations:",
-                              choices = c("2-way", "3-way"), selected = "2-way",
-                              inline = TRUE),
-                 numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
-                 actionButton("pairs_search", "Find Pairs", icon = icon("search"), width = "100%"),
-                 br(), br(),
-                 helpText("Click a row to load variables into the plot above.")
+                            
+                            # side bar for mosaic plot controls
+                            uiOutput("mosaic_x_ui"),
+                            uiOutput("mosaic_y_ui"),
+                            uiOutput("mosaic_z_ui"),
+                            checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
+                            
+                            hr(),
+                            
+                            # side bar for mosaic pair advisor controls
+                            strong("Pair Advisor"),
+                            br(),
+                            helpText("Ranks variable combinations by Cramér's V (effect size). Higher = stronger association."),
+                            br(),
+                            radioButtons("pairs_way", "Combinations:",
+                                         choices = c("2-way", "3-way"), selected = "2-way",
+                                         inline = TRUE),
+                            numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
+                            actionButton("pairs_search", "Find Pairs", icon = icon("search"), width = "100%"),
+                            br(), br(),
+                            helpText("Click a row to load variables into the plot above.")
                ),
                
                mainPanel(
@@ -448,7 +434,7 @@ server <- function(input, output, session) {
            "Enriched Dataset" = enriched_dataset,
            "Model Dataset"  = model_dataset,
            NULL)
-    })
+  })
   
   observeEvent(input$dataset_info, {
     showModal(modalDialog(
@@ -553,7 +539,7 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "vc_cols", choices = all_cols, selected = all_cols)
   })
   
-  output$vc_plot <- renderPlot({
+  output$vc_plot <- renderPlotly({
     req(input$vc_value, input$vc_cols)
     df  <- display_data()
     val <- input$vc_value
@@ -582,58 +568,39 @@ server <- function(input, output, session) {
     
     plot_df <- do.call(rbind, results)
     
-    # sort if requested
-    if (input$vc_sort) {
-      sort_col  <- if (input$vc_metric == "count") "Count" else "Pct"
-      plot_df   <- plot_df[order(plot_df[[sort_col]], decreasing = FALSE), ]
+    # sort based on radio selection
+    if (input$vc_sort == "desc") {
+      sort_col <- if (input$vc_metric == "count") "Count" else "Pct"
+      plot_df  <- plot_df[order(plot_df[[sort_col]], decreasing = TRUE), ]
+    } else if (input$vc_sort == "asc") {
+      sort_col <- if (input$vc_metric == "count") "Count" else "Pct"
+      plot_df  <- plot_df[order(plot_df[[sort_col]], decreasing = FALSE), ]
     }
     
     # keep column order for plot
-    plot_df$Column <- factor(plot_df$Column, levels = plot_df$Column)
+    plot_df$Column <- factor(plot_df$Column, levels = rev(plot_df$Column))
     
     y_val   <- if (input$vc_metric == "count") plot_df$Count else plot_df$Pct
     y_label <- if (input$vc_metric == "count") "Count" else "Percentage (%)"
-    y_max   <- max(y_val, na.rm = TRUE) * 1.15  # headroom for labels
     
-    # lollipop plot
-    par(mar = c(5, 10, 4, 2))  # wide left margin for column names
-    
-    plot(NULL,
-         xlim = c(0, y_max),
-         ylim = c(0.5, nrow(plot_df) + 0.5),
-         xlab = y_label,
-         ylab = "",
-         main = paste0('Occurrences of "', val, '" across Selected Columns'),
-         yaxt = "n")
-    
-    # y axis labels
-    axis(2, at = seq_len(nrow(plot_df)),
-         labels = levels(plot_df$Column),
-         las = 2, cex.axis = 0.9)
-    
-    # grid lines
-    abline(h = seq_len(nrow(plot_df)), col = "grey90", lty = 1)
-    
-    # stems
-    segments(x0 = 0, x1 = y_val,
-             y0 = seq_len(nrow(plot_df)),
-             y1 = seq_len(nrow(plot_df)),
-             col = "steelblue", lwd = 2)
-    
-    # dots
-    points(y_val, seq_len(nrow(plot_df)),
-           pch = 16, cex = 2.5, col = "steelblue")
-    
-    # value labels on dots
-    label_text <- if (input$vc_metric == "count") {
-      paste0(plot_df$Count, " / ", plot_df$Total)
+    # tooltip label
+    plot_df$label <- if (input$vc_metric == "count") {
+      paste0(plot_df$Column, ": ", plot_df$Count, " / ", plot_df$Total)
     } else {
-      paste0(plot_df$Pct, "%")
+      paste0(plot_df$Column, ": ", plot_df$Pct, "%")
     }
     
-    text(y_val, seq_len(nrow(plot_df)),
-         labels = label_text,
-         pos = 4, cex = 0.85, col = "grey30")
+    plot_df$y_val <- y_val
+    
+    p <- ggplot(plot_df, aes(x = y_val, y = Column, text = label)) +
+      geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column),
+                   colour = "steelblue", linewidth = 0.8) +
+      geom_point(colour = "steelblue", size = 3) +
+      labs(title = paste0('Occurrences of "', val, '" across Selected Columns'),
+           x = y_label, y = NULL) +
+      theme_minimal(base_size = 11)
+    
+    ggplotly(p, tooltip = "text")
   })
   
   
@@ -647,7 +614,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "rising_var", choices = numeric_vars, selected = numeric_vars[1])
   })
   
-  output$rising_plot <- renderPlot({
+  output$rising_plot <- renderPlotly({
     req(input$rising_var)
     df <- display_data()
     
@@ -660,95 +627,23 @@ server <- function(input, output, session) {
       colors <- rainbow(n)
     }
     
-    # vary line types as well for extra differentiation
-    ltypes <- rep(1:6, length.out = n)  # cycles through solid, dashed, dotted, etc.
-    
-    all_vals <- unlist(lapply(input$rising_var, function(v) df[[v]][!is.na(df[[v]])]))
-    y_range  <- range(all_vals)
-    
-    for (i in seq_along(input$rising_var)) {
+    # build long-format df for ggplot
+    plot_df <- do.call(rbind, lapply(seq_along(input$rising_var), function(i) {
       v        <- input$rising_var[i]
       y        <- df[[v]]
       y        <- y[!is.na(y)]
       y_sorted <- sort(y)
       pct      <- seq_along(y_sorted) / length(y_sorted) * 100
-      
-      if (i == 1) {
-        plot(pct, y_sorted,
-             type = "l", col = colors[i], lwd = 2, lty = ltypes[i],
-             xlab = "Percentile", ylab = "Value",
-             main = "Rising Value Chart",
-             ylim = y_range)
-      } else {
-        lines(pct, y_sorted, col = colors[i], lwd = 2, lty = ltypes[i])
-      }
-    }
+      data.frame(Percentile = pct, Value = y_sorted, Variable = v)
+    }))
     
-    legend("topleft", legend = input$rising_var,
-           col = colors, lwd = 2, lty = ltypes, bty = "n")
-  })
-  
-  
-  # ── TAB BARCHART ───────────────────────────────────────────────────────────
-  
-  observe({
-    df <- display_data()
-    req(df)
-    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
-    updateSelectInput(session, "card_var", choices = cat_vars, selected = cat_vars[1])
-  })
-  
-  output$card_plot <- renderPlot({
-    req(input$card_var)
-    x   <- display_data()[[input$card_var]]
-    tbl <- sort(table(as.character(x)), decreasing = TRUE)
-    tbl <- head(tbl, input$card_top)
+    p <- ggplot(plot_df, aes(x = Percentile, y = Value, colour = Variable)) +
+      geom_line(linewidth = 0.8) +
+      scale_colour_manual(values = setNames(colors, input$rising_var)) +
+      labs(title = "Rising Value Chart", x = "Percentile", y = "Value") +
+      theme_minimal(base_size = 11)
     
-    n_classes <- length(unique(na.omit(x)))
-    
-    # switch between count and percentage based on imbalance toggle
-    if (input$card_imbalance) {
-      plot_vals <- round(as.integer(tbl) / length(x) * 100, 1)
-      y_label   <- "Percentage (%)"
-      ref_line  <- 100 / n_classes  # perfect balance line
-      y_max     <- max(plot_vals) * 1.15
-    } else {
-      plot_vals <- as.integer(tbl)
-      y_label   <- "Count"
-      ref_line  <- NULL
-      y_max     <- max(plot_vals) * 1.15
-    }
-    
-    plot_df <- data.frame(
-      Value = factor(names(tbl), levels = names(tbl)),
-      Val   = plot_vals
-    )
-    
-    par(mar = c(8, 5, 3, 2))
-    
-    bp <- barplot(plot_df$Val,
-                  names.arg = plot_df$Value,
-                  las       = 2,
-                  col       = "steelblue",
-                  border    = NA,
-                  main      = paste("Value Distribution:", input$card_var,
-                                    "| Cardinality:", n_classes),
-                  ylab      = y_label,
-                  ylim      = c(0, y_max),
-                  cex.names = 0.85)
-    
-    # count/pct labels on top of bars
-    text(bp, plot_df$Val,
-         labels = if (input$card_imbalance) paste0(plot_df$Val, "%") else plot_df$Val,
-         pos = 3, cex = 0.8, col = "grey30")
-    
-    # perfect balance reference line (imbalance mode only)
-    if (input$card_imbalance) {
-      abline(h = ref_line, col = "red", lwd = 2, lty = 2)
-      legend("topright",
-             legend = paste0("Perfect balance (", round(ref_line, 1), "%)"),
-             col = "red", lty = 2, lwd = 2, bty = "n")
-    }
+    ggplotly(p, tooltip = c("x", "y", "colour"))
   })
   
   
@@ -789,18 +684,18 @@ server <- function(input, output, session) {
   })
   
   # render the QQ Plot
-  output$qq_plot <- renderPlot({
+  output$qq_plot <- renderPlotly({
     req(input$qq_var, input$qq_dist)
-    df <- display_data()
+    df  <- display_data()
     val <- df[[input$qq_var]]
-    val <- sort(val[!is.na(val)]) # ascending order/quantile
+    val <- sort(val[!is.na(val)])  # ascending order/quantile
     
     # define distribution arguments based on user input
     dist_args <- switch(input$qq_dist,
-                        "norm"    = list(mean = input$qq_mean, sd = input$qq_sd),
+                        "norm"    = list(mean = input$qq_mean,     sd    = input$qq_sd),
                         "exp"     = list(rate = input$qq_rate),
                         "lnorm"   = list(meanlog = input$qq_meanlog, sdlog = input$qq_sdlog),
-                        "gamma"   = list(shape = input$qq_shape, rate = input$qq_rate_g),
+                        "gamma"   = list(shape = input$qq_shape,   rate  = input$qq_rate_g),
                         "weibull" = list(shape = input$qq_shape_w, scale = input$qq_scale_w)
     )
     
@@ -808,29 +703,33 @@ server <- function(input, output, session) {
     if (any(sapply(dist_args, is.null))) return(NULL)
     
     # generate theoretical quantiles
-    n <- length(val)
+    n     <- length(val)
     probs <- (1:n - 0.5) / n
     
     # map string distribution names to their quantile functions (qnorm, qexp, etc)
-    q_func <- match.fun(paste0("q", input$qq_dist))
+    q_func                <- match.fun(paste0("q", input$qq_dist))
     theoretical_quantiles <- do.call(q_func, c(list(p = probs), dist_args))
     
-    # plot with updated axis label
-    plot(theoretical_quantiles, val,
-         xlab = paste("Theoretical Quantiles (", input$qq_dist, ")"),
-         ylab = paste("Sample Quantiles:", input$qq_var),
-         main = paste("Q-Q Plot:", input$qq_var, "vs", input$qq_dist),
-         pch = 20, col = "steelblue")
+    qq_df <- data.frame(Theoretical = theoretical_quantiles, Sample = val)
+    
+    p <- ggplot(qq_df, aes(x = Theoretical, y = Sample)) +
+      geom_point(colour = "steelblue", size = 1.5, alpha = 0.7) +
+      labs(title = paste("Q-Q Plot:", input$qq_var, "vs", input$qq_dist),
+           x = paste("Theoretical Quantiles (", input$qq_dist, ")"),
+           y = paste("Sample Quantiles:", input$qq_var)) +
+      theme_minimal(base_size = 11)
     
     if (input$qq_line) {
-      # Adding a reference line passing through 1st and 3rd quartiles
-      # (Similar to qqline logic)
-      y_q <- quantile(val, c(0.25, 0.75))
-      x_q <- do.call(q_func, c(list(p = c(0.25, 0.75)), dist_args))
+      # reference line passing through 1st and 3rd quartiles (similar to qqline logic)
+      y_q   <- quantile(val, c(0.25, 0.75))
+      x_q   <- do.call(q_func, c(list(p = c(0.25, 0.75)), dist_args))
       slope <- diff(y_q) / diff(x_q)
-      int <- y_q[1] - slope * x_q[1]
-      abline(int, slope, col = "red", lwd = 2)
+      int   <- y_q[1] - slope * x_q[1]
+      p     <- p + geom_abline(intercept = int, slope = slope,
+                               colour = "red", linewidth = 0.8)
     }
+    
+    ggplotly(p, tooltip = c("x", "y"))
   })
   
   
@@ -838,7 +737,7 @@ server <- function(input, output, session) {
   
   # mosaic part1: mosaic plot
   cat_cols <- reactive({
-    df <- selected_data()
+    df <- display_data()
     names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
   })
   
@@ -859,7 +758,7 @@ server <- function(input, output, session) {
   
   output$mosaic_plot <- renderPlot({
     req(input$mosaic_x, input$mosaic_y, input$mosaic_z)
-    df <- selected_data()
+    df <- display_data()
     
     # build 2-way or 3-way contingency table depending on Variable 3
     if (input$mosaic_z == "None") {
@@ -897,7 +796,7 @@ server <- function(input, output, session) {
   }
   
   pairs_result <- eventReactive(input$pairs_search, {
-    df   <- selected_data()
+    df   <- display_data()
     cats <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
     
     if (input$pairs_way == "2-way") {
@@ -1115,4 +1014,3 @@ server <- function(input, output, session) {
 # =============================================================================
 
 shinyApp(ui, server)
-
