@@ -199,9 +199,9 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── LOLLIPOP ─────────────────────────────────────────────────────────────
+    # ── TAB MISSINGNESS ──────────────────────────────────────────────────────
     
-    tabPanel("Lollipop",
+    tabPanel("Missingness",
              sidebarLayout(
                sidebarPanel(width = 3,
                             
@@ -330,14 +330,14 @@ ui <- fluidPage(
     tabPanel("Correlation",  p("Coming soon")),  # end of tab panel
     
     
-    # ── TAB MISSINGNESS ──────────────────────────────────────────────────────
-    
-    tabPanel("Missingness",  p("Coming soon")),  # end of tab panel
-    
-    
     # ── TAB BOXPLOT ──────────────────────────────────────────────────────────
     
     tabPanel("Boxplot",      p("Coming soon")),  # end of tab panel
+    
+    
+    # ── TAB OTHERS ───────────────────────────────────────────────────────────
+    
+    tabPanel("Others",  p("Coming soon")),  # end of tab panel
     
     
   ) # end tabsetPanel
@@ -405,7 +405,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── LOLLIPOP ───────────────────────────────────────────────────────────────
+  # ── TAB MISSINGNESS ────────────────────────────────────────────────────────
   
   observe({
     df   <- selected_data()
@@ -782,9 +782,8 @@ server <- function(input, output, session) {
   
   # ── TAB GGPAIRS ────────────────────────────────────────────────────────────
   # ── TAB CORRELATION ────────────────────────────────────────────────────────
-  # ── TAB MISSINGNESS ────────────────────────────────────────────────────────
   # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
-  
+  # ── TAB OTHERS ─────────────────────────────────────────────────────────────
   
   
 } # end server
