@@ -253,7 +253,7 @@ ui <- fluidPage(
                             
                ),
                mainPanel(width = 9,
-                         plotlyOutput("vc_plot", height = "80vh")  # was plotOutput
+                         plotlyOutput("vc_plot", height = "80vh")
                )
              )
     ),  # end of tab panel
