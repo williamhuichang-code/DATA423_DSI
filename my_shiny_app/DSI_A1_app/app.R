@@ -225,6 +225,27 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
+    # ── TAB UPSET ────────────────────────────────────────────────────────────
+    tabPanel("UpSet",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            helpText("Shows which combinations of columns have missing values together, and how many rows fall into each pattern."),
+                            selectizeInput("upset_cols", "Columns to include:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            numericInput("upset_top", "Show top N combinations:", value = 20, min = 1),
+                            hr(),
+                            radioButtons("upset_sort", "Sort bars by:",
+                                         choices  = c("Frequency" = "freq", "Combination" = "combo"),
+                                         selected = "freq")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("upset_plot", height = "80vh")
+               )
+             )
+    ),
+    
+    
     # ── TAB MISSINGNESS ──────────────────────────────────────────────────────
     
     tabPanel("Missingness",
@@ -435,7 +456,42 @@ ui <- fluidPage(
     
     # ── TAB OTHERS ───────────────────────────────────────────────────────────
     
-    tabPanel("Others",  p("Coming soon")),  # end of tab panel
+    tabPanel("Duplicates",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            
+                            strong("Exact Duplicates"),
+                            helpText("Rows that are identical across all selected columns."),
+                            selectizeInput("dup_cols", "Columns to check:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            actionButton("dup_run", "Find Exact Duplicates", icon = icon("search"), width = "100%"),
+                            
+                            hr(),
+                            
+                            strong("Near Duplicates"),
+                            helpText("Rows that are highly similar but not identical."),
+                            radioButtons("near_method", "Similarity metric:",
+                                         choices = c("Euclidean distance (numeric)" = "euclidean",
+                                                     "Proportion matching (mixed)"  = "matching"),
+                                         selected = "euclidean"),
+                            sliderInput("near_top", "Show top N most similar pairs:",
+                                        min = 5, max = 100, value = 20, step = 5),
+                            actionButton("near_run", "Find Near Duplicates", icon = icon("search"), width = "100%")
+               ),
+               mainPanel(width = 9,
+                         h4("Exact Duplicates"),
+                         helpText("Groups of rows with identical values across selected columns."),
+                         DTOutput("dup_table"),
+                         
+                         hr(),
+                         
+                         h4("Near Duplicates"),
+                         helpText("Pairs of rows ranked by similarity. Lower distance = more similar (Euclidean). Higher match % = more similar (Matching)."),
+                         DTOutput("near_table")
+               )
+             )
+    )
     
     
   ) # end tabsetPanel
@@ -550,6 +606,68 @@ server <- function(input, output, session) {
            "glimpse"   = tibble::glimpse(df),
            "dfsummary" = summarytools::dfSummary(df)
     )
+  })
+  
+  
+  # ── TAB UPSET ──────────────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    # default to columns that actually have NAs
+    na_cols <- names(df)[sapply(df, function(x) any(is.na(x)))]
+    if (length(na_cols) == 0) na_cols <- names(df)  # fallback if no NAs
+    updateSelectizeInput(session, "upset_cols", choices = names(df), selected = na_cols)
+  })
+  
+  output$upset_plot <- renderPlotly({
+    req(input$upset_cols)
+    df <- display_data()
+    validate(need(length(input$upset_cols) >= 1, "Please select at least 1 column."))
+    
+    df_sub <- df[, input$upset_cols, drop = FALSE]
+    
+    # build binary NA matrix (1 = missing, 0 = present)
+    na_mat <- as.data.frame(lapply(df_sub, function(x) as.integer(is.na(x))))
+    
+    # create a pattern string per row e.g. "Sensor1&Sensor3"
+    patterns <- apply(na_mat, 1, function(row) {
+      cols_missing <- input$upset_cols[row == 1]
+      if (length(cols_missing) == 0) return("(complete)")
+      paste(cols_missing, collapse = " & ")
+    })
+    
+    # count each pattern
+    pattern_counts <- sort(table(patterns), decreasing = TRUE)
+    pattern_counts <- head(pattern_counts, input$upset_top)
+    
+    plot_df <- data.frame(
+      Pattern = names(pattern_counts),
+      Count   = as.integer(pattern_counts)
+    )
+    
+    # sort
+    if (input$upset_sort == "freq") {
+      plot_df <- plot_df[order(-plot_df$Count), ]
+    } else {
+      plot_df <- plot_df[order(plot_df$Pattern), ]
+    }
+    
+    plot_df$Pattern <- factor(plot_df$Pattern, levels = rev(plot_df$Pattern))
+    
+    # colour complete rows differently
+    plot_df$Colour <- ifelse(plot_df$Pattern == "(complete)", "complete", "missing")
+    
+    p <- ggplot(plot_df, aes(x = Count, y = Pattern, fill = Colour,
+                             text = paste0(Pattern, "\n", Count, " rows"))) +
+      geom_col() +
+      scale_fill_manual(values = c("complete" = "steelblue", "missing" = "tomato")) +
+      labs(title = "Missing Value Intersection Patterns",
+           x = "Row Count", y = NULL) +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "none")
+    
+    ggplotly(p, tooltip = "text") %>% layout(showlegend = FALSE)
   })
   
   
@@ -1095,6 +1213,103 @@ server <- function(input, output, session) {
   
   
   # ── TAB OTHERS ─────────────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    updateSelectizeInput(session, "dup_cols", choices = names(df), selected = names(df))
+  })
+  
+  # exact duplicates
+  dup_result <- eventReactive(input$dup_run, {
+    req(input$dup_cols)
+    df <- display_data()
+    
+    df_sub <- df[, input$dup_cols, drop = FALSE]
+    
+    # add row index
+    df_sub$RowIndex <- seq_len(nrow(df_sub))
+    
+    # find duplicated rows
+    dup_mask <- duplicated(df_sub[, input$dup_cols]) | 
+      duplicated(df_sub[, input$dup_cols], fromLast = TRUE)
+    
+    if (!any(dup_mask)) return(data.frame(Message = "No exact duplicates found."))
+    
+    df_dups <- df_sub[dup_mask, ]
+    df_dups <- df_dups[order(do.call(paste, df_dups[, input$dup_cols, drop = FALSE])), ]
+    df_dups
+  })
+  
+  output$dup_table <- renderDT({
+    req(dup_result())
+    datatable(dup_result(), rownames = FALSE, options = list(pageLength = 15, scrollX = TRUE))
+  })
+  
+  # near duplicates
+  near_result <- eventReactive(input$near_run, {
+    df <- display_data()
+    
+    if (input$near_method == "euclidean") {
+      # use only numeric cols
+      num_cols <- names(df)[sapply(df, is.numeric)]
+      validate(need(length(num_cols) >= 1, "No numeric columns available for Euclidean distance."))
+      
+      df_num <- df[, num_cols, drop = FALSE]
+      df_num <- scale(df_num)  # normalise before distance
+      df_num[is.nan(df_num)] <- 0
+      
+      n <- nrow(df_num)
+      # compute pairwise distances — limit to first 1000 rows for performance
+      max_rows <- min(n, 1000)
+      df_num   <- df_num[1:max_rows, ]
+      dist_mat <- as.matrix(dist(df_num, method = "euclidean"))
+      diag(dist_mat) <- NA
+      
+      # extract upper triangle pairs
+      pairs <- which(upper.tri(dist_mat), arr.ind = TRUE)
+      scores <- dist_mat[pairs]
+      
+      out <- data.frame(
+        Row1       = pairs[, 1],
+        Row2       = pairs[, 2],
+        Distance   = round(scores, 4)
+      )
+      out <- out[order(out$Distance), ]
+      head(out, input$near_top)
+      
+    } else {
+      # proportion of matching columns (works with any type)
+      n       <- nrow(df)
+      max_rows <- min(n, 500)  # limit for performance
+      df_sub  <- df[1:max_rows, ]
+      
+      pairs <- combn(max_rows, 2, simplify = FALSE)
+      results <- lapply(pairs, function(p) {
+        r1 <- df_sub[p[1], ]
+        r2 <- df_sub[p[2], ]
+        matches <- sum(mapply(function(a, b) {
+          if (is.na(a) && is.na(b)) return(TRUE)
+          if (is.na(a) || is.na(b)) return(FALSE)
+          a == b
+        }, r1, r2))
+        data.frame(Row1 = p[1], Row2 = p[2], 
+                   MatchPct = round(matches / ncol(df_sub) * 100, 1))
+      })
+      
+      out <- do.call(rbind, results)
+      out <- out[order(-out$MatchPct), ]
+      head(out, input$near_top)
+    }
+  })
+  
+  output$near_table <- renderDT({
+    req(near_result())
+    datatable(near_result(), rownames = FALSE, options = list(pageLength = 15, scrollX = TRUE))
+  })
+  
+  
+  
   
   
 } # end server
