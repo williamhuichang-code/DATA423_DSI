@@ -397,8 +397,12 @@ ui <- fluidPage(
                             checkboxInput("gg_group_on", "Group by variable", value = FALSE),
                             conditionalPanel(
                               condition = "input.gg_group_on == true",
-                              selectInput("gg_group_var", "Group by:", choices = NULL)
-                            ),
+                              selectInput("gg_group_var", "Group by:", choices = NULL),
+                              selectizeInput("gg_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),   # ← conditionalPanel closed here
                             hr(),
                             actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
                             helpText("Select variables then click Plot. Large selections may be slow.")
@@ -1014,8 +1018,20 @@ server <- function(input, output, session) {
     numeric_vars <- names(df)[sapply(df, is.numeric)]
     cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
     
-    updateSelectizeInput(session, "gg_vars",      choices = all_vars,    selected = numeric_vars[1:min(5, length(numeric_vars))])
-    updateSelectInput(   session, "gg_group_var", choices = cat_vars,    selected = cat_vars[1])
+    default_gg_vars <- c("Sensor4", "Sensor8", "Sensor11", "Sensor16", "Sensor22", "Sensor24", "Sensor28")
+    updateSelectizeInput(session, "gg_vars", choices  = all_vars, selected = intersect(default_gg_vars, all_vars))
+    updateSelectInput(session, "gg_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # populate level choices when group variable changes
+  observeEvent(input$gg_group_var, {
+    req(input$gg_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$gg_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "gg_group_levels",
+                         choices  = lvls,
+                         selected = lvls)
   })
   
   output$gg_plot <- renderPlot({
@@ -1032,6 +1048,12 @@ server <- function(input, output, session) {
         # build df with selected vars + group col, drop NAs in group
         plot_df <- df[, c(input$gg_vars, grp), drop = FALSE]
         plot_df <- plot_df[!is.na(plot_df[[grp]]), ]
+        
+        # filter to selected levels only
+        if (!is.null(input$gg_group_levels) && length(input$gg_group_levels) > 0) {
+          plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$gg_group_levels, ]
+          plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))  # drop unused levels from legend
+        }
         
         # columns to plot = only the selected vars (not the group col)
         col_idx <- seq_along(input$gg_vars)
