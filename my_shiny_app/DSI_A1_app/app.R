@@ -14,11 +14,6 @@ library(DT)
 library(GGally)
 library(ggplot2)
 
-# library(tidyr)
-# library(ggplot2)
-# library(tabplot)
-
-
 
 # load the raw dataset
 raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = FALSE)
@@ -29,6 +24,9 @@ ds_copied <- raw_dataset
 # standardise all the col names with initial capital naming style
 ds_renamed <- ds_copied %>% 
   rename_with(~ tools::toTitleCase(.x))  # e.g., sensors have bad names
+
+# define what cols are sensitive for privacy concern
+private_cols <- c("ID") # could be e.g., "ID", "Date"
 
 # master column order — all datasets follow this, skipping cols that don't exist
 master_col_order <- c(
@@ -168,15 +166,34 @@ ui <- fluidPage(
   
   # global dropdown choces for dataset at different stages
   fluidRow(
+    
+    # dataset stage choices
     column(2, selectInput("dataset_choice", "Choose Dataset Stage:",
                           choices = c("Raw Dataset", "Enriched Dataset", "Model Dataset"),
                           selected = "Enriched Dataset")),
+    
+    # dataset hint
     column(1, actionButton("dataset_info", label = NULL,
                            icon  = icon("circle-info"),
                            style = "margin-top: 25px; font-size: 20px;
                                 color: #0d6efd; background: none;
-                                border: none; padding: 0;"))
-  ),
+                                border: none; padding: 0;")),
+    
+    # spacer pushes privacy to the right
+    column(6),
+    
+    # private control
+    column(3,
+           div(style = "margin-top: 20px; display: flex; align-items: center; gap: 8px;",
+               passwordInput("privacy_pass", label = NULL,
+                             placeholder = "Enter passphrase to unlock",
+                             width = "200px"),
+               actionButton("privacy_unlock", label = NULL, icon = icon("lock"),
+                            style = "padding: 6px 10px;"),
+               uiOutput("privacy_status")
+           ))
+    
+  ),  # end of fluid row
   
   
   # ── TABS ───────────────────────────────────────────────────────────────────
@@ -416,7 +433,6 @@ ui <- fluidPage(
 # server.R
 # =============================================================================
 
-# server
 server <- function(input, output, session) {
   
   # ── GLOBAL REACTIVE ────────────────────────────────────────────────────────
@@ -451,11 +467,62 @@ server <- function(input, output, session) {
   })
   
   
+  # ── PRIVACY CONTROL ──────────────────────────────────────────────────────
+  
+  # hardcoded passphrase
+  UNLOCK_PASSPHRASE <- "123"
+  
+  privacy_unlocked <- reactiveVal(FALSE)
+  
+  observeEvent(input$privacy_unlock, {
+    if (privacy_unlocked()) {
+      # already unlocked, lock it again (toggle / logout)
+      privacy_unlocked(FALSE)
+      updateTextInput(session, "privacy_pass", value = "")
+    } else {
+      # try to unlock
+      if (!is.null(input$privacy_pass) && input$privacy_pass == UNLOCK_PASSPHRASE) {
+        privacy_unlocked(TRUE)
+        updateTextInput(session, "privacy_pass", value = "")
+      } else {
+        showNotification("Incorrect passphrase.", type = "error", duration = 3)
+      }
+    }
+  })
+  
+  # update the lock icon and status text reactively
+  output$privacy_status <- renderUI({
+    if (privacy_unlocked()) {
+      tagList(
+        actionButton("privacy_lock_btn", label = NULL, icon = icon("unlock"),
+                     style = "color: #198754; background: none; border: none; font-size: 18px; padding: 0;",
+                     title = "Click to lock"),
+        span("Full access", style = "color: #198754; font-size: 12px;")
+      )
+    } else {
+      span(icon("lock"), " Private Mode (123)", style = "color: #6c757d; font-size: 12px;")
+    }
+  })
+  
+  # the privacy-aware data accessor
+  display_data <- reactive({
+    df <- selected_data()
+    if (privacy_unlocked()) {
+      df  # full data
+    } else {
+      # drop private cols that actually exist in this dataset stage
+      cols_to_drop <- intersect(private_cols, names(df))
+      if (length(cols_to_drop) > 0) df[, !names(df) %in% cols_to_drop, drop = FALSE]
+      else df
+    }
+  })
+  
+  
   # ── TAB TABLE ──────────────────────────────────────────────────────────────
   # (renderTable cannot handle date format well, so changed to DT::dataTableOutput)
   output$data_table <- DT::renderDataTable({
-    # instead of head(selected_data(), 1000), this new code adds col info as well
-    df <- head(selected_data(), 1000)
+    # instead of head(display_data(), 1000), this new code adds col info as well
+    df <- head(display_data(), 1000)
     # can add "switch dataset stage to explore different dimensional views"
     DT::datatable(df, caption = paste0(input$dataset_choice, " Dimensions: ", nrow(df), " × ", ncol(df)))
   })
@@ -464,7 +531,7 @@ server <- function(input, output, session) {
   # ── TAB SUMMARY ────────────────────────────────────────────────────────────
   
   output$data_summary <- renderPrint({
-    df <- selected_data()
+    df <- display_data()
     switch(input$summary_style,
            "base"      = summary(df),
            "glimpse"   = tibble::glimpse(df),
@@ -476,7 +543,7 @@ server <- function(input, output, session) {
   # ── TAB MISSINGNESS ────────────────────────────────────────────────────────
   
   observe({
-    df   <- selected_data()
+    df   <- display_data()
     req(df)
     all_cols <- names(df)
     updateSelectizeInput(session, "vc_cols", choices = all_cols, selected = all_cols)
@@ -484,7 +551,7 @@ server <- function(input, output, session) {
   
   output$vc_plot <- renderPlot({
     req(input$vc_value, input$vc_cols)
-    df  <- selected_data()
+    df  <- display_data()
     val <- input$vc_value
     
     # count occurrences of the value in each selected column
@@ -569,7 +636,7 @@ server <- function(input, output, session) {
   # ── TAB RISING ORDER ───────────────────────────────────────────────────────
   # update choices
   observe({
-    df <- selected_data()
+    df <- display_data()
     req(df)
     
     numeric_vars <- names(df)[sapply(df, is.numeric)]
@@ -578,7 +645,7 @@ server <- function(input, output, session) {
   
   output$rising_plot <- renderPlot({
     req(input$rising_var)
-    df <- selected_data()
+    df <- display_data()
     
     n <- length(input$rising_var)
     
@@ -621,7 +688,7 @@ server <- function(input, output, session) {
   # ── TAB BARCHART ───────────────────────────────────────────────────────────
   
   observe({
-    df <- selected_data()
+    df <- display_data()
     req(df)
     cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
     updateSelectInput(session, "card_var", choices = cat_vars, selected = cat_vars[1])
@@ -629,7 +696,7 @@ server <- function(input, output, session) {
   
   output$card_plot <- renderPlot({
     req(input$card_var)
-    x   <- selected_data()[[input$card_var]]
+    x   <- display_data()[[input$card_var]]
     tbl <- sort(table(as.character(x)), decreasing = TRUE)
     tbl <- head(tbl, input$card_top)
     
@@ -684,7 +751,7 @@ server <- function(input, output, session) {
   # ── TAB Q-Q PLOT ───────────────────────────────────────────────────────────
   # update variable choices for QQ Plot
   observe({
-    df <- selected_data()
+    df <- display_data()
     req(df)
     numeric_vars <- names(df)[sapply(df, is.numeric)]
     updateSelectInput(session, "qq_var", choices = numeric_vars)
@@ -720,7 +787,7 @@ server <- function(input, output, session) {
   # render the QQ Plot
   output$qq_plot <- renderPlot({
     req(input$qq_var, input$qq_dist)
-    df <- selected_data()
+    df <- display_data()
     val <- df[[input$qq_var]]
     val <- sort(val[!is.na(val)]) # ascending order/quantile
     
@@ -941,7 +1008,7 @@ server <- function(input, output, session) {
   # ── TAB GGPAIRS ────────────────────────────────────────────────────────────
   
   observe({
-    df <- selected_data()
+    df <- display_data()
     req(df)
     all_vars     <- names(df)
     numeric_vars <- names(df)[sapply(df, is.numeric)]
@@ -955,7 +1022,7 @@ server <- function(input, output, session) {
     input$gg_run
     isolate({
       req(input$gg_vars)
-      df <- selected_data()
+      df <- display_data()
       validate(need(length(input$gg_vars) >= 2, "Please select at least 2 variables."))
       
       if (input$gg_group_on && !is.null(input$gg_group_var)) {
