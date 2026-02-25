@@ -11,6 +11,14 @@ library(shiny)
 library(dplyr)
 library(vcd)
 library(DT)
+library(GGally)
+library(ggplot2)
+
+# library(tidyr)
+# library(ggplot2)
+# library(tabplot)
+
+
 
 # load the raw dataset
 raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = FALSE)
@@ -246,6 +254,25 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
+    # ── TAB BARCHART ───────────────────────────────────────────────────────────
+    
+    tabPanel("Bar",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectInput("card_var", "Select variable:", choices = NULL),
+                            numericInput("card_top", "Show top N values:", value = 20, min = 1),
+                            checkboxInput("card_sort", "Sort by frequency", value = TRUE),
+                            hr(),
+                            checkboxInput("card_imbalance", "Show imbalance view", value = FALSE)
+               ),
+               mainPanel(width = 10,
+                         verbatimTextOutput("card_info"),
+                         plotOutput("card_plot", height = "70vh")
+               )
+             ),
+    ),  # end of tab panel
+    
+    
     # ── TAB Q-Q PLOT ──────────────────────────────────────────────────────────
     
     tabPanel("Q-Q Plot",
@@ -320,9 +347,50 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
+    # ── TAB SEQUENCE PLOT ────────────────────────────────────────────────────
+    
+    # tabPanel("Sequence Plot",
+    #          sidebarLayout(
+    #            sidebarPanel(width = 2,
+    #                         selectizeInput("seq_var", "Variables to plot:",
+    #                                        choices  = NULL,
+    #                                        multiple = TRUE),
+    #                         hr(),
+    #                         selectInput("seq_sort_var", "Sort by:", choices = NULL),
+    #                         radioButtons("seq_sort_dir", "Sort direction:",
+    #                                      choices  = c("Ascending" = "asc", "Descending" = "desc"),
+    #                                      selected = "asc", inline = TRUE)
+    #            ),
+    #            mainPanel(width = 10,
+    #                      plotOutput("seq_plot", height = "80vh")
+    #            )
+    #          )
+    # ),  # end of tab panel
+    
+    
     # ── TAB GGPAIRS ──────────────────────────────────────────────────────────
     
-    tabPanel("GGPairs",      p("Coming soon")),  # end of tab panel
+    tabPanel("GGPairs",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectizeInput("gg_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            checkboxInput("gg_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.gg_group_on == true",
+                              selectInput("gg_group_var", "Group by:", choices = NULL)
+                            ),
+                            hr(),
+                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Plot. Large selections may be slow.")
+               ),
+               mainPanel(width = 10,
+                         plotOutput("gg_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
     
     
     # ── TAB CORRELATION ──────────────────────────────────────────────────────
@@ -547,6 +615,69 @@ server <- function(input, output, session) {
     
     legend("topleft", legend = input$rising_var,
            col = colors, lwd = 2, lty = ltypes, bty = "n")
+  })
+  
+  
+  # ── TAB BARCHART ───────────────────────────────────────────────────────────
+  
+  observe({
+    df <- selected_data()
+    req(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "card_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  output$card_plot <- renderPlot({
+    req(input$card_var)
+    x   <- selected_data()[[input$card_var]]
+    tbl <- sort(table(as.character(x)), decreasing = TRUE)
+    tbl <- head(tbl, input$card_top)
+    
+    n_classes <- length(unique(na.omit(x)))
+    
+    # switch between count and percentage based on imbalance toggle
+    if (input$card_imbalance) {
+      plot_vals <- round(as.integer(tbl) / length(x) * 100, 1)
+      y_label   <- "Percentage (%)"
+      ref_line  <- 100 / n_classes  # perfect balance line
+      y_max     <- max(plot_vals) * 1.15
+    } else {
+      plot_vals <- as.integer(tbl)
+      y_label   <- "Count"
+      ref_line  <- NULL
+      y_max     <- max(plot_vals) * 1.15
+    }
+    
+    plot_df <- data.frame(
+      Value = factor(names(tbl), levels = names(tbl)),
+      Val   = plot_vals
+    )
+    
+    par(mar = c(8, 5, 3, 2))
+    
+    bp <- barplot(plot_df$Val,
+                  names.arg = plot_df$Value,
+                  las       = 2,
+                  col       = "steelblue",
+                  border    = NA,
+                  main      = paste("Value Distribution:", input$card_var,
+                                    "| Cardinality:", n_classes),
+                  ylab      = y_label,
+                  ylim      = c(0, y_max),
+                  cex.names = 0.85)
+    
+    # count/pct labels on top of bars
+    text(bp, plot_df$Val,
+         labels = if (input$card_imbalance) paste0(plot_df$Val, "%") else plot_df$Val,
+         pos = 3, cex = 0.8, col = "grey30")
+    
+    # perfect balance reference line (imbalance mode only)
+    if (input$card_imbalance) {
+      abline(h = ref_line, col = "red", lwd = 2, lty = 2)
+      legend("topright",
+             legend = paste0("Perfect balance (", round(ref_line, 1), "%)"),
+             col = "red", lty = 2, lwd = 2, bty = "n")
+    }
   })
   
   
@@ -780,7 +911,108 @@ server <- function(input, output, session) {
   })
   
   
+  # ── TAB SEQUENCE PLOT ──────────────────────────────────────────────────────
+  
+  # observe({
+  #   df <- selected_data()
+  #   req(df)
+  #   all_vars     <- names(df)
+  #   numeric_vars <- names(df)[sapply(df, is.numeric)]
+  #   updateSelectizeInput(session, "seq_var",      choices = numeric_vars, selected = numeric_vars[1])
+  #   updateSelectInput(   session, "seq_sort_var", choices = all_vars,     selected = numeric_vars[1])
+  # })
+  # 
+  # output$seq_plot <- renderPlot({
+  #   req(input$seq_var, input$seq_sort_var)
+  #   df <- selected_data()
+  #   
+  #   cols_needed <- unique(c(input$seq_sort_var, input$seq_var))
+  #   df_sub      <- df[, cols_needed]
+  #   
+  #   tabplot::tableplot(
+  #     df_sub,
+  #     sortCol    = input$seq_sort_var,
+  #     decreasing = (input$seq_sort_dir == "desc"),
+  #     nBins      = 100,
+  #     title      = paste("Table Lens — sorted by", input$seq_sort_var)
+  #   )
+  # })
+  
   # ── TAB GGPAIRS ────────────────────────────────────────────────────────────
+  
+  observe({
+    df <- selected_data()
+    req(df)
+    all_vars     <- names(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    updateSelectizeInput(session, "gg_vars",      choices = all_vars,    selected = numeric_vars[1:min(5, length(numeric_vars))])
+    updateSelectInput(   session, "gg_group_var", choices = cat_vars,    selected = cat_vars[1])
+  })
+  
+  output$gg_plot <- renderPlot({
+    input$gg_run
+    isolate({
+      req(input$gg_vars)
+      df <- selected_data()
+      validate(need(length(input$gg_vars) >= 2, "Please select at least 2 variables."))
+      
+      if (input$gg_group_on && !is.null(input$gg_group_var)) {
+        
+        grp <- input$gg_group_var
+        
+        # build df with selected vars + group col, drop NAs in group
+        plot_df <- df[, c(input$gg_vars, grp), drop = FALSE]
+        plot_df <- plot_df[!is.na(plot_df[[grp]]), ]
+        
+        # columns to plot = only the selected vars (not the group col)
+        col_idx <- seq_along(input$gg_vars)
+        
+        GGally::ggpairs(
+          plot_df,
+          columns  = col_idx,
+          mapping  = aes(colour = .data[[grp]], alpha = 0.6),
+          upper    = list(
+            continuous = GGally::wrap("cor", size = 2.5),
+            combo      = GGally::wrap("box_no_facet", alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          lower    = list(
+            continuous = GGally::wrap("points", alpha = 0.3, size = 0.8),
+            combo      = GGally::wrap("facethist", bins = 20, alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          diag     = list(
+            continuous = GGally::wrap("densityDiag", alpha = 0.5),
+            discrete   = GGally::wrap("barDiag", alpha = 0.5)
+          ),
+          legend   = 1  # show legend
+        ) +
+          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme(
+            strip.text  = element_text(size = 7),
+            legend.position = "bottom"
+          ) +
+          ggplot2::labs(title = paste("GGPairs — grouped by", grp))
+        
+      } else {
+        
+        plot_df <- df[, input$gg_vars, drop = FALSE]
+        
+        GGally::ggpairs(
+          plot_df,
+          upper = list(continuous = GGally::wrap("cor", size = 3)),
+          lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
+          diag  = list(continuous = GGally::wrap("densityDiag"))
+        ) +
+          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme(strip.text = element_text(size = 7))
+      }
+    })
+  })
+  
+  
   # ── TAB CORRELATION ────────────────────────────────────────────────────────
   # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
   # ── TAB OTHERS ─────────────────────────────────────────────────────────────
