@@ -530,6 +530,8 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
+  rconsole_env <- new.env(parent = globalenv())
+  
   # ── GLOBAL REACTIVE ────────────────────────────────────────────────────────
   
   # switch dataset based on drop down
@@ -1412,7 +1414,7 @@ server <- function(input, output, session) {
                       aceEditor("rconsole_input",
                                 mode     = "r",
                                 theme    = "tomorrow",
-                                height   = "200px",
+                                height   = "500px",
                                 value    = "table(format(df$Date, '%A'))",
                                 fontSize = 14)
                     ),
@@ -1431,19 +1433,59 @@ server <- function(input, output, session) {
   })
   
   output$rconsole_output <- renderPrint({
-    input$rconsole_run  # trigger on button click
+    input$rconsole_run
     isolate({
+      # # ── DEBUG (remove when done) ──────────────────────
+      # cat("--- RUN CLICKED ---\n")
+      # cat("raw code: [", input$rconsole_input, "]\n")
+      # # show the actual character codes around position 19
+      # first_line <- strsplit(input$rconsole_input, "\n")[[1]][1]
+      # cat("first line chars: [", first_line, "]\n")
+      # cat("chartr check - char codes:\n")
+      # print(utf8ToInt(first_line))  # reveals the actual Unicode codepoints
+      # # ─────────────────────────────────────────────────
       code <- input$rconsole_input
       if (is.null(code) || trimws(code) == "") {
         cat("# Type R code above and click Run\n")
         return(invisible(NULL))
       }
-      df <- display_data()
-      tryCatch(
-        eval(parse(text = code), envir = environment()),
+      
+      # strip Windows carriage returns FIRST
+      code <- gsub("\r\n", "\n", code)  # Windows CRLF → LF
+      code <- gsub("\r",   "\n", code)  # bare CR → LF (old Mac)
+      
+      # sanitise pasted Unicode → ASCII
+      code <- gsub("\u2018|\u2019|\u00b4",             "'", code)
+      code <- gsub("\u201c|\u201d",                    '"', code)
+      code <- gsub("\uff08",                           "(", code)
+      code <- gsub("\uff09",                           ")", code)
+      code <- gsub("\u2013|\u2014",                    "-", code)
+      code <- gsub("\u00a0|\u202f|\u2009|\u3000",      " ", code)
+      code <- gsub("[\u2768\u276a\u27ee\u2985\u2987]", "(", code)
+      code <- gsub("[\u2769\u276b\u27ef\u2986\u2988]", ")", code)
+      code <- gsub("\u00d7",                           "*", code)
+      code <- gsub("\u2212",                           "-", code)
+      code <- iconv(code, from = "UTF-8", to = "ASCII", sub = "")
+      
+      # always refresh df in the env so latest dataset is available
+      assign("df", display_data(), envir = rconsole_env)
+      
+      # parse into individual expressions and eval each one, capturing output
+      exprs <- tryCatch(parse(text = code), error = function(e) {
+        cat("Parse error:", conditionMessage(e), "\n")
+        return(NULL)
+      })
+      if (is.null(exprs)) return(invisible(NULL))
+      
+      # eval each expression individually so multi-line scripts print everything
+      for (i in seq_along(exprs)) {
+        tryCatch({
+          res <- withVisible(eval(exprs[[i]], envir = rconsole_env))
+          if (res$visible) print(res$value)
+        },
         error   = function(e) cat("Error:", conditionMessage(e), "\n"),
-        warning = function(w) cat("Warning:", conditionMessage(w), "\n")
-      )
+        warning = function(w) cat("Warning:", conditionMessage(w), "\n"))
+      }
     })
   })
   
