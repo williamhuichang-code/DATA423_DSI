@@ -455,104 +455,53 @@ ui <- fluidPage(
     # ── TAB CORRELATION ──────────────────────────────────────────────────────
     
     tabPanel("Correlation",
-      sidebarLayout(
-        sidebarPanel(width = 3,
-
-          # variable selection
-          selectizeInput("cor_vars", "Numeric variables:",
-                         choices  = NULL,
-                         multiple = TRUE,
-                         options  = list(placeholder = "Default: all numeric")),
-
-          hr(),
-
-          # method
-          radioButtons("cor_method", "Correlation method:",
-                       choices = c(
-                         "Pearson"  = "pearson",
-                         "Spearman" = "spearman",
-                         "Kendall"  = "kendall"
-                       ),
-                       selected = "pearson"),
-
-          hr(),
-
-          # display style
-          radioButtons("cor_plot_type", "Plot type:",
-                       choices = c(
-                         "Heatmap (ggplot2)" = "heatmap",
-                         "corrplot"          = "corrplot",
-                         "Scatter matrix"    = "scatter"
-                       ),
-                       selected = "heatmap"),
-
-          # corrplot-only options
-          conditionalPanel(
-            condition = "input.cor_plot_type == 'corrplot'",
-            selectInput("cor_cp_shape", "Shape:",
-                        choices  = c("circle", "square", "ellipse",
-                                     "number", "shade", "color", "pie"),
-                        selected = "circle"),
-            selectInput("cor_cp_order", "Variable order:",
-                        choices  = c("original", "AOE", "FPC", "hclust", "alphabet"),
-                        selected = "hclust"),
-            checkboxInput("cor_cp_addrect", "Draw cluster rectangles", value = TRUE)
-          ),
-
-          # heatmap-only options
-          conditionalPanel(
-            condition = "input.cor_plot_type == 'heatmap'",
-            checkboxInput("cor_show_vals", "Show correlation values", value = TRUE),
-            checkboxInput("cor_show_sig",  "Mask non-significant (p > 0.05)", value = FALSE)
-          ),
-
-          hr(),
-
-          # NA handling
-          selectInput("cor_na", "Handle NAs:",
-                      choices  = c("pairwise.complete.obs", "complete.obs", "na.or.complete"),
-                      selected = "pairwise.complete.obs"),
-
-          hr(),
-
-          # grouping
-          checkboxInput("cor_group_on", "Split by group variable", value = FALSE),
-          conditionalPanel(
-            condition = "input.cor_group_on == true",
-            selectInput("cor_group_var", "Group by:", choices = NULL),
-            selectizeInput("cor_group_levels", "Show levels:",
-                           choices  = NULL,
-                           multiple = TRUE,
-                           options  = list(placeholder = "All levels"))
-          ),
-
-          hr(),
-          actionButton("cor_run", "Compute", icon = icon("play"), width = "100%"),
-          helpText("Large variable sets may be slow for scatter matrix.")
-        ),
-
-        mainPanel(width = 9,
-          # top row: plot
-          conditionalPanel(
-            condition = "input.cor_plot_type == 'heatmap'",
-            plotlyOutput("cor_plot_gg", height = "85vh")
-          ),
-          conditionalPanel(
-            condition = "input.cor_plot_type == 'corrplot'",
-            plotOutput("cor_plot_cp", height = "85vh")
-          ),
-          conditionalPanel(
-            condition = "input.cor_plot_type == 'scatter'",
-            plotOutput("cor_plot_scatter", height = "85vh")
-          ),
-          
-          hr(),
-          # bottom row: numeric table
-          h4("Correlation Matrix"),
-          DTOutput("cor_table")
-        )
-      )
-    ),   # end of tab panel
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            
+                            # variable selection
+                            selectizeInput("cor_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "Default: all numeric")),
+                            
+                            hr(),
+                            
+                            # method
+                            radioButtons("cor_method", "Correlation method:",
+                                         choices  = c("Pearson"  = "pearson",
+                                                      "Spearman" = "spearman",
+                                                      "Kendall"  = "kendall"),
+                                         selected = "pearson"),
+                            
+                            hr(),
+                            
+                            # threshold filter
+                            sliderInput("cor_threshold", "Collinearity threshold:",
+                                        min   = 0,
+                                        max   = 1,
+                                        value = 1,      # default = keep all
+                                        step  = 0.05),
+                            helpText("1.00 = keep all variables.",
+                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
+                                     "0.00 = extremely strict, keeps only uncorrelated variables."),
+                            
+                            hr(),
+                            
+                            # NA handling
+                            selectInput("cor_na", "Handle NAs:",
+                                        choices  = c("pairwise.complete.obs", "complete.obs"),
+                                        selected = "pairwise.complete.obs")
+                            
+               ),
+               
+               mainPanel(width = 9,
+                         plotlyOutput("cor_plot_gg", height = "70vh"),
+                         hr(),
+                         h4("Correlation Matrix"),
+                         DTOutput("cor_table")
+               )
+             )
+    ),  # end of tab panel
     
     
     # ── TAB BOXPLOT ──────────────────────────────────────────────────────────
@@ -641,7 +590,7 @@ server <- function(input, output, session) {
   
   rconsole_env <- new.env(parent = globalenv())
   
-  # ── GLOBAL REACTIVE ────────────────────────────────────────────────────────
+  # ── SERVER GLOBAL REACTIVE ────────────────────────────────────────────────────────
   
   # switch dataset based on drop down
   selected_data <- reactive({
@@ -673,7 +622,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── PRIVACY CONTROL ──────────────────────────────────────────────────────
+  # ── SERVER PRIVACY CONTROL ──────────────────────────────────────────────────────
   
   # hardcoded passphrase
   UNLOCK_PASSPHRASE <- "123"
@@ -724,7 +673,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB TABLE ──────────────────────────────────────────────────────────────
+  # ── SERVER TABLE ──────────────────────────────────────────────────────────────
   # (renderTable cannot handle date format well, so changed to DT::dataTableOutput)
   output$data_table <- DT::renderDataTable({
     # instead of head(display_data(), 1000), this new code adds col info as well
@@ -734,7 +683,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB SUMMARY ────────────────────────────────────────────────────────────
+  # ── SERVER SUMMARY ────────────────────────────────────────────────────────────
   
   output$data_summary <- renderPrint({
     df <- display_data()
@@ -746,7 +695,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB UPSET ──────────────────────────────────────────────────────────────
+  # ── SERVER UPSET ──────────────────────────────────────────────────────────────
   
   observe({
     df <- display_data()
@@ -808,7 +757,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB LOLLIPOP ───────────────────────────────────────────────────────────
+  # ── SERVER LOLLIPOP ───────────────────────────────────────────────────────────
   
   observe({
     df   <- display_data()
@@ -936,7 +885,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB RISING ORDER ───────────────────────────────────────────────────────
+  # ── SERVER RISING ORDER ───────────────────────────────────────────────────────
   # update choices
   observe({
     df <- display_data()
@@ -979,7 +928,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB Q-Q PLOT ───────────────────────────────────────────────────────────
+  # ── SERVER Q-Q PLOT ───────────────────────────────────────────────────────────
   # update variable choices for QQ Plot
   observe({
     df <- display_data()
@@ -1065,7 +1014,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB MOSAIC ─────────────────────────────────────────────────────────────
+  # ── SERVER MOSAIC ─────────────────────────────────────────────────────────────
   
   # mosaic part1: mosaic plot
   cat_cols <- reactive({
@@ -1213,7 +1162,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB SEQUENCE PLOT ──────────────────────────────────────────────────────
+  # ── SERVER SEQUENCE PLOT ──────────────────────────────────────────────────────
   
   # observe({
   #   df <- selected_data()
@@ -1333,167 +1282,211 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB CORRELATION ────────────────────────────────────────────────────────
+  # ── SERVER CORRELATION ────────────────────────────────────────────────────────
   
-  # populate variable + group choices
+  # populate variable choices when dataset changes
   observe({
     df       <- display_data()
     req(df)
     num_vars <- names(df)[sapply(df, is.numeric)]
-    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
-    updateSelectizeInput(session, "cor_vars",      choices = num_vars, selected = character(0))
-    updateSelectInput(   session, "cor_group_var", choices = cat_vars, selected = cat_vars[1])
+    updateSelectizeInput(session, "cor_vars", choices = num_vars, selected = character(0))
   })
-
-  observeEvent(input$cor_group_var, {
-    req(input$cor_group_var)
-    df   <- display_data()
-    lvls <- sort(unique(as.character(df[[input$cor_group_var]])))
-    lvls <- lvls[!is.na(lvls)]
-    updateSelectizeInput(session, "cor_group_levels", choices = lvls, selected = lvls)
-  })
-
-  # helpers
-
-  # build correlation + p-value matrices for a numeric data.frame
+  
+  
+  # (helper) compute correlation + p-value matrices
+  # - complete.obs  -> listwise delete rows with any NA first
+  # - pairwise      -> rcorr handles it internally
   get_cor_mats <- function(df_num, method, use_arg) {
-    # only keep complete pairs for rcorr
     mat <- as.matrix(df_num)
-
-    # rcorr needs complete.obs or pairwise; map our use strings
-    hmisc_use <- if (use_arg == "complete.obs") "complete.obs" else "pairwise.complete.obs"
-
-    rc  <- tryCatch(Hmisc::rcorr(mat, type = method), error = function(e) NULL)
+    
+    if (use_arg == "complete.obs") {
+      mat <- mat[complete.cases(mat), , drop = FALSE]
+    }
+    
+    validate(need(nrow(mat) >= 3,
+                  "Not enough complete rows to compute correlation (need >= 3)."))
+    
+    rc      <- tryCatch(Hmisc::rcorr(mat, type = method), error = function(e) NULL)
     cor_mat <- if (!is.null(rc)) rc$r else cor(mat, use = use_arg, method = method)
     p_mat   <- if (!is.null(rc)) rc$P else NULL
+    
     list(cor = cor_mat, p = p_mat)
   }
-
-  # reactive: selected numeric df
-  cor_data <- reactive({
-    input$cor_run
-    isolate({
-      df       <- display_data()
-      num_vars <- names(df)[sapply(df, is.numeric)]
-      selected <- if (!is.null(input$cor_vars) && length(input$cor_vars) > 0)
-        input$cor_vars else num_vars
-      selected <- intersect(selected, num_vars)
-      validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
-      df[, selected, drop = FALSE]
-    })
-  })
-
-  # reactive: compute correlation matrix(ces)
+  
+  
+  # reactive: raw correlation matrices — reacts to dataset / vars / method / NA
+  # - does NOT read input$cor_threshold so threshold never triggers a full recompute
   cor_result <- reactive({
-    input$cor_run
-    isolate({
-      df_num <- cor_data()
-      method <- input$cor_method
-      use    <- input$cor_na
-
-      if (input$cor_group_on && !is.null(input$cor_group_var)) {
-        grp  <- input$cor_group_var
-        df   <- display_data()
-        lvls <- if (!is.null(input$cor_group_levels) && length(input$cor_group_levels) > 0)
-          input$cor_group_levels
-        else
-          sort(unique(as.character(df[[grp]])))
-
-        lapply(setNames(lvls, lvls), function(lv) {
-          sub    <- df[as.character(df[[grp]]) == lv, names(df_num), drop = FALSE]
-          sub    <- sub[sapply(sub, is.numeric)]
-          validate(need(nrow(sub) > 2, paste("Group", lv, "has too few rows.")))
-          get_cor_mats(sub, method, use)
-        })
-      } else {
-        list(All = get_cor_mats(df_num, method, use))
-      }
-    })
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    selected <- if (!is.null(input$cor_vars) && length(input$cor_vars) > 0)
+      input$cor_vars else num_vars
+    
+    selected <- intersect(selected, num_vars)
+    validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+    
+    df_num <- df[, selected, drop = FALSE]
+    get_cor_mats(df_num, input$cor_method, input$cor_na)
   })
-
-  # helper: long-format df for ggplot heatmap
-  cor_long <- function(cor_mat, p_mat = NULL, sig_mask = FALSE) {
-    df_long <- reshape2::melt(cor_mat, varnames = c("Var1", "Var2"), value.name = "r")
-
-    if (!is.null(p_mat) && sig_mask) {
-      p_long  <- reshape2::melt(p_mat, varnames = c("Var1", "Var2"), value.name = "p")
-      df_long <- merge(df_long, p_long, by = c("Var1", "Var2"))
-      df_long$r[df_long$p > 0.05] <- NA
-    } else {
-      df_long$p <- NA
+  
+  
+  # reactive: flip slider so left=1 (keep all), right=0 (drop most)
+  # - raw slider value 0 → threshold 1.0 (keep all)
+  # - raw slider value 1 → threshold 0.0 (drop everything)
+  cor_threshold <- reactive({ 1 - input$cor_threshold_raw })
+  
+  
+  # reactive: pairwise greedy elimination
+  # - while any pair has |r| > threshold, drop the variable in that pair
+  #   with the higher mean |r| across all other remaining variables
+  # - threshold = 1.00 → keep all (no pair ever has |r| strictly > 1)
+  # - threshold = 0.80 → drop anything with a collinear partner above 0.80
+  # - threshold = 0.00 → extremely strict
+  vars_to_keep <- reactive({
+    m         <- cor_result()
+    threshold <- input$cor_threshold
+    cor_mat   <- m$cor
+    remaining <- rownames(cor_mat)
+    
+    repeat {
+      sub_mat       <- abs(cor_mat[remaining, remaining, drop = FALSE])
+      diag(sub_mat) <- NA
+      
+      max_r <- max(sub_mat, na.rm = TRUE)
+      
+      # stop when no remaining pair exceeds the threshold
+      if (max_r <= threshold || length(remaining) <= 2) break
+      
+      # find the worst offending pair
+      idx   <- which(sub_mat == max_r, arr.ind = TRUE)[1, ]
+      var_a <- remaining[idx[1]]
+      var_b <- remaining[idx[2]]
+      
+      # drop whichever has higher mean |r| with all other remaining vars
+      mean_a <- mean(sub_mat[var_a, setdiff(remaining, var_a)], na.rm = TRUE)
+      mean_b <- mean(sub_mat[var_b, setdiff(remaining, var_b)], na.rm = TRUE)
+      
+      remaining <- setdiff(remaining, if (mean_a >= mean_b) var_a else var_b)
     }
-    df_long
-  }
-
-  # plot: ggplot2 heatmap
+    
+    remaining
+  })
+  
+  
+  # reactive: filtered matrix for heatmap
+  filtered_cor_mats <- reactive({
+    m    <- cor_result()
+    keep <- vars_to_keep()
+    
+    validate(need(length(keep) >= 2,
+                  paste0("All variables exceed the threshold. ",
+                         "Slide left to keep more variables.")))
+    
+    list(
+      cor = m$cor[keep, keep, drop = FALSE],
+      p   = if (!is.null(m$p)) m$p[keep, keep, drop = FALSE] else NULL
+    )
+  })
+  
+  
+  # heatmaply heatmap — shows only kept variables
   output$cor_plot_gg <- renderPlotly({
-    req(input$cor_plot_type == "heatmap")  # only runs for heatmap now
-    input$cor_run
-    isolate({
-      mats   <- cor_result()
-      method <- input$cor_method
-
-      plot_list <- lapply(names(mats), function(nm) {
-        m    <- mats[[nm]]
-        df_l <- cor_long(m$cor, m$p, isTRUE(input$cor_show_sig))
-        df_l$Group <- nm
-        df_l
-      })
-      plot_df <- do.call(rbind, plot_list)
-
-      var_order    <- rownames(mats[[1]]$cor)
-      plot_df$Var1 <- factor(plot_df$Var1, levels = var_order)
-      plot_df$Var2 <- factor(plot_df$Var2, levels = rev(var_order))
-
-      p <- ggplot(plot_df, aes(x = Var1, y = Var2, fill = r,
-                               text = paste0(Var1, " \u00d7 ", Var2,
-                                             "\nr = ", round(r, 3)))) +
-        geom_tile(colour = "white", linewidth = 3) +
-        scale_fill_distiller(palette = "RdBu", limits = c(-1, 1),
-                             direction = 1, na.value = "grey85",
-                             name = paste(tools::toTitleCase(method), "r")) +
-        labs(title = paste(tools::toTitleCase(method), "Correlation Heatmap"),
-             x = NULL, y = NULL) +
-        theme_minimal(base_size = 10) +
-        theme(axis.text.x  = element_text(angle = 45, hjust = 1),
-              panel.grid   = element_blank(),
-              panel.border = element_blank())
-
-      if (isTRUE(input$cor_show_vals)) {
-        p <- p + geom_text(aes(label = ifelse(is.na(r), "", sprintf("%.2f", r))),
-                           size = 2.5, colour = "black")
-      }
-
-      if (length(mats) > 1) p <- p + facet_wrap(~ Group)
-
-      ggplotly(p, tooltip = "text") %>% layout(showlegend = TRUE)
-    })
-  })
-  
-  output$cor_plot_scatter <- renderPlot({
-    req(input$cor_plot_type == "scatter")
-    input$cor_run
-    isolate({
-      df_num <- cor_data()
-      method <- input$cor_method
-      validate(need(ncol(df_num) <= 12,
-                    "Scatter matrix supports max 12 variables. Please reduce selection."))
-
-      GGally::ggpairs(
-        df_num,
-        upper = list(continuous = GGally::wrap("cor", method = method, size = 3)),
-        lower = list(continuous = GGally::wrap("points", alpha = 0.3, size = 0.6)),
-        diag  = list(continuous = GGally::wrap("densityDiag"))
-      ) +
-        ggplot2::theme_minimal(base_size = 9) +
-        ggplot2::theme(strip.text = element_text(size = 7)) +
-        ggplot2::labs(title = paste("Scatter Matrix —",
-                                    tools::toTitleCase(method), "correlation"))
-    })
+    m       <- filtered_cor_mats()
+    cor_mat <- m$cor
+    n_vars  <- nrow(cor_mat)
+    
+    heatmaply::heatmaply_cor(
+      cor_mat,
+      k_col        = min(3, max(1, n_vars - 1)),
+      k_row        = min(3, max(1, n_vars - 1)),
+      colors       = colorRampPalette(c("#2166ac", "white", "#b2182b"))(256),
+      limits       = c(-1, 1),
+      grid_gap     = 1,
+      main         = paste(tools::toTitleCase(input$cor_method), "Correlation"),
+      label_names  = c("X", "Y", "Correlation"),
+      fontsize_row = 8,
+      fontsize_col = 8,
+      margins      = c(80, 80, 40, 20)
+    )
   })
   
   
-  # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
+  # correlation table
+  # - shows ALL variable pairs (full matrix, not filtered)
+  # - Keep column flags whether BOTH variables in the pair survive the threshold
+  # - this lets you see what gets dropped and why
+  output$cor_table <- renderDT({
+    m       <- cor_result()
+    cor_mat <- m$cor
+    p_mat   <- m$p
+    vars    <- rownames(cor_mat)
+    keep    <- vars_to_keep()
+    
+    # melt upper triangle into rows
+    rows <- do.call(rbind, lapply(seq_along(vars), function(i) {
+      do.call(rbind, lapply(seq(i + 1, length(vars)), function(j) {
+        if (j > length(vars)) return(NULL)
+        data.frame(
+          Var1    = vars[i],
+          Var2    = vars[j],
+          r       = round(cor_mat[i, j], 4),
+          p_value = if (!is.null(p_mat)) round(p_mat[i, j], 6) else NA_real_,
+          Keep    = vars[i] %in% keep & vars[j] %in% keep,
+          stringsAsFactors = FALSE
+        )
+      }))
+    }))
+    
+    # sort: kept pairs first, then by |r| descending within each group
+    rows <- rows[order(-rows$Keep, -abs(rows$r)), ]
+    rows$Keep <- ifelse(rows$Keep, "Yes", "No")
+    
+    dt <- datatable(
+      rows,
+      rownames = FALSE,
+      filter   = "top",
+      options  = list(pageLength = 20, dom = "lftip")
+    ) %>%
+      formatRound(columns = "r", digits = 4) %>%
+      formatStyle(
+        "r",
+        background         = styleColorBar(c(-1, 1), "#a8d5e2"),
+        backgroundSize     = "100% 80%",
+        backgroundRepeat   = "no-repeat",
+        backgroundPosition = "center"
+      ) %>%
+      formatStyle(
+        "r",
+        color      = styleInterval(c(-0.5, -0.3, 0.3, 0.5),
+                                   c("#b2182b", "#d6604d", "#555555", "#4393c3", "#2166ac")),
+        fontWeight = "bold"
+      ) %>%
+      # highlight Keep column — green = keep, grey = drop
+      formatStyle(
+        "Keep",
+        color      = styleEqual(c("Yes", "No"), c("#198754", "#6c757d")),
+        fontWeight = "bold"
+      ) %>%
+      # dim entire row if both variables are dropped
+      formatStyle(
+        "Keep",
+        target          = "row",
+        backgroundColor = styleEqual(c("Yes", "No"), c("white", "#f8f9fa"))
+      )
+    
+    # colour p-values green if significant
+    if ("p_value" %in% names(rows)) {
+      dt <- dt %>%
+        formatStyle("p_value",
+                    color = styleInterval(0.05, c("#198754", "#6c757d")))
+    }
+    
+    dt
+  })
+  
+  
+  # ── SERVER BOXPLOT ────────────────────────────────────────────────────────────
   
   observe({
     df       <- display_data()
@@ -1653,7 +1646,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── R CONSOLE ──────────────────────────────────────────────────────────────
+  # ── SERVER R CONSOLE ──────────────────────────────────────────────────────────────
   
   output$rconsole_body <- renderUI({
     if (!privacy_unlocked()) {
