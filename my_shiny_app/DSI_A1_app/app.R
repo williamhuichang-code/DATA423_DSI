@@ -16,7 +16,9 @@ library(GGally)
 library(ggplot2)
 library(plotly)
 library(wordcloud)
-
+library(corrplot)
+library(reshape2)
+library(Hmisc)
 
 # load the raw dataset
 raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = FALSE)
@@ -452,7 +454,105 @@ ui <- fluidPage(
     
     # ── TAB CORRELATION ──────────────────────────────────────────────────────
     
-    tabPanel("Correlation",  p("Coming soon")),  # end of tab panel
+    tabPanel("Correlation",
+      sidebarLayout(
+        sidebarPanel(width = 3,
+
+          # variable selection
+          selectizeInput("cor_vars", "Numeric variables:",
+                         choices  = NULL,
+                         multiple = TRUE,
+                         options  = list(placeholder = "Default: all numeric")),
+
+          hr(),
+
+          # method
+          radioButtons("cor_method", "Correlation method:",
+                       choices = c(
+                         "Pearson"  = "pearson",
+                         "Spearman" = "spearman",
+                         "Kendall"  = "kendall"
+                       ),
+                       selected = "pearson"),
+
+          hr(),
+
+          # display style
+          radioButtons("cor_plot_type", "Plot type:",
+                       choices = c(
+                         "Heatmap (ggplot2)" = "heatmap",
+                         "corrplot"          = "corrplot",
+                         "Scatter matrix"    = "scatter"
+                       ),
+                       selected = "heatmap"),
+
+          # corrplot-only options
+          conditionalPanel(
+            condition = "input.cor_plot_type == 'corrplot'",
+            selectInput("cor_cp_shape", "Shape:",
+                        choices  = c("circle", "square", "ellipse",
+                                     "number", "shade", "color", "pie"),
+                        selected = "circle"),
+            selectInput("cor_cp_order", "Variable order:",
+                        choices  = c("original", "AOE", "FPC", "hclust", "alphabet"),
+                        selected = "hclust"),
+            checkboxInput("cor_cp_addrect", "Draw cluster rectangles", value = TRUE)
+          ),
+
+          # heatmap-only options
+          conditionalPanel(
+            condition = "input.cor_plot_type == 'heatmap'",
+            checkboxInput("cor_show_vals", "Show correlation values", value = TRUE),
+            checkboxInput("cor_show_sig",  "Mask non-significant (p > 0.05)", value = FALSE)
+          ),
+
+          hr(),
+
+          # NA handling
+          selectInput("cor_na", "Handle NAs:",
+                      choices  = c("pairwise.complete.obs", "complete.obs", "na.or.complete"),
+                      selected = "pairwise.complete.obs"),
+
+          hr(),
+
+          # grouping
+          checkboxInput("cor_group_on", "Split by group variable", value = FALSE),
+          conditionalPanel(
+            condition = "input.cor_group_on == true",
+            selectInput("cor_group_var", "Group by:", choices = NULL),
+            selectizeInput("cor_group_levels", "Show levels:",
+                           choices  = NULL,
+                           multiple = TRUE,
+                           options  = list(placeholder = "All levels"))
+          ),
+
+          hr(),
+          actionButton("cor_run", "Compute", icon = icon("play"), width = "100%"),
+          helpText("Large variable sets may be slow for scatter matrix.")
+        ),
+
+        mainPanel(width = 9,
+          # top row: plot
+          conditionalPanel(
+            condition = "input.cor_plot_type == 'heatmap'",
+            plotlyOutput("cor_plot_gg", height = "85vh")
+          ),
+          conditionalPanel(
+            condition = "input.cor_plot_type == 'corrplot'",
+            plotOutput("cor_plot_cp", height = "85vh")
+          ),
+          conditionalPanel(
+            condition = "input.cor_plot_type == 'scatter'",
+            plotOutput("cor_plot_scatter", height = "85vh")
+          ),
+          
+          hr(),
+          # bottom row: numeric table
+          h4("Correlation Matrix"),
+          DTOutput("cor_table")
+        )
+      )
+    ),   # end of tab panel
     
     
     # ── TAB BOXPLOT ──────────────────────────────────────────────────────────
@@ -1234,6 +1334,165 @@ server <- function(input, output, session) {
   
   
   # ── TAB CORRELATION ────────────────────────────────────────────────────────
+  
+  # populate variable + group choices
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectizeInput(session, "cor_vars",      choices = num_vars, selected = character(0))
+    updateSelectInput(   session, "cor_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+
+  observeEvent(input$cor_group_var, {
+    req(input$cor_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$cor_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "cor_group_levels", choices = lvls, selected = lvls)
+  })
+
+  # helpers
+
+  # build correlation + p-value matrices for a numeric data.frame
+  get_cor_mats <- function(df_num, method, use_arg) {
+    # only keep complete pairs for rcorr
+    mat <- as.matrix(df_num)
+
+    # rcorr needs complete.obs or pairwise; map our use strings
+    hmisc_use <- if (use_arg == "complete.obs") "complete.obs" else "pairwise.complete.obs"
+
+    rc  <- tryCatch(Hmisc::rcorr(mat, type = method), error = function(e) NULL)
+    cor_mat <- if (!is.null(rc)) rc$r else cor(mat, use = use_arg, method = method)
+    p_mat   <- if (!is.null(rc)) rc$P else NULL
+    list(cor = cor_mat, p = p_mat)
+  }
+
+  # reactive: selected numeric df
+  cor_data <- reactive({
+    input$cor_run
+    isolate({
+      df       <- display_data()
+      num_vars <- names(df)[sapply(df, is.numeric)]
+      selected <- if (!is.null(input$cor_vars) && length(input$cor_vars) > 0)
+        input$cor_vars else num_vars
+      selected <- intersect(selected, num_vars)
+      validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+      df[, selected, drop = FALSE]
+    })
+  })
+
+  # reactive: compute correlation matrix(ces)
+  cor_result <- reactive({
+    input$cor_run
+    isolate({
+      df_num <- cor_data()
+      method <- input$cor_method
+      use    <- input$cor_na
+
+      if (input$cor_group_on && !is.null(input$cor_group_var)) {
+        grp  <- input$cor_group_var
+        df   <- display_data()
+        lvls <- if (!is.null(input$cor_group_levels) && length(input$cor_group_levels) > 0)
+          input$cor_group_levels
+        else
+          sort(unique(as.character(df[[grp]])))
+
+        lapply(setNames(lvls, lvls), function(lv) {
+          sub    <- df[as.character(df[[grp]]) == lv, names(df_num), drop = FALSE]
+          sub    <- sub[sapply(sub, is.numeric)]
+          validate(need(nrow(sub) > 2, paste("Group", lv, "has too few rows.")))
+          get_cor_mats(sub, method, use)
+        })
+      } else {
+        list(All = get_cor_mats(df_num, method, use))
+      }
+    })
+  })
+
+  # helper: long-format df for ggplot heatmap
+  cor_long <- function(cor_mat, p_mat = NULL, sig_mask = FALSE) {
+    df_long <- reshape2::melt(cor_mat, varnames = c("Var1", "Var2"), value.name = "r")
+
+    if (!is.null(p_mat) && sig_mask) {
+      p_long  <- reshape2::melt(p_mat, varnames = c("Var1", "Var2"), value.name = "p")
+      df_long <- merge(df_long, p_long, by = c("Var1", "Var2"))
+      df_long$r[df_long$p > 0.05] <- NA
+    } else {
+      df_long$p <- NA
+    }
+    df_long
+  }
+
+  # plot: ggplot2 heatmap
+  output$cor_plot_gg <- renderPlotly({
+    req(input$cor_plot_type == "heatmap")  # only runs for heatmap now
+    input$cor_run
+    isolate({
+      mats   <- cor_result()
+      method <- input$cor_method
+
+      plot_list <- lapply(names(mats), function(nm) {
+        m    <- mats[[nm]]
+        df_l <- cor_long(m$cor, m$p, isTRUE(input$cor_show_sig))
+        df_l$Group <- nm
+        df_l
+      })
+      plot_df <- do.call(rbind, plot_list)
+
+      var_order    <- rownames(mats[[1]]$cor)
+      plot_df$Var1 <- factor(plot_df$Var1, levels = var_order)
+      plot_df$Var2 <- factor(plot_df$Var2, levels = rev(var_order))
+
+      p <- ggplot(plot_df, aes(x = Var1, y = Var2, fill = r,
+                               text = paste0(Var1, " \u00d7 ", Var2,
+                                             "\nr = ", round(r, 3)))) +
+        geom_tile(colour = "white", linewidth = 3) +
+        scale_fill_distiller(palette = "RdBu", limits = c(-1, 1),
+                             direction = 1, na.value = "grey85",
+                             name = paste(tools::toTitleCase(method), "r")) +
+        labs(title = paste(tools::toTitleCase(method), "Correlation Heatmap"),
+             x = NULL, y = NULL) +
+        theme_minimal(base_size = 10) +
+        theme(axis.text.x  = element_text(angle = 45, hjust = 1),
+              panel.grid   = element_blank(),
+              panel.border = element_blank())
+
+      if (isTRUE(input$cor_show_vals)) {
+        p <- p + geom_text(aes(label = ifelse(is.na(r), "", sprintf("%.2f", r))),
+                           size = 2.5, colour = "black")
+      }
+
+      if (length(mats) > 1) p <- p + facet_wrap(~ Group)
+
+      ggplotly(p, tooltip = "text") %>% layout(showlegend = TRUE)
+    })
+  })
+  
+  output$cor_plot_scatter <- renderPlot({
+    req(input$cor_plot_type == "scatter")
+    input$cor_run
+    isolate({
+      df_num <- cor_data()
+      method <- input$cor_method
+      validate(need(ncol(df_num) <= 12,
+                    "Scatter matrix supports max 12 variables. Please reduce selection."))
+
+      GGally::ggpairs(
+        df_num,
+        upper = list(continuous = GGally::wrap("cor", method = method, size = 3)),
+        lower = list(continuous = GGally::wrap("points", alpha = 0.3, size = 0.6)),
+        diag  = list(continuous = GGally::wrap("densityDiag"))
+      ) +
+        ggplot2::theme_minimal(base_size = 9) +
+        ggplot2::theme(strip.text = element_text(size = 7)) +
+        ggplot2::labs(title = paste("Scatter Matrix —",
+                                    tools::toTitleCase(method), "correlation"))
+    })
+  })
+  
+  
   # ── TAB BOXPLOT ────────────────────────────────────────────────────────────
   
   observe({
