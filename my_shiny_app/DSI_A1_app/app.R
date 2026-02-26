@@ -8,6 +8,7 @@
 #   UI, server files should be universally applicable
 
 library(shiny)
+library(shinyAce)
 library(dplyr)
 library(vcd)
 library(DT)
@@ -37,7 +38,7 @@ master_col_order <- c(
   # identifiers and operators
   "IdGroup", "ID", "Operator", 
   # date and derived factors
-  "Date", "Year", "Season", "Month", "Day",
+  "Date", "Year", "Season", "Month", "Day", "Weekday",
   # context
   "Priority", "Price", "Speed", "Duration", "Temp",
   "Location", "Agreed", "State", "Class", "Surface",
@@ -110,6 +111,9 @@ ds_col_enriched <- ds_typed %>%
     Year   = factor(format(Date, "%Y")),
     Month  = as.integer(format(Date, "%m")),
     Day    = as.integer(format(Date, "%d")),
+    Weekday = factor(format(Date, "%A"),
+                     levels = c("Monday", "Tuesday", "Wednesday",
+                                "Thursday", "Friday", "Saturday", "Sunday")),
     Season = factor(
       case_when(
         Month %in% 1:3   ~ "S1",
@@ -505,6 +509,15 @@ ui <- fluidPage(
                )
              )
     ),  # end of tab panel
+    
+    
+    # ── R CONSOLE ──────────────────────────────────────────────────────────────
+    
+    tabPanel("R Console",
+             uiOutput("rconsole_body")
+    ),
+    
+    
     
     
   ) # end tabsetPanel
@@ -1367,6 +1380,76 @@ server <- function(input, output, session) {
       scale        = c(max_scale, min_scale),
       use.r.layout = FALSE
     )
+  })
+  
+  
+  # ── R CONSOLE ──────────────────────────────────────────────────────────────
+  
+  output$rconsole_body <- renderUI({
+    if (!privacy_unlocked()) {
+      tagList(
+        br(),
+        div(style = "text-align: center; margin-top: 100px; color: #6c757d;",
+            icon("lock", style = "font-size: 48px;"),
+            h4("This tab is locked."),
+            p("Enter the passphrase (hint: 123) above to access the R Console.")
+        )
+      )
+    } else {
+      tagList(
+        sidebarLayout(
+          sidebarPanel(width = 3,
+                       helpText("Run arbitrary R expressions against the current dataset."),
+                       helpText("The current dataset is available as 'df'."),
+                       hr(),
+                       actionButton("rconsole_run", "Run", icon = icon("play"), width = "100%"),
+                       hr(),
+                       actionButton("rconsole_clear", "Clear", icon = icon("trash"), width = "100%")
+          ),
+          mainPanel(width = 9,
+                    tags$div(
+                      style = "font-family: monospace;",
+                      aceEditor("rconsole_input",
+                                mode     = "r",
+                                theme    = "tomorrow",
+                                height   = "200px",
+                                value    = "table(format(df$Date, '%A'))",
+                                fontSize = 14)
+                    ),
+                    hr(),
+                    verbatimTextOutput("rconsole_output")
+          )
+        )
+      )
+    }
+  })
+  
+  rconsole_history <- reactiveVal("")
+  
+  observeEvent(input$rconsole_clear, {
+    rconsole_history("")
+  })
+  
+  output$rconsole_output <- renderPrint({
+    input$rconsole_run  # trigger on button click
+    isolate({
+      code <- input$rconsole_input
+      if (is.null(code) || trimws(code) == "") {
+        cat("# Type R code above and click Run\n")
+        return(invisible(NULL))
+      }
+      df <- display_data()
+      tryCatch(
+        eval(parse(text = code), envir = environment()),
+        error   = function(e) cat("Error:", conditionMessage(e), "\n"),
+        warning = function(w) cat("Warning:", conditionMessage(w), "\n")
+      )
+    })
+  })
+  
+  # clear the ace editor content
+  observeEvent(input$rconsole_clear, {
+    updateAceEditor(session, "rconsole_input", value = "")
   })
   
   
