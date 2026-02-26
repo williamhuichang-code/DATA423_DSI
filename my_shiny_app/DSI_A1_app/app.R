@@ -247,9 +247,9 @@ ui <- fluidPage(
     ),
     
     
-    # ── TAB MISSINGNESS ──────────────────────────────────────────────────────
+    # ── TAB LOLLIPOP ─────────────────────────────────────────────────────────
     
-    tabPanel("Missingness",
+    tabPanel("Lollipop",
              sidebarLayout(
                sidebarPanel(width = 3,
                             
@@ -463,6 +463,8 @@ ui <- fluidPage(
                             selectInput("wc_var", "Categorical variable:",
                                         choices = NULL),
                             hr(),
+                            checkboxInput("wc_case", "Case sensitive", value = TRUE),
+                            hr(),
                             radioButtons("wc_split_mode", "Token split mode:",
                                          choices = c(
                                            "None (whole value)"   = "none",
@@ -472,7 +474,7 @@ ui <- fluidPage(
                                          selected = "none"),
                             hr(),
                             sliderInput("wc_max_words", "Max words to show:",
-                                        min = 10, max = 200, value = 200, step = 10),
+                                        min = 10, max = 500, value = 360, step = 10),
                             sliderInput("wc_min_freq", "Min frequency:",
                                         min = 1, max = 50, value = 1, step = 1),
                             hr(),
@@ -667,7 +669,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB MISSINGNESS ────────────────────────────────────────────────────────
+  # ── TAB LOLLIPOP ───────────────────────────────────────────────────────────
   
   observe({
     df   <- display_data()
@@ -1222,6 +1224,9 @@ server <- function(input, output, session) {
     df  <- display_data()
     val <- as.character(df[[input$wc_var]])
     val <- val[!is.na(val) & nchar(trimws(val)) > 0]
+    
+    # apply case folding on raw values before any splitting
+    if (!input$wc_case) val <- tolower(val)
     
     validate(need(length(val) > 0, "No non-missing values to display."))
     
