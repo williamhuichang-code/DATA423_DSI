@@ -480,7 +480,7 @@ ui <- fluidPage(
                                         min   = 0,
                                         max   = 1,
                                         value = 1,      # default = keep all
-                                        step  = 0.05),
+                                        step  = 0.01),
                             helpText("1.00 = keep all variables.",
                                      "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
                                      "0.00 = extremely strict, keeps only uncorrelated variables."),
@@ -495,7 +495,7 @@ ui <- fluidPage(
                ),
                
                mainPanel(width = 9,
-                         plotlyOutput("cor_plot_gg", height = "70vh"),
+                         plotlyOutput("cor_plot_gg", height = "90vh"),
                          hr(),
                          h4("Correlation Matrix"),
                          DTOutput("cor_table")
