@@ -84,11 +84,11 @@ ds_typed <- ds_renamed %>%
   # - manually defining level order for potential ordinal factors
   # - (has to be strict, since no context provided)
   mutate(
-    # Priority = factor(Priority, levels = c("Low", "Medium", "High"),      ordered = TRUE),
-    # Price    = factor(Price,    levels = c("Expensive", "Fair", "Cheap"), ordered = TRUE),
-    # Speed    = factor(Speed,    levels = c("Slow", "Medium", "Fast"),     ordered = TRUE),
-    # Duration = factor(Duration, levels = c("Short", "Long", "Very Long"), ordered = TRUE),
-    # Temp     = factor(Temp,     levels = c("Cold", "Warm", "Hot"),        ordered = TRUE),
+    Priority = factor(Priority, levels = c("Low", "Medium", "High"),      ordered = TRUE),
+    Price    = factor(Price,    levels = c("Expensive", "Fair", "Cheap"), ordered = TRUE),
+    Speed    = factor(Speed,    levels = c("Slow", "Medium", "Fast"),     ordered = TRUE),
+    Duration = factor(Duration, levels = c("Short", "Long", "Very Long"), ordered = TRUE),
+    Temp     = factor(Temp,     levels = c("Cold", "Warm", "Hot"),        ordered = TRUE),
     Agreed   = factor(Agreed,   levels = c("No", "Yes"))
   )
 
