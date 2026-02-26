@@ -14,6 +14,7 @@ library(DT)
 library(GGally)
 library(ggplot2)
 library(plotly)
+library(wordcloud)
 
 
 # load the raw dataset
@@ -454,44 +455,34 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── TAB OTHERS ───────────────────────────────────────────────────────────
+    # ── TAB WORD CLOUD ───────────────────────────────────────────────────────
     
-    tabPanel("Duplicates",
+    tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            
-                            strong("Exact Duplicates"),
-                            helpText("Rows that are identical across all selected columns."),
-                            selectizeInput("dup_cols", "Columns to check:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            actionButton("dup_run", "Find Exact Duplicates", icon = icon("search"), width = "100%"),
-                            
+                            selectInput("wc_var", "Categorical variable:",
+                                        choices = NULL),
                             hr(),
-                            
-                            strong("Near Duplicates"),
-                            helpText("Rows that are highly similar but not identical."),
-                            radioButtons("near_method", "Similarity metric:",
-                                         choices = c("Euclidean distance (numeric)" = "euclidean",
-                                                     "Proportion matching (mixed)"  = "matching"),
-                                         selected = "euclidean"),
-                            sliderInput("near_top", "Show top N most similar pairs:",
-                                        min = 5, max = 100, value = 20, step = 5),
-                            actionButton("near_run", "Find Near Duplicates", icon = icon("search"), width = "100%")
+                            checkboxInput("wc_split_chars", "Split into individual characters", value = FALSE),
+                            checkboxInput("wc_split_alphanum", "Split alphabets and numbers separately", value = FALSE),
+                            hr(),
+                            sliderInput("wc_max_words", "Max words to show:",
+                                        min = 10, max = 200, value = 100, step = 10),
+                            sliderInput("wc_min_freq", "Min frequency:",
+                                        min = 1, max = 50, value = 1, step = 1),
+                            hr(),
+                            selectInput("wc_palette", "Colour palette:",
+                                        choices = c("Dark2", "Set1", "Set2", "Set3",
+                                                    "Paired", "Accent", "Spectral"),
+                                        selected = "Dark2"),
+                            hr(),
+                            helpText("Font size is proportional to frequency.")
                ),
                mainPanel(width = 9,
-                         h4("Exact Duplicates"),
-                         helpText("Groups of rows with identical values across selected columns."),
-                         DTOutput("dup_table"),
-                         
-                         hr(),
-                         
-                         h4("Near Duplicates"),
-                         helpText("Pairs of rows ranked by similarity. Lower distance = more similar (Euclidean). Higher match % = more similar (Matching)."),
-                         DTOutput("near_table")
+                         plotOutput("wc_plot", height = "80vh")
                )
              )
-    )
+    ),  # end of tab panel
     
     
   ) # end tabsetPanel
@@ -1212,103 +1203,89 @@ server <- function(input, output, session) {
   })
   
   
-  # ── TAB OTHERS ─────────────────────────────────────────────────────────────
+  # ── TAB WORD CLOUD ─────────────────────────────────────────────────────────
   
   observe({
-    df <- display_data()
+    df       <- display_data()
     req(df)
-    updateSelectizeInput(session, "dup_cols", choices = names(df), selected = names(df))
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "wc_var", choices = cat_vars, selected = cat_vars[1])
   })
   
-  # exact duplicates
-  dup_result <- eventReactive(input$dup_run, {
-    req(input$dup_cols)
-    df <- display_data()
+  output$wc_plot <- renderPlot({
+    req(input$wc_var)
+    df  <- display_data()
+    val <- as.character(df[[input$wc_var]])
+    val <- val[!is.na(val) & nchar(trimws(val)) > 0]
     
-    df_sub <- df[, input$dup_cols, drop = FALSE]
+    validate(need(length(val) > 0, "No non-missing values to display."))
     
-    # add row index
-    df_sub$RowIndex <- seq_len(nrow(df_sub))
-    
-    # find duplicated rows
-    dup_mask <- duplicated(df_sub[, input$dup_cols]) | 
-      duplicated(df_sub[, input$dup_cols], fromLast = TRUE)
-    
-    if (!any(dup_mask)) return(data.frame(Message = "No exact duplicates found."))
-    
-    df_dups <- df_sub[dup_mask, ]
-    df_dups <- df_dups[order(do.call(paste, df_dups[, input$dup_cols, drop = FALSE])), ]
-    df_dups
-  })
-  
-  output$dup_table <- renderDT({
-    req(dup_result())
-    datatable(dup_result(), rownames = FALSE, options = list(pageLength = 15, scrollX = TRUE))
-  })
-  
-  # near duplicates
-  near_result <- eventReactive(input$near_run, {
-    df <- display_data()
-    
-    if (input$near_method == "euclidean") {
-      # use only numeric cols
-      num_cols <- names(df)[sapply(df, is.numeric)]
-      validate(need(length(num_cols) >= 1, "No numeric columns available for Euclidean distance."))
-      
-      df_num <- df[, num_cols, drop = FALSE]
-      df_num <- scale(df_num)  # normalise before distance
-      df_num[is.nan(df_num)] <- 0
-      
-      n <- nrow(df_num)
-      # compute pairwise distances — limit to first 1000 rows for performance
-      max_rows <- min(n, 1000)
-      df_num   <- df_num[1:max_rows, ]
-      dist_mat <- as.matrix(dist(df_num, method = "euclidean"))
-      diag(dist_mat) <- NA
-      
-      # extract upper triangle pairs
-      pairs <- which(upper.tri(dist_mat), arr.ind = TRUE)
-      scores <- dist_mat[pairs]
-      
-      out <- data.frame(
-        Row1       = pairs[, 1],
-        Row2       = pairs[, 2],
-        Distance   = round(scores, 4)
-      )
-      out <- out[order(out$Distance), ]
-      head(out, input$near_top)
-      
+    # optionally split into individual characters
+    if (input$wc_split_chars) {
+      tokens <- unlist(strsplit(val, ""))
+      tokens <- tokens[!grepl("\\s", tokens)]
     } else {
-      # proportion of matching columns (works with any type)
-      n       <- nrow(df)
-      max_rows <- min(n, 500)  # limit for performance
-      df_sub  <- df[1:max_rows, ]
-      
-      pairs <- combn(max_rows, 2, simplify = FALSE)
-      results <- lapply(pairs, function(p) {
-        r1 <- df_sub[p[1], ]
-        r2 <- df_sub[p[2], ]
-        matches <- sum(mapply(function(a, b) {
-          if (is.na(a) && is.na(b)) return(TRUE)
-          if (is.na(a) || is.na(b)) return(FALSE)
-          a == b
-        }, r1, r2))
-        data.frame(Row1 = p[1], Row2 = p[2], 
-                   MatchPct = round(matches / ncol(df_sub) * 100, 1))
-      })
-      
-      out <- do.call(rbind, results)
-      out <- out[order(-out$MatchPct), ]
-      head(out, input$near_top)
+      tokens <- val
     }
+    
+    # optionally split each token into alpha vs numeric runs
+    # e.g. "G10045" → c("G", "10045"), "D75" → c("D", "75")
+    # works on whatever tokens came out of the previous logic
+    if (input$wc_split_alphanum) {
+      tokens <- unlist(lapply(tokens, function(tok) {
+        # gregexpr finds consecutive runs of [A-Za-z] or [0-9]
+        m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+        regmatches(tok, m)[[1]]
+      }))
+      tokens <- tokens[nchar(tokens) > 0]
+    }
+    
+    freq_table <- sort(table(tokens), decreasing = TRUE)
+    freq_table <- freq_table[freq_table >= input$wc_min_freq]
+    validate(need(length(freq_table) > 0,
+                  paste0("No tokens appear at least ", input$wc_min_freq, " times.")))
+    freq_table <- head(freq_table, input$wc_max_words)
+    
+    words <- names(freq_table)
+    freqs <- as.integer(freq_table)
+    n     <- length(words)
+    
+    # colours
+    pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
+    colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
+    
+    # adaptive normalisation:
+    # - if all freqs are identical, spread them artificially so wordcloud
+    #   uses a range of sizes and fills the canvas
+    # - scale max size DOWN as n grows (more words → smaller max to avoid overlap)
+    freq_range <- max(freqs) - min(freqs)
+    
+    freqs_norm <- if (freq_range == 0) {
+      # all same frequency — assign fake spread so sizes vary visually
+      as.integer(seq(30, 100, length.out = n))
+    } else {
+      as.integer(1 + (freqs - min(freqs)) / freq_range * 99)
+    }
+    
+    # scale: bigger max when few words, smaller max when many words
+    # prevents tiny cluster for n=2 and prevents overflow for n=100
+    max_scale <- max(2, min(8, 40 / sqrt(n)))
+    min_scale <- max(0.3, max_scale / 10)
+    
+    par(mar = c(0, 0, 0, 0), bg = "white")
+    
+    wordcloud::wordcloud(
+      words        = words,
+      freq         = freqs_norm,
+      max.words    = n,
+      min.freq     = 1,
+      random.order = FALSE,
+      rot.per      = 0.15,
+      colors       = colors,
+      scale        = c(max_scale, min_scale),
+      use.r.layout = FALSE
+    )
   })
-  
-  output$near_table <- renderDT({
-    req(near_result())
-    datatable(near_result(), rownames = FALSE, options = list(pageLength = 15, scrollX = TRUE))
-  })
-  
-  
   
   
   
