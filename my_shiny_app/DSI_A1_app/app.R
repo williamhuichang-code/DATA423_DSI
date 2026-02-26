@@ -1256,22 +1256,18 @@ server <- function(input, output, session) {
     colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
     
     # adaptive normalisation:
-    # - if all freqs are identical, spread them artificially so wordcloud
-    #   uses a range of sizes and fills the canvas
-    # - scale max size DOWN as n grows (more words → smaller max to avoid overlap)
-    freq_range <- max(freqs) - min(freqs)
+    # rank-based normalisation: assign sizes by rank, not raw freq
+    # this completely sidesteps the 500:1 ratio problem
+    # rank 1 (most frequent) → 100, rank n (least frequent) → 20
+    freq_ranks  <- rank(-freqs, ties.method = "first")   # 1 = most frequent
+    freqs_norm  <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+    # result: most frequent = 100, least frequent = 20, linear spread regardless of raw values
     
-    freqs_norm <- if (freq_range == 0) {
-      # all same frequency — assign fake spread so sizes vary visually
-      as.integer(seq(30, 100, length.out = n))
-    } else {
-      as.integer(1 + (freqs - min(freqs)) / freq_range * 99)
-    }
-    
-    # scale: bigger max when few words, smaller max when many words
-    # prevents tiny cluster for n=2 and prevents overflow for n=100
-    max_scale <- max(2, min(8, 40 / sqrt(n)))
-    min_scale <- max(0.3, max_scale / 10)
+    # adaptive scale
+    # n_eff caps at 30 so scale doesn't collapse for large n
+    n_eff     <- min(n, 30)
+    max_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+    min_scale <- max_scale * 0.4   # min is always 40% of max → visible words
     
     par(mar = c(0, 0, 0, 0), bg = "white")
     
