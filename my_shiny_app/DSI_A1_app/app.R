@@ -472,7 +472,7 @@ ui <- fluidPage(
                                          selected = "none"),
                             hr(),
                             sliderInput("wc_max_words", "Max words to show:",
-                                        min = 10, max = 200, value = 100, step = 10),
+                                        min = 10, max = 200, value = 200, step = 10),
                             sliderInput("wc_min_freq", "Min frequency:",
                                         min = 1, max = 50, value = 1, step = 1),
                             hr(),
@@ -1255,19 +1255,30 @@ server <- function(input, output, session) {
     pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
     colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
     
-    # adaptive normalisation:
-    # rank-based normalisation: assign sizes by rank, not raw freq
-    # this completely sidesteps the 500:1 ratio problem
-    # rank 1 (most frequent) → 100, rank n (least frequent) → 20
-    freq_ranks  <- rank(-freqs, ties.method = "first")   # 1 = most frequent
-    freqs_norm  <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
-    # result: most frequent = 100, least frequent = 20, linear spread regardless of raw values
+    # adaptive normalisation with outlier-aware contrast boost
+    freq_ranks <- rank(-freqs, ties.method = "first")   # 1 = most frequent
     
-    # adaptive scale
-    # n_eff caps at 30 so scale doesn't collapse for large n
-    n_eff     <- min(n, 30)
-    max_scale <- max(3, min(9, 40 / sqrt(n_eff)))
-    min_scale <- max_scale * 0.4   # min is always 40% of max → visible words
+    # detect if top token(s) are genuine outliers vs the rest
+    # outlier = top freq is 3x the median freq
+    freq_ratio <- max(freqs) / max(median(freqs), 1)
+    
+    if (freq_ratio >= 3) {
+      # outlier mode: use sqrt-compressed raw freq → preserves contrast without
+      # letting the top token completely dwarf everyone else
+      freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
+                                 max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
+    } else {
+      # normal mode: pure rank-based (flat distribution, no outliers)
+      freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+    }
+    
+    # adaptive scale — use outlier ratio to decide canvas scale
+    # high ratio = we WANT a large max_scale so G/D are visually dominant
+    n_eff      <- min(n, 30)
+    base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+    # boost max_scale proportionally to outlier strength, cap at 12
+    max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
+    min_scale  <- max(0.3, max_scale * 0.15)   # tighter min so rare tokens stay small
     
     par(mar = c(0, 0, 0, 0), bg = "white")
     
