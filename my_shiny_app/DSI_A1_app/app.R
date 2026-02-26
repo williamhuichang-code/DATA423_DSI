@@ -463,8 +463,13 @@ ui <- fluidPage(
                             selectInput("wc_var", "Categorical variable:",
                                         choices = NULL),
                             hr(),
-                            checkboxInput("wc_split_chars", "Split into individual characters", value = FALSE),
-                            checkboxInput("wc_split_alphanum", "Split alphabets and numbers separately", value = FALSE),
+                            radioButtons("wc_split_mode", "Token split mode:",
+                                         choices = c(
+                                           "None (whole value)"   = "none",
+                                           "Individual characters" = "chars",
+                                           "Alpha / numeric runs"  = "alphanum"
+                                         ),
+                                         selected = "none"),
                             hr(),
                             sliderInput("wc_max_words", "Max words to show:",
                                         min = 10, max = 200, value = 100, step = 10),
@@ -1220,25 +1225,21 @@ server <- function(input, output, session) {
     
     validate(need(length(val) > 0, "No non-missing values to display."))
     
-    # optionally split into individual characters
-    if (input$wc_split_chars) {
-      tokens <- unlist(strsplit(val, ""))
-      tokens <- tokens[!grepl("\\s", tokens)]
-    } else {
-      tokens <- val
-    }
-    
-    # optionally split each token into alpha vs numeric runs
-    # e.g. "G10045" → c("G", "10045"), "D75" → c("D", "75")
-    # works on whatever tokens came out of the previous logic
-    if (input$wc_split_alphanum) {
-      tokens <- unlist(lapply(tokens, function(tok) {
-        # gregexpr finds consecutive runs of [A-Za-z] or [0-9]
-        m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
-        regmatches(tok, m)[[1]]
-      }))
-      tokens <- tokens[nchar(tokens) > 0]
-    }
+    # optional splitting logic
+    tokens <- switch(input$wc_split_mode,
+                     "none" = val,
+                     "chars" = {
+                       t <- unlist(strsplit(val, ""))
+                       t[!grepl("\\s", t)]
+                     },
+                     "alphanum" = {
+                       t <- unlist(lapply(val, function(tok) {
+                         m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+                         regmatches(tok, m)[[1]]
+                       }))
+                       t[nchar(t) > 0]
+                     }
+    )
     
     freq_table <- sort(table(tokens), decreasing = TRUE)
     freq_table <- freq_table[freq_table >= input$wc_min_freq]
