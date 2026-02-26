@@ -38,7 +38,9 @@ master_col_order <- c(
   # identifiers and operators
   "IdGroup", "ID", "Operator", 
   # date and derived factors
-  "Date", "Year", "Season", "Month", "Day", "Weekday",
+  "Date", "Year", "Season", "Month", "Day", "Weekday", "Week", 
+  # cyclic encodings
+  "Season_sin", "Season_cos", "Month_sin", "Month_cos",
   # context
   "Priority", "Price", "Speed", "Duration", "Temp",
   "Location", "Agreed", "State", "Class", "Surface",
@@ -104,16 +106,15 @@ ds_col_enriched <- ds_typed %>%
   # - derive meaningful cyclic info from Date, including Year, Season, Month, Day
   mutate(
     
-    # many years use numeric, for its order, real distance meaning, good for correlation / time trend plots
-    # few years prefer factor, purely categorical regimes, for barchart comparison
-    # month stays categorical, we do not assume January < February < March in a monotonic sense
+    # many years use numeric, for its potential monotonic trend, good for correlation / time trend plots
+    # but, few years prefer factor, purely categorical regimes
     # day mostly noise, but just curious about its day-wise distribution in histogram, so better numeric
     Year   = factor(format(Date, "%Y")),
     Month  = as.integer(format(Date, "%m")),
-    Day    = as.integer(format(Date, "%d")),
-    Weekday = factor(format(Date, "%A"),
-                     levels = c("Monday", "Tuesday", "Wednesday",
-                                "Thursday", "Friday", "Saturday", "Sunday")),
+    # given the data only falls on Thursdays and Fridays, day-of-month is likely just noise
+    # Day    = as.integer(format(Date, "%d")),
+    Weekday = factor(format(Date, "%A")),
+    Week = as.integer(format(Date, "%V")),  # ISO week number 1-53
     Season = factor(
       case_when(
         Month %in% 1:3   ~ "S1",
@@ -121,7 +122,12 @@ ds_col_enriched <- ds_typed %>%
         Month %in% 7:9   ~ "S3",
         Month %in% 10:12 ~ "S4"
       )),
-    Month  = factor(Month)
+    # cyclic encodings — computed before Month is converted to factor
+    Month_sin  = sin(2 * pi * Month / 12),
+    Month_cos  = cos(2 * pi * Month / 12),
+    Season_sin = sin(2 * pi * as.integer(Season) / 4),  # S1=1 … S4=4
+    Season_cos = cos(2 * pi * as.integer(Season) / 4),
+    Month      = factor(Month)   # convert to factor last, after sin/cos done
   ) %>% 
   
   # - sensor patterns, including grouping and feature scaling
@@ -152,12 +158,16 @@ ds_col_enriched <- ds_typed %>%
 enriched_dataset <- ds_col_enriched %>% 
   reorder_cols()
 
+enriched_dataset <- enriched_dataset %>%
+  mutate(
+    S6NaFlag = factor(is.na(Sensor6)),
+    Pri_Temp = factor(interaction(Price, Temp, sep = "_")))  # trial for variable testing
+
 # model dataset, since we don't need ID, Date and maybe Sensor1-30 as well for further modelling
 model_dataset <- enriched_dataset %>% 
   select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols not needed for modelling
   reorder_cols()
 
-# model_dataset <- model_dataset %>% select(-IdGroup, -Year, -Month) # trial for variable testing
 
 
 # =============================================================================
@@ -265,7 +275,6 @@ ui <- fluidPage(
                             
                             hr(),
                             checkboxInput("vc_group_on", "Group by variable", value = FALSE),
-                            
                             conditionalPanel(
                               condition = "input.vc_group_on == true",
                               selectInput("vc_group_var", "Group by:", choices = NULL),
