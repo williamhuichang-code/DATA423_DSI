@@ -332,6 +332,43 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
+    # ── UI WORD CLOUD ─────────────────────────────────────────────────────
+    
+    tabPanel("Word Cloud",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            selectInput("wc_var", "Categorical variable:",
+                                        choices = NULL),
+                            hr(),
+                            checkboxInput("wc_case", "Case sensitive", value = TRUE),
+                            hr(),
+                            radioButtons("wc_split_mode", "Token split mode:",
+                                         choices = c(
+                                           "None (whole value)"   = "none",
+                                           "Individual characters" = "chars",
+                                           "Alpha / numeric runs"  = "alphanum"
+                                         ),
+                                         selected = "none"),
+                            hr(),
+                            sliderInput("wc_max_words", "Max words to show:",
+                                        min = 10, max = 500, value = 360, step = 10),
+                            sliderInput("wc_min_freq", "Min frequency:",
+                                        min = 1, max = 50, value = 1, step = 1),
+                            hr(),
+                            selectInput("wc_palette", "Colour palette:",
+                                        choices = c("Dark2", "Set1", "Set2", "Set3",
+                                                    "Paired", "Accent", "Spectral"),
+                                        selected = "Dark2"),
+                            hr(),
+                            helpText("Font size is proportional to frequency.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("wc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
     
     tabPanel("Plot A",
@@ -383,9 +420,9 @@ server <- function(input, output, session) {
   rconsole_env <- new.env(parent = globalenv())
   
   
-  # ── SERVER SECURITY REACTIVE ─────────────────────────────────────────────
+  # ── SERVER SECURITY REACTIVE ───────────────────────────────────────────
   
-  # ·· LOCK STATE UPDATE ················································
+  # ·· LOCK STATE UPDATE ··············································
   
   # single reactive value drives everything security-related
   is_unlocked <- reactiveVal(FALSE)
@@ -422,7 +459,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ·· DATASET SELECTOR UI ··············································
+  # ·· DATASET SELECTOR UI ············································
   
   output$dataset_selector_ui <- renderUI({
     choices <- c("Raw Dataset", "Enriched Dataset", "Model Dataset")
@@ -458,7 +495,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── GLOBAL DATASET STAGE ─────────────────────────────────────────────────
+  # ── GLOBAL DATASET STAGE ───────────────────────────────────────────────
   
   # Note: everything downstream will read from display_data()
   
@@ -484,7 +521,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER DATA TABLE ────────────────────────────────────────────────────
+  # ── SERVER DATA TABLE ──────────────────────────────────────────────────
   
   output$data_table <- DT::renderDataTable({
     df <- head(display_data(), 1000)
@@ -494,7 +531,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER SUMMARY ───────────────────────────────────────────────────────
+  # ── SERVER SUMMARY ─────────────────────────────────────────────────────
   
   output$summary_output <- renderPrint({
     df <- display_data()
@@ -505,7 +542,98 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER PLOT A EXAMPLE ────────────────────────────────────────────────
+  # ── SERVER WORD CLOUD ──────────────────────────────────────────────────
+  
+  observe({
+    df       <- display_data()
+    req(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "wc_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  output$wc_plot <- renderPlot({
+    req(input$wc_var)
+    df  <- display_data()
+    val <- as.character(df[[input$wc_var]])
+    val <- val[!is.na(val) & nchar(trimws(val)) > 0]
+    
+    # apply case folding on raw values before any splitting
+    if (!input$wc_case) val <- tolower(val)
+    
+    validate(need(length(val) > 0, "No non-missing values to display."))
+    
+    # optional splitting logic
+    tokens <- switch(input$wc_split_mode,
+                     "none" = val,
+                     "chars" = {
+                       t <- unlist(strsplit(val, ""))
+                       t[!grepl("\\s", t)]
+                     },
+                     "alphanum" = {
+                       t <- unlist(lapply(val, function(tok) {
+                         m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+                         regmatches(tok, m)[[1]]
+                       }))
+                       t[nchar(t) > 0]
+                     }
+    )
+    
+    freq_table <- sort(table(tokens), decreasing = TRUE)
+    freq_table <- freq_table[freq_table >= input$wc_min_freq]
+    validate(need(length(freq_table) > 0,
+                  paste0("No tokens appear at least ", input$wc_min_freq, " times.")))
+    freq_table <- head(freq_table, input$wc_max_words)
+    
+    words <- names(freq_table)
+    freqs <- as.integer(freq_table)
+    n     <- length(words)
+    
+    # colours
+    pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
+    colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
+    
+    # adaptive normalisation with outlier-aware contrast boost
+    freq_ranks <- rank(-freqs, ties.method = "first")   # 1 = most frequent
+    
+    # detect if top token(s) are genuine outliers vs the rest
+    # outlier = top freq is 3x the median freq
+    freq_ratio <- max(freqs) / max(median(freqs), 1)
+    
+    if (freq_ratio >= 3) {
+      # outlier mode: use sqrt-compressed raw freq → preserves contrast without
+      # letting the top token completely dwarf everyone else
+      freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
+                                 max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
+    } else {
+      # normal mode: pure rank-based (flat distribution, no outliers)
+      freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+    }
+    
+    # adaptive scale — use outlier ratio to decide canvas scale
+    # high ratio = we WANT a large max_scale so G/D are visually dominant
+    n_eff      <- min(n, 30)
+    base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+    # boost max_scale proportionally to outlier strength, cap at 12
+    max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
+    min_scale  <- max(0.3, max_scale * 0.15)   # tighter min so rare tokens stay small
+    
+    par(mar = c(0, 0, 0, 0), bg = "white")
+    
+    wordcloud::wordcloud(
+      words        = words,
+      freq         = freqs_norm,
+      max.words    = n,
+      min.freq     = 1,
+      random.order = FALSE,
+      rot.per      = 0.15,
+      colors       = colors,
+      scale        = c(max_scale, min_scale),
+      use.r.layout = FALSE
+    )
+  })
+  
+  
+  # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
   
   # user sidebar action collection layer (reactive auto-detect)
   observe({
@@ -525,16 +653,16 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER R CONSOLE ─────────────────────────────────────────────────────
+  # ── SERVER R CONSOLE ───────────────────────────────────────────────────
   
   # the entire UI is replaced with a lock screen when not authenticated
   
-  # ·· CONDITIONAL UI (LOCK GATE) ·······································
+  # ·· CONDITIONAL UI (LOCK GATE) ·····································
   
   output$rconsole_body_ui <- renderUI({
     
     if (!is_unlocked()) {
-      # ── locked state: show a friendly gate ───────────────────────────────
+      # ~~ locked state: show a friendly gate ~~
       div(style = "text-align:center; margin-top:120px; color:#6c757d;",
           icon("lock", style = "font-size:48px;"),
           h4("R Console is locked for developer only."),
@@ -542,7 +670,7 @@ server <- function(input, output, session) {
       )
       
     } else {
-      # ── unlocked state: render full console ──────────────────────────────
+      # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
                      helpText("Run R expressions against the current dataset."),
@@ -570,7 +698,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ·· CONTROLLED CODE EXECUTION ········································
+  # ·· CONTROLLED CODE EXECUTION ······································
   
   output$rconsole_output <- renderPrint({
     input$rconsole_run
