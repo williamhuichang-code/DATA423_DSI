@@ -70,6 +70,28 @@ reorder_cols <- function(df) {
 }
 
 
+
+# ── GENERAL HELPER ───────────────────────────────────────────────────────────
+
+sidebar_note <- function(text) {
+  div(
+    style = "
+      font-size: 13px;
+      font-weight: 500;
+      color: #343a40;
+      background-color: white;
+      padding: 10px;
+      border-left: 4px solid #0d6efd;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    ",
+    icon("info-circle", style = "color:#0d6efd;"),
+    HTML(paste("&nbsp;", text))
+  )
+}
+
+
 # ── DATA STAGE ───────────────────────────────────────────────────────────────
 
 # ·· RAW DATASET ··························································
@@ -319,6 +341,7 @@ ui <- fluidPage(
     tabPanel("Summary",
              sidebarLayout(
                sidebarPanel(width = 2,
+                            sidebar_note("Can select a style to inspect the dataset structure."),
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
@@ -337,8 +360,8 @@ ui <- fluidPage(
     tabPanel("Plot A",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            selectInput("plotA_var", "Variable:", choices = NULL),
-                            helpText("CONFIGURE: add my own controls here.")
+                            sidebar_note("CONFIGURE: add my own controls here."),
+                            selectInput("plotA_var", "Variable:", choices = NULL)
                ),
                mainPanel(width = 9,
                          plotOutput("plotA_output", height = "85vh")
@@ -349,7 +372,17 @@ ui <- fluidPage(
     
     # ── COMING SOON ───────────────────────────────────────────────────────
     
-    tabPanel("Coming Soon", p("This feature is under development.")), # end of tab panel
+    tabPanel("Coming Soon",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("This feature is under development."),
+                            selectInput("x_var", "Variable:", choices = NULL)
+               ),
+               mainPanel(width = 9,
+                         plotOutput("x_output", height = "85vh")
+               )
+             )
+    ), # end of tab panel
     
     
     # ── UI R CONSOLE ───────────────────────────────────────────────────────
@@ -545,8 +578,7 @@ server <- function(input, output, session) {
       # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
-                     helpText("Run R expressions against the current dataset."),
-                     helpText("The dataset is available as ", code("df"), "."),
+                     sidebar_note("Run R expressions against the current dataset. <br><br>The dataset is available as df."),
                      hr(),
                      actionButton("rconsole_run",   "Run",   icon = icon("play"),  width = "100%"),
                      br(), br(),
