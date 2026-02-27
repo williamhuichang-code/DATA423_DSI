@@ -9,6 +9,11 @@ library(shiny)
 library(shinyAce)  # R console ace editor
 library(dplyr)
 library(DT)
+library(plotly)
+library(ggplot2)
+library(paletteer) # global colour theme
+library(colorspace)
+
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
@@ -69,6 +74,70 @@ reorder_cols <- function(df) {
   df[, keep]
 }
 
+
+# ── GLOBAL COLOUR THEME ──────────────────────────────────────────────────────
+
+# grouping color strategy
+# interleave light/dark within each group for maximum within-group contrast
+sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
+sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
+
+sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+THEME_COLOURS <- c(
+  sensor1_cols,
+  sensor2_cols,
+  sensor3_cols,
+  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
+)
+
+# named designations (only pin variables that need a meaningful fixed colour)
+THEME_DESIGNATED <- c(
+  "Y" = "#C41E3A"   # target variable always red
+)
+
+# helper: give it any character vector of names -> get back a named colour vector
+#   designated names always get their fixed colour
+#   everything else samples from THEME_COLOURS automatically
+
+theme_colours_for <- function(vars) {
+  colours <- character(length(vars))
+  names(colours) <- vars
+  
+  for (v in vars) {
+    
+    # 1️⃣ designated colours
+    if (v %in% names(THEME_DESIGNATED)) {
+      colours[v] <- THEME_DESIGNATED[v]
+      next
+    }
+    
+    # 2️⃣ raw sensors 1–30 (true grouping logic)
+    if (grepl("^Sensor[0-9]+$", v)) {
+      num <- as.integer(sub("Sensor", "", v))
+      
+      if (num <= 10) {
+        colours[v] <- sensor1_cols[num]
+      } else if (num <= 20) {
+        colours[v] <- sensor2_cols[num - 10]
+      } else {
+        colours[v] <- sensor3_cols[num - 20]
+      }
+      
+      next
+    }
+    
+    # 3️⃣ everything else (fallback deterministic mapping)
+    idx <- abs(sum(utf8ToInt(v)))
+    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
+  }
+  
+  colours
+}
 
 
 # ── GENERAL HELPER ───────────────────────────────────────────────────────────
@@ -340,7 +409,7 @@ ui <- fluidPage(
     
     tabPanel("Summary",
              sidebarLayout(
-               sidebarPanel(width = 2,
+               sidebarPanel(width = 3,
                             sidebar_note("Note: <br><br>Can select a style to inspect the dataset structure."),
                             hr(),
                             radioButtons("summary_style", "Style:",
@@ -349,110 +418,41 @@ ui <- fluidPage(
                                                      "dfSummary"   = "dfsummary"),
                                          selected = "glimpse")
                ),
-               mainPanel(width = 10,
+               mainPanel(width = 9,
                          verbatimTextOutput("summary_output")
                )
              )
     ), # end of tab panel
     
     
-    # ── UI PARALLEL COORDINATES ───────────────────────────────────────────
-    
-    tabPanel("Parallel",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("Duplicate Detection: <br><br>Lines that travel the same path across 
-                                     all axes are systematic duplicates. Dense overlapping strands 
-                                     indicate repeated value patterns across columns."),
-                            hr(),
-                            
-                            # column selector (numeric only — populated server-side)
-                            selectizeInput("pc_cols", "Columns to include:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            hr(),
-                            
-                            # colour group
-                            selectInput("pc_group", "Colour lines by:",
-                                        choices = NULL),
-                            hr(),
-                            
-                            # alpha slider
-                            sliderInput("pc_alpha", "Line transparency:",
-                                        min = 0.01, max = 1.0, value = 0.3, step = 0.01),
-                            
-                            # normalise toggle
-                            checkboxInput("pc_normalise", "Normalise axes to 0–1", value = TRUE),
-                            hr(),
-                            
-                            # row sample limit (safety for performance)
-                            numericInput("pc_max_rows", "Max rows to plot:",
-                                         value = 360, min = 10, max = 5000)
-               ),
-               mainPanel(width = 9,
-                         plotlyOutput("pc_plot", height = "80vh")
-               )
-             )
-    ),  # end of tab panel
-    
-    
-    # ── UI TABLEPLOT ──────────────────────────────────────────────────────
-    
-    tabPanel("Tableplot",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("Sequence Pattern Detection: <br><br>Rows are sorted by the chosen 
-                                     variable, binned, and each column's mean is shown as a heatmap tile. 
-                                     Horizontal bands of consistent colour indicate systematic patterns 
-                                     or duplicates across row sequences."),
-                            hr(),
-                            
-                            # sort by variable (all columns, default Date)
-                            selectInput("tp_sort_var", "Sort rows by:",
-                                        choices = NULL),
-                            
-                            radioButtons("tp_sort_dir", "Sort direction:",
-                                         choices  = c("Ascending" = "asc", "Descending" = "desc"),
-                                         selected = "asc"),
-                            hr(),
-                            
-                            # column selector (numeric only)
-                            selectizeInput("tp_cols", "Columns to include:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            hr(),
-                            
-                            # bin slider
-                            sliderInput("tp_bins", "Number of row bins:",
-                                        min = 10, max = 200, value = 100, step = 10),
-                            hr(),
-                            
-                            # scaling method
-                            radioButtons("tp_scale", "Value scaling:",
-                                         choices  = c("Raw"          = "raw",
-                                                      "Normalise"    = "normalise",
-                                                      "Centre"       = "centre",
-                                                      "Standardise"  = "standardise"),
-                                         selected = "normalise")
-               ),
-               mainPanel(width = 9,
-                         plotlyOutput("tp_plot", height = "80vh")
-               )
-             )
-    ),  # end of tab panel
-    
-    
     # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
     
-    tabPanel("Plot A",
+    tabPanel("Rising Value",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Note: <br><br>add my own controls here."),
+                            sidebar_note("Comeplete but Improper Value: <br><br>
+                                         This rising value chart helps identify incorrectly collected or 
+                                         inconsistent numeric values.
+                                         "),
+                            selectizeInput("rising_var", "Select numeric variable:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
                             hr(),
-                            selectInput("plotA_var", "Variable:", choices = NULL)
+                            sliderInput("rising_lwd", "Line width:",
+                                        min = 0.2, max = 5, value = 1.6, step = 0.1, width = "100%"),
+                            hr(),
+                            radioButtons("rising_lty", "Line type:",
+                                         choices = c(
+                                           "Solid"    = "solid",
+                                           "Dashed"   = "dashed",
+                                           "Dotted"   = "dotted",
+                                           "Dotdash"  = "dotdash",
+                                           "Longdash" = "longdash"
+                                         ),
+                                         selected = "dotdash")
                ),
                mainPanel(width = 9,
-                         plotOutput("plotA_output", height = "85vh")
+                         plotlyOutput("rising_output", height = "85vh")
                )
              )
     ), # end of tab panel
@@ -622,184 +622,8 @@ server <- function(input, output, session) {
     df <- display_data()
     switch(input$summary_style,
            "base"    = summary(df),
-           "glimpse" = tibble::glimpse(df),
+           "glimpse" = cat(capture.output(tibble::glimpse(df)), sep = "\n"),
            "dfsummary" = summarytools::dfSummary(df))
-  })
-  
-  
-  # ── SERVER PARALLEL COORDINATES ────────────────────────────────────────
-  
-  observe({
-    df       <- display_data()
-    req(df)
-    num_vars <- names(df)[sapply(df, is.numeric)]
-    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
-    updateSelectizeInput(session, "pc_cols",  choices = num_vars, selected = num_vars)
-    updateSelectInput(   session, "pc_group", choices = cat_vars, selected = cat_vars[1])
-  })
-  
-  output$pc_plot <- renderPlotly({
-    req(input$pc_cols, input$pc_group)
-    df <- display_data()
-    
-    validate(need(length(input$pc_cols) >= 2, "Please select at least 2 numeric columns."))
-    
-    # ·· subset + optional row cap ··
-    df_sub <- df[, c(input$pc_cols, input$pc_group), drop = FALSE]
-    if (nrow(df_sub) > input$pc_max_rows) {
-      df_sub <- df_sub[sample(nrow(df_sub), input$pc_max_rows), ]
-    }
-    
-    # ·· normalise each numeric column to 0-1 ··
-    df_num <- df_sub[, input$pc_cols, drop = FALSE]
-    if (isTRUE(input$pc_normalise)) {
-      df_num <- as.data.frame(lapply(df_num, function(x) {
-        rng <- range(x, na.rm = TRUE)
-        if (diff(rng) == 0) return(rep(0, length(x)))  # constant column — avoid div/0
-        (x - rng[1]) / diff(rng)
-      }))
-    }
-    
-    # ·· attach group + row id for line grouping ··
-    df_num$group  <- as.character(df_sub[[input$pc_group]])
-    df_num$row_id <- seq_len(nrow(df_num))
-    
-    # ·· pivot to long format ··
-    plot_df <- tidyr::pivot_longer(
-      df_num,
-      cols      = all_of(input$pc_cols),
-      names_to  = "Column",
-      values_to = "Value"
-    )
-    
-    # preserve column order on x axis
-    plot_df$Column <- factor(plot_df$Column, levels = input$pc_cols)
-    
-    # ·· plot ··
-    p <- ggplot(plot_df, aes(x      = Column,
-                             y      = Value,
-                             group  = row_id,
-                             colour = group,
-                             text   = paste0("Row: ", row_id, "<br>Group: ", group,
-                                             "<br>Column: ", Column,
-                                             "<br>Value: ", round(Value, 4)))) +
-      geom_line(alpha = input$pc_alpha, linewidth = 0.5) +
-      labs(title  = "Parallel Coordinates — Normalised",
-           x      = NULL,
-           y      = if (isTRUE(input$pc_normalise)) "Normalised Value (0–1)" else "Value",
-           colour = input$pc_group) +
-      theme_minimal(base_size = 11) +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1),
-            legend.position = "right")
-    
-    ggplotly(p, tooltip = "text") %>%
-      layout(legend = list(title = list(text = input$pc_group)))
-  })
-  
-  
-  # ── SERVER TABLEPLOT ───────────────────────────────────────────────────
-  
-  observe({
-    df       <- display_data()
-    req(df)
-    num_vars <- names(df)[sapply(df, is.numeric)]
-    all_vars <- names(df)
-    
-    # default sort to Date if it exists, otherwise first column
-    default_sort    <- if ("Date" %in% all_vars) "Date" else all_vars[1]
-    default_sensors <- grep("^Sensor", num_vars, value = TRUE)  # only Sensor cols by default
-    
-    updateSelectInput(   session, "tp_sort_var", choices = all_vars,  selected = default_sort)
-    updateSelectizeInput(session, "tp_cols",     choices = num_vars,  selected = default_sensors)
-  })
-  
-  output$tp_plot <- renderPlotly({
-    req(input$tp_sort_var, input$tp_cols)
-    df <- display_data()
-    
-    validate(need(length(input$tp_cols) >= 1, "Please select at least 1 numeric column."))
-    
-    # ·· sort rows ··
-    sort_vec <- df[[input$tp_sort_var]]
-    row_order <- if (input$tp_sort_dir == "asc") {
-      order(sort_vec, na.last = TRUE)
-    } else {
-      order(sort_vec, decreasing = TRUE, na.last = TRUE)
-    }
-    df_sorted <- df[row_order, , drop = FALSE]
-    
-    # ·· assign row bins ··
-    n        <- nrow(df_sorted)
-    n_bins   <- input$tp_bins
-    bin_size <- ceiling(n / n_bins)
-    df_sorted$bin <- ceiling(seq_len(n) / bin_size)
-    
-    # ·· compute mean per bin per column ··
-    bin_means <- df_sorted %>%
-      group_by(bin) %>%
-      summarise(across(all_of(input$tp_cols), ~ mean(.x, na.rm = TRUE)),
-                .groups = "drop")
-    
-    # ·· scale each column according to selected method ··
-    bin_means_scaled <- bin_means
-    for (col in input$tp_cols) {
-      x <- bin_means[[col]]
-      bin_means_scaled[[col]] <- switch(input$tp_scale,
-                                        "raw"         = x,
-                                        "normalise"   = {
-                                          rng <- range(x, na.rm = TRUE)
-                                          if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
-                                        },
-                                        "centre"      = x - mean(x, na.rm = TRUE),
-                                        "standardise" = as.numeric(scale(x, center = TRUE, scale = TRUE))
-      )
-    }
-    
-    # ·· pivot to long ··
-    plot_df <- tidyr::pivot_longer(
-      bin_means_scaled,
-      cols      = all_of(input$tp_cols),
-      names_to  = "Column",
-      values_to = "Value"
-    )
-    
-    # preserve column order in facets
-    plot_df$Column <- factor(plot_df$Column, levels = input$tp_cols)
-    
-    
-    clim <- if (input$tp_scale == "normalise") {
-      c(0, 1)
-    } else {
-      rng <- range(plot_df$Value, na.rm = TRUE)
-      c(rng[1], rng[2])
-    }
-    
-    # ·· plot — horizontal bars, faceted by column ··
-    p <- ggplot(plot_df, aes(x    = Value,
-                             y    = bin,
-                             text = paste0("Bin: ",       bin,
-                                           "<br>Col: ",   Column,
-                                           "<br>Norm mean: ", round(Value, 3)))) +
-      geom_col(aes(fill = Value), orientation = "y", width = 0.9) +
-      scale_fill_viridis_c(option = "magma", limits = clim, name = "Value") +
-      facet_wrap(~ Column, nrow = 1, strip.position = "bottom") +
-      scale_y_reverse(expand = c(0, 0)) +
-      scale_x_continuous(breaks = NULL, expand = c(0, 0)) +
-      labs(title = paste0("Tableplot — sorted by ", input$tp_sort_var),
-           x     = NULL,
-           y     = paste0("Row bin (", bin_size, " rows each)")) +
-      theme_minimal(base_size = 9) +
-      theme(
-        panel.spacing    = unit(0.5, "mm"),      # minimal gap between panels
-        strip.text       = element_text(angle = 90, hjust = 1, size = 7),
-        axis.text.x      = element_blank(),
-        axis.ticks.x     = element_blank(),
-        panel.grid       = element_blank(),
-        panel.background = element_rect(fill = "grey95", colour = NA)
-      )
-    
-    ggplotly(p, tooltip = "text") %>%
-      layout(showlegend = FALSE)
   })
   
   
@@ -809,17 +633,39 @@ server <- function(input, output, session) {
   observe({
     df       <- display_data()
     num_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectInput(session, "plotA_var", choices = num_vars, selected = num_vars[1])
+    default_sel  <- num_vars[num_vars %in% 
+                               c("Y", "Sensor4", "Sensor6", "Sensor8", "Sensor11", 
+                                 "Sensor16", "Sensor22", "Sensor24", "Sensor28")]
+    updateSelectizeInput(session, "rising_var", choices = num_vars, selected = default_sel)
   })
   
-  # render layer (computation / visualization)
-  output$plotA_output <- renderPlot({
-    req(input$plotA_var)
-    df <- display_data()
-    # random plot example
-    hist(df[[input$plotA_var]],
-         main = paste("Histogram —", input$plotA_var),
-         xlab = input$plotA_var, col = "steelblue", border = "white")
+  # render layer — rising value lines, ggplotly
+  output$rising_output <- renderPlotly({
+    req(input$rising_var)
+    df       <- display_data()
+    num_vars <- input$rising_var
+    colours  <- theme_colours_for(num_vars)
+    
+    # build long-format df
+    plot_df <- do.call(rbind, lapply(num_vars, function(v) {
+      y   <- sort(na.omit(df[[v]]))
+      pct <- seq_along(y) / length(y) * 100
+      data.frame(Percentile = pct, Value = y, Variable = v)
+    }))
+    
+    p <- ggplot(plot_df, aes(x = Percentile, y = Value,
+                             colour = Variable,
+                             group  = Variable,
+                             text   = paste0(Variable,
+                                             "<br>Percentile: ", round(Percentile, 1),
+                                             "<br>Value: ",      round(Value, 3)))) +
+      geom_line(linewidth = input$rising_lwd / 3, linetype = input$rising_lty) +
+      scale_colour_manual(values = colours) +
+      labs(title = "Rising Value Chart", x = "Percentile", y = "Value") +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "right")
+    
+    ggplotly(p, tooltip = "text")
   })
   
   
