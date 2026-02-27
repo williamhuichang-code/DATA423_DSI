@@ -342,6 +342,7 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 2,
                             sidebar_note("Can select a style to inspect the dataset structure."),
+                            hr(),
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
@@ -361,6 +362,7 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("CONFIGURE: add my own controls here."),
+                            hr(),
                             selectInput("plotA_var", "Variable:", choices = NULL)
                ),
                mainPanel(width = 9,
@@ -376,6 +378,7 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("This feature is under development."),
+                            hr(),
                             selectInput("x_var", "Variable:", choices = NULL)
                ),
                mainPanel(width = 9,
