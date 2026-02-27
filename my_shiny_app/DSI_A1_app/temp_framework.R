@@ -29,6 +29,9 @@ UNLOCK_PASSPHRASE <- "123"
 PRIVATE_COLS <- c("ID")
 
 # global master column order, that all datasets could follow (skipping cols that don't exist in that dataset)
+# Note:
+#   every time when I derived a col to enrich, I should add it here in a position
+
 MASTER_COL_ORDER <- c(
   # target
   "Y",
@@ -236,7 +239,7 @@ enriched_dataset <- ds_typed %>%
 model_dataset <- enriched_dataset %>%
   
   select(
-    -any_of(c("ID", "Date")),     # example drops
+    -any_of(c("ID", "Date")),       # example drops
     # -matches("^RawSensor\\d+$"),  # drop Sensor1, Sensor2, ... Sensor30
     # -matches("^Normalised"),      # drop NormalisedSG1, NormalisedSG2, NormalisedSG3
   )
@@ -303,86 +306,85 @@ ui <- fluidPage(
   
   tabsetPanel(
     
-    # ── TAB: Data Table ────────────────────────────────────────────────────
-    tabPanel("Data Table",
-             DT::dataTableOutput("data_table")
-    ),
+    # ── UI Data Table ─────────────────────────────────────────────────────
     
-    # ── TAB: Summary ───────────────────────────────────────────────────────
+    tabPanel("Data Table",   DT::dataTableOutput("data_table")),  # end of tab panel
+    
+    # ── UI SUMMARY ────────────────────────────────────────────────────────
+    
     tabPanel("Summary",
              sidebarLayout(
                sidebarPanel(width = 2,
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
-                                                     "glimpse" = "glimpse"),
+                                                     "glimpse" = "glimpse",
+                                                     "dfSummary"   = "dfsummary"),
                                          selected = "glimpse")
                ),
                mainPanel(width = 10,
                          verbatimTextOutput("summary_output")
                )
              )
-    ),
+    ), # end of tab panel
     
-    # ── TAB: Plot A (your first visualisation) ─────────────────────────────
-    # CONFIGURE ↓ rename and build out your own sidebar + plot
+    
+    # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
+    
     tabPanel("Plot A",
              sidebarLayout(
                sidebarPanel(width = 3,
                             selectInput("plotA_var", "Variable:", choices = NULL),
-                            helpText("CONFIGURE: add your own controls here.")
+                            helpText("CONFIGURE: add my own controls here.")
                ),
                mainPanel(width = 9,
-                         plotOutput("plotA_output", height = "70vh")
+                         plotOutput("plotA_output", height = "85vh")
                )
              )
-    ),
+    ), # end of tab panel
     
-    # ── TAB: Plot B (your second visualisation) ────────────────────────────
-    # CONFIGURE ↓ duplicate this pattern for as many tabs as you need
-    tabPanel("Plot B",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            selectizeInput("plotB_vars", "Variables:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            helpText("CONFIGURE: add your own controls here.")
-               ),
-               mainPanel(width = 9,
-                         plotOutput("plotB_output", height = "70vh")
-               )
-             )
-    ),
     
-    # ── TAB: R Console (security-gated) ────────────────────────────────────
-    # The entire tab body is rendered server-side so it stays hidden when locked.
-    tabPanel("R Console",
-             uiOutput("rconsole_body_ui")
-    )
+    # ── UI R CONSOLE ───────────────────────────────────────────────────────
+    
+    # the entire tab body is rendered server-side to stay hidden when locked
+    #   for myself use only (debugging / testing / developing)
+    #   reason is I cant access R terminal when using shiny app lol
+    #   so, kinda cool to make this anyway :D
+    
+    tabPanel("R Console", uiOutput("rconsole_body_ui")) # end of tab panel
+    
     
   ) # end tabsetPanel
 )   # end fluidPage
 
 
+
+
+
 # =============================================================================
-# SECTION 4 — SERVER
+# server.R
 # =============================================================================
 
 server <- function(input, output, session) {
   
-  # Isolated R environment for the console — inherits global so datasets
-  # defined above are visible, but user code cannot clobber server variables.
+  # isolated R environment for the console (inheritance)
+  #   so that I can read global objects
+  #   assign while staying inside rconsole_env
+  #   but my console code won't overwrite globalenv()
+  
   rconsole_env <- new.env(parent = globalenv())
   
   
-  # ── 4.1  SECURITY REACTIVE ────────────────────────────────────────────────
-  # Single reactive value drives everything security-related.
+  # ── SERVER SECURITY REACTIVE ─────────────────────────────────────────────
   
+  # ·· LOCK STATE UPDATE ················································
+  
+  # single reactive value drives everything security-related
   is_unlocked <- reactiveVal(FALSE)
   
   # toggle lock / unlock on button click
   observeEvent(input$privacy_unlock, {
     if (is_unlocked()) {
-      # already unlocked → lock again
+      # if already unlocked → lock again
       is_unlocked(FALSE)
       updateTextInput(session, "privacy_pass", value = "")
     } else {
@@ -411,10 +413,11 @@ server <- function(input, output, session) {
   })
   
   
-  # ── 4.2  DATASET SELECTOR UI (injects "Debug Dataset" when unlocked) ──────
+  # ·· DATASET SELECTOR UI ··············································
   
   output$dataset_selector_ui <- renderUI({
     choices <- c("Raw Dataset", "Enriched Dataset", "Model Dataset")
+    # (injects "Debug Dataset" when unlocked)
     if (is_unlocked()) choices <- c(choices, "Debug Dataset")
     selectInput("dataset_choice", "Dataset Stage:",
                 choices = choices, selected = "Enriched Dataset")
@@ -440,12 +443,11 @@ server <- function(input, output, session) {
   })
   
   
-  # ── 4.3  CORE DATA REACTIVE ───────────────────────────────────────────────
-  # Everything downstream reads from display_data().
-  # Two layers:
-  #   selected_data()  — picks the right stage
-  #   display_data()   — additionally strips PRIVATE_COLS when locked
+  # ── GLOBAL DATASET STAGE ─────────────────────────────────────────────────
   
+  # Note: everything downstream will read from display_data()
+  
+  # layer 1: selected_data()  —> picks the intended dataset stage to examine
   selected_data <- reactive({
     req(input$dataset_choice)
     switch(input$dataset_choice,
@@ -453,9 +455,10 @@ server <- function(input, output, session) {
            "Enriched Dataset" = enriched_dataset,
            "Model Dataset"    = model_dataset,
            "Debug Dataset"    = debug_dataset,   # only reachable when unlocked
-           enriched_dataset)                      # safe fallback
+           enriched_dataset)                      # enriched dataset always as fallback
   })
   
+  # layer 2: display_data()   —> additionally strips PRIVATE_COLS when locked
   display_data <- reactive({
     df   <- selected_data()
     drop <- intersect(PRIVATE_COLS, names(df))
@@ -466,7 +469,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── 4.4  SERVER: Data Table ───────────────────────────────────────────────
+  # ── SERVER DATA TABLE ────────────────────────────────────────────────────
   
   output$data_table <- DT::renderDataTable({
     df <- head(display_data(), 1000)
@@ -476,56 +479,42 @@ server <- function(input, output, session) {
   })
   
   
-  # ── 4.5  SERVER: Summary ─────────────────────────────────────────────────
+  # ── SERVER SUMMARY ───────────────────────────────────────────────────────
   
   output$summary_output <- renderPrint({
     df <- display_data()
     switch(input$summary_style,
            "base"    = summary(df),
-           "glimpse" = tibble::glimpse(df))
+           "glimpse" = tibble::glimpse(df),
+           "dfsummary" = summarytools::dfSummary(df))
   })
   
   
-  # ── 4.6  SERVER: Plot A ───────────────────────────────────────────────────
-  # Populate sidebar choices whenever the dataset changes.
+  # ── SERVER PLOT A EXAMPLE ────────────────────────────────────────────────
   
+  # user sidebar action collection layer (reactive auto-detect)
   observe({
     df       <- display_data()
     num_vars <- names(df)[sapply(df, is.numeric)]
     updateSelectInput(session, "plotA_var", choices = num_vars, selected = num_vars[1])
   })
   
+  # render layer (computation / visualization)
   output$plotA_output <- renderPlot({
     req(input$plotA_var)
     df <- display_data()
-    # CONFIGURE ↓ replace with your own ggplot / base-R plot
+    # random plot example
     hist(df[[input$plotA_var]],
          main = paste("Histogram —", input$plotA_var),
          xlab = input$plotA_var, col = "steelblue", border = "white")
   })
   
   
-  # ── 4.7  SERVER: Plot B ───────────────────────────────────────────────────
+  # ── SERVER R CONSOLE ─────────────────────────────────────────────────────
   
-  observe({
-    df       <- display_data()
-    num_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectizeInput(session, "plotB_vars", choices = num_vars,
-                         selected = num_vars[1:min(3, length(num_vars))])
-  })
+  # the entire UI is replaced with a lock screen when not authenticated
   
-  output$plotB_output <- renderPlot({
-    req(input$plotB_vars)
-    df <- display_data()
-    # CONFIGURE ↓ replace with your own ggplot / base-R plot
-    boxplot(df[, input$plotB_vars, drop = FALSE],
-            main = "Boxplot — selected variables",
-            col  = "steelblue")
-  })
-  
-  
-  # ── 4.8  SERVER: R Console (security-gated) ───────────────────────────────
-  # The entire UI is replaced with a lock screen when not authenticated.
+  # ·· CONDITIONAL UI (LOCK GATE) ·······································
   
   output$rconsole_body_ui <- renderUI({
     
@@ -533,7 +522,7 @@ server <- function(input, output, session) {
       # ── locked state: show a friendly gate ───────────────────────────────
       div(style = "text-align:center; margin-top:120px; color:#6c757d;",
           icon("lock", style = "font-size:48px;"),
-          h4("R Console is locked."),
+          h4("R Console is locked for developer only."),
           p("Enter the passphrase above to unlock.")
       )
       
@@ -549,6 +538,7 @@ server <- function(input, output, session) {
                      actionButton("rconsole_clear", "Clear", icon = icon("trash"), width = "100%")
         ),
         mainPanel(width = 9,
+                  # code editor (ACE)
                   shinyAce::aceEditor(
                     "rconsole_input",
                     mode     = "r",
@@ -564,8 +554,12 @@ server <- function(input, output, session) {
     }
   })
   
+  
+  # ·· CONTROLLED CODE EXECUTION ········································
+  
   output$rconsole_output <- renderPrint({
     input$rconsole_run
+    # isolate here means code only runs on button click
     isolate({
       code <- input$rconsole_input
       if (is.null(code) || trimws(code) == "") {
@@ -601,12 +595,16 @@ server <- function(input, output, session) {
     })
   })
   
+  # resets editor content, clean UX
   observeEvent(input$rconsole_clear, {
     shinyAce::updateAceEditor(session, "rconsole_input", value = "")
   })
   
   
 } # end server
+
+
+
 
 
 # =============================================================================
