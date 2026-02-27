@@ -140,6 +140,7 @@ theme_colours_for <- function(vars) {
 
 # ── GENERAL HELPER ───────────────────────────────────────────────────────────
 
+# sidebar note
 sidebar_note <- function(text) {
   div(
     style = "
@@ -156,6 +157,15 @@ sidebar_note <- function(text) {
     icon("info-circle", style = "color:#0d6efd;"),
     HTML(paste("&nbsp;", text))
   )
+}
+
+# plot title
+plot_title <- function(type, context = NULL) {
+  if (is.null(context) || context == "") {
+    type
+  } else {
+    paste(type, "—", context)
+  }
 }
 
 
@@ -626,6 +636,40 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
+    # ── UI GGPAIRS ────────────────────────────────────────────────────────
+    
+    tabPanel("GGPairs",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Suspecious Relationship and Density: <br><br>
+                                         This GGPairs graph is useful for quickly inspecting 
+                                         pairwise relationships, correlations, and marginal 
+                                         density distributions across multiple variables."),
+                            hr(),
+                            selectizeInput("gg_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            checkboxInput("gg_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.gg_group_on == true",
+                              selectInput("gg_group_var", "Group by:", choices = NULL),
+                              selectizeInput("gg_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),   # ← conditionalPanel closed here
+                            hr(),
+                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Plot. Large selections may be slow.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("gg_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
     
     tabPanel("Plot A",
@@ -900,6 +944,19 @@ server <- function(input, output, session) {
     
     par(mar = c(0, 0, 0, 0), bg = "white")
     
+    title(
+      main = plot_title(
+        "Word Cloud",
+        if (isTRUE(input$wc_varnames_mode)) {
+          "Variable Names"
+        } else {
+          paste("Values of", input$wc_var)
+        }
+      ),
+      cex.main = 1.2,
+      font.main = 2
+    )
+    
     wordcloud::wordcloud(
       words        = words,
       freq         = freqs_norm,
@@ -1029,8 +1086,7 @@ server <- function(input, output, session) {
                              text = paste0(Pattern, "\n", Count, " rows"))) +
       geom_col() +
       scale_fill_manual(values = c("complete" = "steelblue", "missing" = "tomato")) +
-      labs(title = "Anomaly Intersection Patterns",
-           x = "Row Count", y = NULL) +
+      labs(title = plot_title("UpSet", "Anomaly intersection patterns")) +
       theme_minimal(base_size = 11) +
       theme(legend.position = "none")
     
@@ -1147,8 +1203,10 @@ server <- function(input, output, session) {
                      linewidth = 0.6,
                      position  = position_dodge(width = 0.6)) +
         geom_point(size = 3, position = position_dodge(width = 0.6)) +
-        labs(title = paste0('Occurrences of "', val, '" — grouped by ', input$vc_group_var),
-             x = y_label, y = NULL) +
+        labs(title = plot_title(
+          "Lollipop",
+          paste0('Occurrences of "', val, '" grouped by ', input$vc_group_var)
+        )) +
         theme_minimal(base_size = 11)
       
     } else {
@@ -1157,8 +1215,10 @@ server <- function(input, output, session) {
         geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column),
                      colour = "steelblue", linewidth = 0.8) +
         geom_point(colour = "steelblue", size = 3) +
-        labs(title = paste0('Occurrences of "', val, '" across Selected Columns'),
-             x = y_label, y = NULL) +
+        labs(title = plot_title(
+          "Lollipop",
+          paste0('Occurrences of "', val, '" grouped by ', input$vc_group_var)
+        )) +
         theme_minimal(base_size = 11)
     }
     
@@ -1200,11 +1260,104 @@ server <- function(input, output, session) {
                                              "<br>Value: ",      round(Value, 3)))) +
       geom_line(linewidth = input$rising_lwd / 3, linetype = input$rising_lty) +
       scale_colour_manual(values = colours) +
-      labs(title = "Rising Value Chart", x = "Percentile", y = "Value") +
+      labs(title = plot_title("Rising Value", "Sorted Distribution by Percentile")) +
       theme_minimal(base_size = 11) +
       theme(legend.position = "right")
     
     ggplotly(p, tooltip = "text")
+  })
+  
+  
+  # ── SERVER GGPAIRS ─────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    all_vars     <- names(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    default_gg_vars <- c("Sensor4", "Sensor8", "Sensor11", "Sensor16", "Sensor22", "Sensor24", "Sensor28")
+    updateSelectizeInput(session, "gg_vars", choices  = all_vars, selected = intersect(default_gg_vars, all_vars))
+    updateSelectInput(session, "gg_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # populate level choices when group variable changes
+  observeEvent(input$gg_group_var, {
+    req(input$gg_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$gg_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "gg_group_levels",
+                         choices  = lvls,
+                         selected = lvls)
+  })
+  
+  output$gg_plot <- renderPlot({
+    input$gg_run
+    isolate({
+      req(input$gg_vars)
+      df <- display_data()
+      validate(need(length(input$gg_vars) >= 2, "Please select at least 2 variables."))
+      
+      if (input$gg_group_on && !is.null(input$gg_group_var)) {
+        
+        grp <- input$gg_group_var
+        
+        # build df with selected vars + group col, drop NAs in group
+        plot_df <- df[, c(input$gg_vars, grp), drop = FALSE]
+        plot_df <- plot_df[!is.na(plot_df[[grp]]), ]
+        
+        # filter to selected levels only
+        if (!is.null(input$gg_group_levels) && length(input$gg_group_levels) > 0) {
+          plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$gg_group_levels, ]
+          plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))  # drop unused levels from legend
+        }
+        
+        # columns to plot = only the selected vars (not the group col)
+        col_idx <- seq_along(input$gg_vars)
+        
+        GGally::ggpairs(
+          plot_df,
+          columns  = col_idx,
+          mapping  = aes(colour = .data[[grp]], alpha = 0.6),
+          upper    = list(
+            continuous = GGally::wrap("cor", size = 2.5),
+            combo      = GGally::wrap("box_no_facet", alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          lower    = list(
+            continuous = GGally::wrap("points", alpha = 0.3, size = 0.8),
+            combo      = GGally::wrap("facethist", bins = 20, alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          diag     = list(
+            continuous = GGally::wrap("densityDiag", alpha = 0.5),
+            discrete   = GGally::wrap("barDiag", alpha = 0.5)
+          ),
+          legend   = 1  # show legend
+        ) +
+          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme(
+            strip.text  = element_text(size = 7),
+            legend.position = "bottom"
+          ) +
+          ggplot2::labs(title = plot_title("GGPairs", paste("Grouped by", grp)))
+        
+      } else {
+        
+        plot_df <- df[, input$gg_vars, drop = FALSE]
+        
+        GGally::ggpairs(
+          plot_df,
+          upper = list(continuous = GGally::wrap("cor", size = 3)),
+          lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
+          diag  = list(continuous = GGally::wrap("densityDiag"))
+        ) +
+          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme(strip.text = element_text(size = 7))
+      }
+    })
   })
   
   

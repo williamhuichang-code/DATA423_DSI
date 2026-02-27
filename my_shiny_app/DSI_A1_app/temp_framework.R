@@ -142,6 +142,7 @@ theme_colours_for <- function(vars) {
 
 # ── GENERAL HELPER ───────────────────────────────────────────────────────────
 
+# sidebar note
 sidebar_note <- function(text) {
   div(
     style = "
@@ -158,6 +159,15 @@ sidebar_note <- function(text) {
     icon("info-circle", style = "color:#0d6efd;"),
     HTML(paste("&nbsp;", text))
   )
+}
+
+# plot title
+plot_title <- function(type, context = NULL) {
+  if (is.null(context) || context == "") {
+    type
+  } else {
+    paste0(type, "\n", context)
+  }
 }
 
 
@@ -661,7 +671,7 @@ server <- function(input, output, session) {
                                              "<br>Value: ",      round(Value, 3)))) +
       geom_line(linewidth = input$rising_lwd / 3, linetype = input$rising_lty) +
       scale_colour_manual(values = colours) +
-      labs(title = "Rising Value Chart", x = "Percentile", y = "Value") +
+      labs(title = plot_title("Rising Value", "Sorted Distribution by Percentile")) +
       theme_minimal(base_size = 11) +
       theme(legend.position = "right")
     
