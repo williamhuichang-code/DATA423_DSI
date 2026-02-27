@@ -383,9 +383,9 @@ server <- function(input, output, session) {
   rconsole_env <- new.env(parent = globalenv())
   
   
-  # ── SERVER SECURITY REACTIVE ─────────────────────────────────────────────
+  # ── SERVER SECURITY REACTIVE ───────────────────────────────────────────
   
-  # ·· LOCK STATE UPDATE ················································
+  # ·· LOCK STATE UPDATE ··············································
   
   # single reactive value drives everything security-related
   is_unlocked <- reactiveVal(FALSE)
@@ -422,7 +422,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ·· DATASET SELECTOR UI ··············································
+  # ·· DATASET SELECTOR UI ············································
   
   output$dataset_selector_ui <- renderUI({
     choices <- c("Raw Dataset", "Enriched Dataset", "Model Dataset")
@@ -458,7 +458,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── GLOBAL DATASET STAGE ─────────────────────────────────────────────────
+  # ── GLOBAL DATASET STAGE ───────────────────────────────────────────────
   
   # Note: everything downstream will read from display_data()
   
@@ -484,7 +484,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER DATA TABLE ────────────────────────────────────────────────────
+  # ── SERVER DATA TABLE ──────────────────────────────────────────────────
   
   output$data_table <- DT::renderDataTable({
     df <- head(display_data(), 1000)
@@ -494,7 +494,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER SUMMARY ───────────────────────────────────────────────────────
+  # ── SERVER SUMMARY ─────────────────────────────────────────────────────
   
   output$summary_output <- renderPrint({
     df <- display_data()
@@ -505,7 +505,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER PLOT A EXAMPLE ────────────────────────────────────────────────
+  # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
   
   # user sidebar action collection layer (reactive auto-detect)
   observe({
@@ -525,16 +525,16 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER R CONSOLE ─────────────────────────────────────────────────────
+  # ── SERVER R CONSOLE ───────────────────────────────────────────────────
   
   # the entire UI is replaced with a lock screen when not authenticated
   
-  # ·· CONDITIONAL UI (LOCK GATE) ·······································
+  # ·· CONDITIONAL UI (LOCK GATE) ·····································
   
   output$rconsole_body_ui <- renderUI({
     
     if (!is_unlocked()) {
-      # ── locked state: show a friendly gate ───────────────────────────────
+      # ~~ locked state: show a friendly gate ~~
       div(style = "text-align:center; margin-top:120px; color:#6c757d;",
           icon("lock", style = "font-size:48px;"),
           h4("R Console is locked for developer only."),
@@ -542,7 +542,7 @@ server <- function(input, output, session) {
       )
       
     } else {
-      # ── unlocked state: render full console ──────────────────────────────
+      # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
                      helpText("Run R expressions against the current dataset."),
@@ -570,7 +570,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ·· CONTROLLED CODE EXECUTION ········································
+  # ·· CONTROLLED CODE EXECUTION ······································
   
   output$rconsole_output <- renderPrint({
     input$rconsole_run
