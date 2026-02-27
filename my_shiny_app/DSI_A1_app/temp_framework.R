@@ -3,10 +3,6 @@
 # Loaded once when the app starts. Shared across all sessions.
 # =================================================================================
 
-# Note: 
-#   global file
-
-
 # ── LIBRARY ──────────────────────────────────────────────────────────────────
 
 library(shiny)

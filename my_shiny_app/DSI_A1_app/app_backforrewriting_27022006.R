@@ -1,0 +1,1767 @@
+# =============================================================================
+# global.R
+# Loaded once when the app starts. Shared across all sessions.
+# =============================================================================
+
+# Note: 
+#   global file defines features related to dataset
+#   UI, server files should be universally applicable
+
+library(shiny)
+library(shinyAce)
+library(dplyr)
+library(vcd)
+library(DT)
+library(GGally)
+library(ggplot2)
+library(plotly)
+library(wordcloud)
+library(corrplot)
+library(reshape2)
+library(Hmisc)
+
+# load the raw dataset
+raw_dataset <- read.csv("Ass1Data.csv", header = TRUE, stringsAsFactors = FALSE)
+
+# create a copy of raw dataset (R use copy-on-modify)
+ds_copied <- raw_dataset
+
+# standardise all the col names with initial capital naming style
+ds_renamed <- ds_copied %>% 
+  rename_with(~ tools::toTitleCase(.x))  # e.g., sensors have bad names
+
+# define what cols are sensitive for privacy concern
+private_cols <- c("ID") # could be e.g., "ID", "Date"
+
+# master column order — all datasets follow this, skipping cols that don't exist
+master_col_order <- c(
+  # target
+  "Y",
+  # identifiers and operators
+  "IdGroup", "ID", "Operator", 
+  # date and derived factors
+  "Date", "Year", "Season", "Month", "Day", "Weekday", "Week", 
+  # cyclic encodings
+  "Season_sin", "Season_cos", "Month_sin", "Month_cos",
+  # context
+  "Priority", "Price", "Speed", "Duration", "Temp",
+  "Location", "Agreed", "State", "Class", "Surface",
+  # raw sensors
+  paste0("Sensor", 1:30),
+  # sensor group 1 (averaged raw)
+  "SensorGroup1", "SensorGroup2", "SensorGroup3",
+  # centred sensor group (subtract mean)
+  "CenterSG1", "CenterSG2", "CenterSG3",
+  # standardised sensor group (z-score)
+  "StandardisedSG1", "StandardisedSG2", "StandardisedSG3",
+  # normalised sensor group (min-max)
+  "NormalisedSG1", "NormalisedSG2", "NormalisedSG3"
+)
+
+# helper function: reorder a df by master order, skipping missing cols
+reorder_cols <- function(df) {
+  keep <- master_col_order[master_col_order %in% names(df)]  # only cols that exist
+  df[, keep]
+}
+
+
+# validate dataset with schema
+# - predefine a schema
+schema <- list(
+  numeric_cols = c("Y", grep("^Sensor", names(ds_copied), value = TRUE)),
+  date_cols    = "Date",
+  factor_cols  = c("ID", "Operator", "Priority", "Price",
+                   "Speed", "Duration", "Temp", "Location",
+                   "Agreed", "State", "Class", "Surface")
+)
+
+# - explicitly apply proper schema to our dataset, and solve name issues
+ds_typed <- ds_renamed %>%
+  
+  # - assigning schema
+  mutate(
+    across(all_of(schema$numeric_cols), as.numeric),
+    across(all_of(schema$factor_cols),  as.factor),
+    across(all_of(schema$date_cols),    as.Date)
+  ) %>% 
+  
+  # - manually defining level order for potential ordinal factors
+  # - (has to be strict, since no context provided)
+  mutate(
+    Priority = factor(Priority, levels = c("Low", "Medium", "High"),      ordered = TRUE),
+    Price    = factor(Price,    levels = c("Expensive", "Fair", "Cheap"), ordered = TRUE),
+    Speed    = factor(Speed,    levels = c("Slow", "Medium", "Fast"),     ordered = TRUE),
+    Duration = factor(Duration, levels = c("Short", "Long", "Very Long"), ordered = TRUE),
+    Temp     = factor(Temp,     levels = c("Cold", "Warm", "Hot"),        ordered = TRUE),
+    Agreed   = factor(Agreed,   levels = c("No", "Yes"))
+  )
+
+
+# enrich the dataset with new cols
+ds_col_enriched <- ds_typed %>%
+  
+  # - derive IdGroup, ID values start with significant pattern of G type and D type
+  mutate(
+    IdGroup = as.factor(substr(as.character(ID), 1, 1)),  # ID group info subtracted from the 1st letter in ID
+  ) %>% 
+  
+  # - derive meaningful cyclic info from Date, including Year, Season, Month, Day
+  mutate(
+    
+    # many years use numeric, for its potential monotonic trend, good for correlation / time trend plots
+    # but, few years prefer factor, purely categorical regimes
+    # day mostly noise, but just curious about its day-wise distribution in histogram, so better numeric
+    Year   = factor(format(Date, "%Y")),
+    Month  = as.integer(format(Date, "%m")),
+    # given the data only falls on Thursdays and Fridays, day-of-month is likely just noise
+    # Day    = as.integer(format(Date, "%d")),
+    Weekday = factor(format(Date, "%A")),
+    Week = as.integer(format(Date, "%V")),  # ISO week number 1-53
+    Season = factor(
+      case_when(
+        Month %in% 1:3   ~ "S1",
+        Month %in% 4:6   ~ "S2",
+        Month %in% 7:9   ~ "S3",
+        Month %in% 10:12 ~ "S4"
+      )),
+    # cyclic encodings — computed before Month is converted to factor
+    Month_sin  = sin(2 * pi * Month / 12),
+    Month_cos  = cos(2 * pi * Month / 12),
+    Season_sin = sin(2 * pi * as.integer(Season) / 4),  # S1=1 … S4=4
+    Season_cos = cos(2 * pi * as.integer(Season) / 4),
+    Month      = factor(Month)   # convert to factor last, after sin/cos done
+  ) %>% 
+  
+  # - sensor patterns, including grouping and feature scaling
+  mutate(
+    # - sensor groups based on boxplot patterns
+    SensorGroup1 = as.numeric(rowMeans(across(Sensor1:Sensor10), na.rm = TRUE)),   # dimensionality reduction with sensor groups
+    SensorGroup2 = as.numeric(rowMeans(across(Sensor11:Sensor20), na.rm = TRUE)),  # based on value pattern similarities across sensors
+    SensorGroup3 = as.numeric(rowMeans(across(Sensor21:Sensor30), na.rm = TRUE)),  # making it a perfect choice and can handle NAs
+    # - centering (subtract mean, mean becomes 0, spread preserved)
+    CenterSG1 = SensorGroup1 - mean(SensorGroup1, na.rm = TRUE),
+    CenterSG2 = SensorGroup2 - mean(SensorGroup2, na.rm = TRUE),
+    CenterSG3 = SensorGroup3 - mean(SensorGroup3, na.rm = TRUE),
+    # - Z-score standardisation (mean=0, SD=1)
+    StandardisedSG1 = as.numeric(scale(SensorGroup1, center = TRUE, scale = TRUE)),
+    StandardisedSG2 = as.numeric(scale(SensorGroup2, center = TRUE, scale = TRUE)),
+    StandardisedSG3 = as.numeric(scale(SensorGroup3, center = TRUE, scale = TRUE)),
+    # - min-max normalisation (rescales to [0, 1])
+    NormalisedSG1 = (SensorGroup1 - min(SensorGroup1, na.rm = TRUE)) /
+      (max(SensorGroup1, na.rm = TRUE) - min(SensorGroup1, na.rm = TRUE)),
+    NormalisedSG2 = (SensorGroup2 - min(SensorGroup2, na.rm = TRUE)) /
+      (max(SensorGroup2, na.rm = TRUE) - min(SensorGroup2, na.rm = TRUE)),
+    NormalisedSG3 = (SensorGroup3 - min(SensorGroup3, na.rm = TRUE)) /
+      (max(SensorGroup3, na.rm = TRUE) - min(SensorGroup3, na.rm = TRUE))
+  )
+
+# enrich the dataset by examining proper rows (place holder)
+#  - could be clean dataset, since we don't want NA in some cases (place holder)
+enriched_dataset <- ds_col_enriched %>% 
+  reorder_cols()
+
+enriched_dataset <- enriched_dataset %>%
+  mutate(
+    S6NaFlag = factor(is.na(Sensor6)),
+    Pri_Temp = factor(interaction(Price, Temp, sep = "_")))  # trial for variable testing
+
+# model dataset, since we don't need ID, Date and maybe Sensor1-30 as well for further modelling
+model_dataset <- enriched_dataset %>% 
+  select(-ID, -Date, -matches("^Sensor\\d+$")) %>%   # drop those cols not needed for modelling
+  reorder_cols()
+
+
+
+# =============================================================================
+# ui.R
+# Tabbed layout — one tab per visualisation style.
+# =============================================================================
+
+# UI
+ui <- fluidPage(
+  
+  # ── GLOBAL DS DROPDOWN ─────────────────────────────────────────────────────
+  
+  # global dropdown choces for dataset at different stages
+  fluidRow(
+    
+    # dataset stage choices
+    column(2, selectInput("dataset_choice", "Choose Dataset Stage:",
+                          choices = c("Raw Dataset", "Enriched Dataset", "Model Dataset"),
+                          selected = "Enriched Dataset")),
+    
+    # dataset hint
+    column(1, actionButton("dataset_info", label = NULL,
+                           icon  = icon("circle-info"),
+                           style = "margin-top: 25px; font-size: 20px;
+                                color: #0d6efd; background: none;
+                                border: none; padding: 0;")),
+    
+    # spacer pushes privacy to the right
+    column(6),
+    
+    # private control
+    column(3,
+           div(style = "margin-top: 20px; display: flex; align-items: center; gap: 8px;",
+               passwordInput("privacy_pass", label = NULL,
+                             placeholder = "Enter passphrase to unlock",
+                             width = "200px"),
+               actionButton("privacy_unlock", label = NULL, icon = icon("lock"),
+                            style = "padding: 6px 10px;"),
+               uiOutput("privacy_status")
+           ))
+    
+  ),  # end of fluid row
+  
+  
+  # ── TABS ───────────────────────────────────────────────────────────────────
+  
+  # tabs panels
+  tabsetPanel(
+    
+    # ── TAB TABLE ────────────────────────────────────────────────────────────
+    
+    tabPanel("Data Table",   DT::dataTableOutput("data_table")),  # end of tab panel
+    
+    
+    # ── TAB SUMMARY ──────────────────────────────────────────────────────────
+    
+    tabPanel("Summary",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            radioButtons("summary_style", "Summary Style:",
+                                         choices = c("Base R"      = "base",
+                                                     "Glimpse"     = "glimpse",
+                                                     "dfSummary"   = "dfsummary"),
+                                         selected = "glimpse")
+               ),
+               mainPanel(width = 10,
+                         verbatimTextOutput("data_summary")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB UPSET ────────────────────────────────────────────────────────────
+    tabPanel("UpSet",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            helpText("Shows which combinations of columns have missing values together, and how many rows fall into each pattern."),
+                            selectizeInput("upset_cols", "Columns to include:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            numericInput("upset_top", "Show top N combinations:", value = 20, min = 1),
+                            hr(),
+                            radioButtons("upset_sort", "Sort bars by:",
+                                         choices  = c("Frequency" = "freq", "Combination" = "combo"),
+                                         selected = "freq")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("upset_plot", height = "80vh")
+               )
+             )
+    ),
+    
+    
+    # ── TAB LOLLIPOP ─────────────────────────────────────────────────────────
+    
+    tabPanel("Lollipop",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            
+                            textInput("vc_value", "Value to count:",
+                                      value = "NA",
+                                      placeholder = "e.g. Yes, High, NA"),
+                            
+                            checkboxInput("vc_case", "Case sensitive", value = FALSE),
+                            
+                            hr(),
+                            checkboxInput("vc_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.vc_group_on == true",
+                              selectInput("vc_group_var", "Group by:", choices = NULL),
+                              selectizeInput("vc_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),
+                            
+                            hr(),
+                            selectizeInput("vc_cols", "Search in columns:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            
+                            selectInput("vc_metric", "Show as:",
+                                        choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
+                            
+                            sliderInput("vc_min_count", "Min count to display:",
+                                        min = 0, max = 50, value = 0, step = 1),
+                            
+                            hr(),
+                            radioButtons("vc_sort", "Sort by:",
+                                         choices  = c("Column order"     = "col",
+                                                      "Ascending value"  = "asc",
+                                                      "Descending value" = "desc"),
+                                         selected = "desc"),
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("vc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB RISING ORDER ─────────────────────────────────────────────────────
+    
+    tabPanel("Rising Order",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectizeInput("rising_var",
+                                           "Select numeric variable:",
+                                           choices = NULL,
+                                           multiple = TRUE)
+               ),
+               mainPanel(width = 10,
+                         plotlyOutput("rising_plot", height = "80vh")  # was plotOutput
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB Q-Q PLOT ──────────────────────────────────────────────────────────
+    
+    tabPanel("Q-Q Plot",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            selectInput("qq_var", "Select Variable:", choices = NULL),
+                            selectInput("qq_dist", "Distribution:", 
+                                        choices = c("Normal" = "norm", 
+                                                    "Exponential" = "exp", 
+                                                    "Log-normal" = "lnorm", 
+                                                    "Gamma" = "gamma", 
+                                                    "Weibull" = "weibull")),
+                            hr(),
+                            h4("Distribution Parameters"),
+                            uiOutput("qq_params"), # dynamic UI for parameters
+                            hr(),
+                            checkboxInput("qq_line", "Show Reference Line", value = TRUE)
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("qq_plot", height = "80vh")  # was plotOutput
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB MOSAIC ───────────────────────────────────────────────────────────
+    
+    tabPanel("Mosaic",
+             sidebarLayout(
+               sidebarPanel(width = 2,   # 2/12 = ~17%, narrow sidebar
+                            
+                            # side bar for mosaic plot controls
+                            uiOutput("mosaic_x_ui"),
+                            uiOutput("mosaic_y_ui"),
+                            uiOutput("mosaic_z_ui"),
+                            checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
+                            
+                            hr(),
+                            
+                            # side bar for mosaic pair advisor controls
+                            strong("Pair Advisor"),
+                            br(),
+                            helpText("Ranks variable combinations by Cramér's V (effect size). Higher = stronger association."),
+                            br(),
+                            radioButtons("pairs_way", "Combinations:",
+                                         choices = c("2-way", "3-way"), selected = "2-way",
+                                         inline = TRUE),
+                            numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
+                            actionButton("pairs_search", "Find Pairs", icon = icon("search"), width = "100%"),
+                            br(), br(),
+                            helpText("Click a row to load variables into the plot above.")
+               ),
+               
+               mainPanel(
+                 width = 10,     # must add up to 12
+                 
+                 # mosaic plotting
+                 plotOutput("mosaic_plot", height = "90vh"),
+                 
+                 hr(),
+                 
+                 # pair advisor results (hidden until Search clicked)
+                 conditionalPanel(
+                   condition = "input.pairs_search > 0",
+                   h4("Pair Advisor Results — ranked by Cramér's V"),
+                   helpText("Cramér's V: 0.1 = weak, 0.3 = moderate, 0.5+ = strong. Not inflated by sample size."),
+                   helpText("3-way score = average Cramér's V across the 3 possible pairs within the trio."),
+                   DTOutput("pairs_table")
+                 )
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB SEQUENCE PLOT ────────────────────────────────────────────────────
+    
+    # tabPanel("Sequence Plot",
+    #          sidebarLayout(
+    #            sidebarPanel(width = 2,
+    #                         selectizeInput("seq_var", "Variables to plot:",
+    #                                        choices  = NULL,
+    #                                        multiple = TRUE),
+    #                         hr(),
+    #                         selectInput("seq_sort_var", "Sort by:", choices = NULL),
+    #                         radioButtons("seq_sort_dir", "Sort direction:",
+    #                                      choices  = c("Ascending" = "asc", "Descending" = "desc"),
+    #                                      selected = "asc", inline = TRUE)
+    #            ),
+    #            mainPanel(width = 10,
+    #                      plotOutput("seq_plot", height = "80vh")
+    #            )
+    #          )
+    # ),  # end of tab panel
+    
+    
+    # ── TAB GGPAIRS ──────────────────────────────────────────────────────────
+    
+    tabPanel("GGPairs",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectizeInput("gg_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            checkboxInput("gg_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.gg_group_on == true",
+                              selectInput("gg_group_var", "Group by:", choices = NULL),
+                              selectizeInput("gg_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),   # ← conditionalPanel closed here
+                            hr(),
+                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Plot. Large selections may be slow.")
+               ),
+               mainPanel(width = 10,
+                         plotOutput("gg_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB CORRELATION ──────────────────────────────────────────────────────
+    
+    tabPanel("Correlation",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            
+                            # variable selection
+                            selectizeInput("cor_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "Default: all numeric")),
+                            
+                            hr(),
+                            
+                            # method
+                            radioButtons("cor_method", "Correlation method:",
+                                         choices  = c("Pearson"  = "pearson",
+                                                      "Spearman" = "spearman",
+                                                      "Kendall"  = "kendall"),
+                                         selected = "pearson"),
+                            
+                            hr(),
+                            
+                            # threshold filter
+                            sliderInput("cor_threshold", "Collinearity threshold:",
+                                        min   = 0,
+                                        max   = 1,
+                                        value = 1,      # default = keep all
+                                        step  = 0.01),
+                            helpText("1.00 = keep all variables.",
+                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
+                                     "0.00 = extremely strict, keeps only uncorrelated variables."),
+                            
+                            hr(),
+                            
+                            # NA handling
+                            selectInput("cor_na", "Handle NAs:",
+                                        choices  = c("pairwise.complete.obs", "complete.obs"),
+                                        selected = "pairwise.complete.obs")
+                            
+               ),
+               
+               mainPanel(width = 9,
+                         plotlyOutput("cor_plot_gg", height = "90vh"),
+                         hr(),
+                         h4("Correlation Matrix"),
+                         DTOutput("cor_table")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB BOXPLOT ──────────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot",
+             sidebarLayout(
+               sidebarPanel(width = 2,
+                            selectizeInput("box_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            checkboxInput("box_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.box_group_on == true",
+                              selectInput("box_group_var", "Group by:", choices = NULL),
+                              selectizeInput("box_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),
+                            hr(),
+                            checkboxInput("box_violin", "Show as violin", value = FALSE),
+               ),
+               mainPanel(width = 10,
+                         plotlyOutput("box_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── TAB WORD CLOUD ───────────────────────────────────────────────────────
+    
+    tabPanel("Word Cloud",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            selectInput("wc_var", "Categorical variable:",
+                                        choices = NULL),
+                            hr(),
+                            checkboxInput("wc_case", "Case sensitive", value = TRUE),
+                            hr(),
+                            radioButtons("wc_split_mode", "Token split mode:",
+                                         choices = c(
+                                           "None (whole value)"   = "none",
+                                           "Individual characters" = "chars",
+                                           "Alpha / numeric runs"  = "alphanum"
+                                         ),
+                                         selected = "none"),
+                            hr(),
+                            sliderInput("wc_max_words", "Max words to show:",
+                                        min = 10, max = 500, value = 360, step = 10),
+                            sliderInput("wc_min_freq", "Min frequency:",
+                                        min = 1, max = 50, value = 1, step = 1),
+                            hr(),
+                            selectInput("wc_palette", "Colour palette:",
+                                        choices = c("Dark2", "Set1", "Set2", "Set3",
+                                                    "Paired", "Accent", "Spectral"),
+                                        selected = "Dark2"),
+                            hr(),
+                            helpText("Font size is proportional to frequency.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("wc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── R CONSOLE ──────────────────────────────────────────────────────────────
+    
+    tabPanel("R Console",
+             uiOutput("rconsole_body")
+    ),
+    
+    
+    
+    
+  ) # end tabsetPanel
+)   # end fluidPage
+
+
+# =============================================================================
+# server.R
+# =============================================================================
+
+server <- function(input, output, session) {
+  
+  rconsole_env <- new.env(parent = globalenv())
+  
+  # ── SERVER GLOBAL REACTIVE ────────────────────────────────────────────────────────
+  
+  # switch dataset based on drop down
+  selected_data <- reactive({
+    switch(input$dataset_choice,
+           "Raw Dataset"      = raw_dataset,
+           "Enriched Dataset" = enriched_dataset,
+           "Model Dataset"  = model_dataset,
+           NULL)
+  })
+  
+  observeEvent(input$dataset_info, {
+    showModal(modalDialog(
+      title = "Dataset Stages Explained",
+      tags$dl(
+        tags$dt("Note: Dataset selection is global and applies consistently across all tabs in the app."),
+        tags$br(),
+        tags$dt("Raw Dataset"),
+        tags$dd("Original CSV as loaded. No modifications — includes ID, Date, all Sensor1–30 columns."),
+        tags$dt("Enriched Dataset"),
+        tags$dd("Raw + derived columns: IdGroup (from ID prefix), Year/Season/Month/Day (from Date),
+                SensorGroup1–3 (row means of sensor bands), plus centred, standardised, and normalised variants.
+                Sensor columns were renamed with consistent initial capitalisation as well."),
+        tags$dt("Model Dataset"),
+        tags$dd("Trimmed dataset from enriched one with ID, Date, and Sensor1–30 dropped. Cleaner view for modelling.")
+      ),
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
+  })
+  
+  
+  # ── SERVER PRIVACY CONTROL ──────────────────────────────────────────────────────
+  
+  # hardcoded passphrase
+  UNLOCK_PASSPHRASE <- "123"
+  
+  privacy_unlocked <- reactiveVal(FALSE)
+  
+  observeEvent(input$privacy_unlock, {
+    if (privacy_unlocked()) {
+      # already unlocked, lock it again (toggle / logout)
+      privacy_unlocked(FALSE)
+      updateTextInput(session, "privacy_pass", value = "")
+    } else {
+      # try to unlock
+      if (!is.null(input$privacy_pass) && input$privacy_pass == UNLOCK_PASSPHRASE) {
+        privacy_unlocked(TRUE)
+        updateTextInput(session, "privacy_pass", value = "")
+      } else {
+        showNotification("Incorrect passphrase.", type = "error", duration = 3)
+      }
+    }
+  })
+  
+  # update the lock icon and status text reactively
+  output$privacy_status <- renderUI({
+    if (privacy_unlocked()) {
+      tagList(
+        actionButton("privacy_lock_btn", label = NULL, icon = icon("unlock"),
+                     style = "color: #198754; background: none; border: none; font-size: 18px; padding: 0;",
+                     title = "Click to lock"),
+        span("Full access", style = "color: #198754; font-size: 12px;")
+      )
+    } else {
+      span(icon("lock"), " Private Mode (123)", style = "color: #6c757d; font-size: 12px;")
+    }
+  })
+  
+  # the privacy-aware data accessor
+  display_data <- reactive({
+    df <- selected_data()
+    if (privacy_unlocked()) {
+      df  # full data
+    } else {
+      # drop private cols that actually exist in this dataset stage
+      cols_to_drop <- intersect(private_cols, names(df))
+      if (length(cols_to_drop) > 0) df[, !names(df) %in% cols_to_drop, drop = FALSE]
+      else df
+    }
+  })
+  
+  
+  # ── SERVER TABLE ──────────────────────────────────────────────────────────────
+  # (renderTable cannot handle date format well, so changed to DT::dataTableOutput)
+  output$data_table <- DT::renderDataTable({
+    # instead of head(display_data(), 1000), this new code adds col info as well
+    df <- head(display_data(), 1000)
+    # can add "switch dataset stage to explore different dimensional views"
+    DT::datatable(df, caption = paste0(input$dataset_choice, " Dimensions: ", nrow(df), " × ", ncol(df)))
+  })
+  
+  
+  # ── SERVER SUMMARY ────────────────────────────────────────────────────────────
+  
+  output$data_summary <- renderPrint({
+    df <- display_data()
+    switch(input$summary_style,
+           "base"      = summary(df),
+           "glimpse"   = tibble::glimpse(df),
+           "dfsummary" = summarytools::dfSummary(df)
+    )
+  })
+  
+  
+  # ── SERVER UPSET ──────────────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    # default to columns that actually have NAs
+    na_cols <- names(df)[sapply(df, function(x) any(is.na(x)))]
+    if (length(na_cols) == 0) na_cols <- names(df)  # fallback if no NAs
+    updateSelectizeInput(session, "upset_cols", choices = names(df), selected = na_cols)
+  })
+  
+  output$upset_plot <- renderPlotly({
+    req(input$upset_cols)
+    df <- display_data()
+    validate(need(length(input$upset_cols) >= 1, "Please select at least 1 column."))
+    
+    df_sub <- df[, input$upset_cols, drop = FALSE]
+    
+    # build binary NA matrix (1 = missing, 0 = present)
+    na_mat <- as.data.frame(lapply(df_sub, function(x) as.integer(is.na(x))))
+    
+    # create a pattern string per row e.g. "Sensor1&Sensor3"
+    patterns <- apply(na_mat, 1, function(row) {
+      cols_missing <- input$upset_cols[row == 1]
+      if (length(cols_missing) == 0) return("(complete)")
+      paste(cols_missing, collapse = " & ")
+    })
+    
+    # count each pattern
+    pattern_counts <- sort(table(patterns), decreasing = TRUE)
+    pattern_counts <- head(pattern_counts, input$upset_top)
+    
+    plot_df <- data.frame(
+      Pattern = names(pattern_counts),
+      Count   = as.integer(pattern_counts)
+    )
+    
+    # sort
+    if (input$upset_sort == "freq") {
+      plot_df <- plot_df[order(-plot_df$Count), ]
+    } else {
+      plot_df <- plot_df[order(plot_df$Pattern), ]
+    }
+    
+    plot_df$Pattern <- factor(plot_df$Pattern, levels = rev(plot_df$Pattern))
+    
+    # colour complete rows differently
+    plot_df$Colour <- ifelse(plot_df$Pattern == "(complete)", "complete", "missing")
+    
+    p <- ggplot(plot_df, aes(x = Count, y = Pattern, fill = Colour,
+                             text = paste0(Pattern, "\n", Count, " rows"))) +
+      geom_col() +
+      scale_fill_manual(values = c("complete" = "steelblue", "missing" = "tomato")) +
+      labs(title = "Missing Value Intersection Patterns",
+           x = "Row Count", y = NULL) +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "none")
+    
+    ggplotly(p, tooltip = "text") %>% layout(showlegend = FALSE)
+  })
+  
+  
+  # ── SERVER LOLLIPOP ───────────────────────────────────────────────────────────
+  
+  observe({
+    df   <- display_data()
+    req(df)
+    all_cols <- names(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectizeInput(session, "vc_cols",      choices = all_cols, selected = all_cols)
+    updateSelectInput(   session, "vc_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # populate group levels when group variable changes
+  observeEvent(input$vc_group_var, {
+    req(input$vc_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$vc_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    # append (NA) as selectable level only if the grouping variable actually has NAs
+    if (any(is.na(df[[input$vc_group_var]]))) lvls <- c(lvls, "(NA)")
+    updateSelectizeInput(session, "vc_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  output$vc_plot <- renderPlotly({
+    req(input$vc_value, input$vc_cols)
+    df  <- display_data()
+    val <- input$vc_value
+    
+    # helper: count occurrences in a single df
+    count_val <- function(data, cols, val, case_sensitive) {
+      results <- lapply(cols, function(col) {
+        x     <- data[[col]]
+        total <- length(x)
+        n_match <- if (toupper(val) == "NA") {
+          sum(is.na(x))
+        } else if (case_sensitive) {
+          sum(as.character(x) == val, na.rm = TRUE)
+        } else {
+          sum(tolower(as.character(x)) == tolower(val), na.rm = TRUE)
+        }
+        data.frame(Column = col, Count = n_match,
+                   Pct = round(n_match / total * 100, 1), Total = total)
+      })
+      do.call(rbind, results)
+    }
+    
+    # grouped or ungrouped
+    if (input$vc_group_on && !is.null(input$vc_group_var)) {
+      
+      grp  <- input$vc_group_var
+      lvls <- if (!is.null(input$vc_group_levels) && length(input$vc_group_levels) > 0)
+        input$vc_group_levels
+      else
+        sort(unique(as.character(df[[grp]])))
+      
+      # compute counts per level — treat "(NA)" as a real level by subsetting on is.na()
+      plot_df <- do.call(rbind, lapply(lvls, function(lv) {
+        sub <- if (lv == "(NA)") {
+          df[is.na(df[[grp]]), ]
+        } else {
+          df[!is.na(df[[grp]]) & as.character(df[[grp]]) == lv, ]
+        }
+        res       <- count_val(sub, input$vc_cols, val, input$vc_case)
+        res$Group <- lv
+        res
+      }))
+      
+    } else {
+      plot_df        <- count_val(df, input$vc_cols, val, input$vc_case)
+      plot_df$Group  <- "All"
+    }
+    
+    # apply min count filter
+    # filter keeps a column if ANY group for that column passes the threshold
+    cols_pass <- unique(plot_df$Column[plot_df$Count >= input$vc_min_count])
+    plot_df   <- plot_df[plot_df$Column %in% cols_pass, ]
+    validate(need(nrow(plot_df) > 0, "No columns meet the minimum count threshold."))
+    
+    # sort
+    sort_col <- if (input$vc_metric == "count") "Count" else "Pct"
+    # sort by the max value across groups per column, for stable ordering
+    col_order <- tapply(plot_df[[sort_col]], plot_df$Column, max)
+    if (input$vc_sort == "desc") {
+      col_order <- names(sort(col_order, decreasing = TRUE))
+    } else if (input$vc_sort == "asc") {
+      col_order <- names(sort(col_order, decreasing = FALSE))
+    } else {
+      col_order <- input$vc_cols[input$vc_cols %in% names(col_order)]
+    }
+    plot_df$Column <- factor(plot_df$Column, levels = rev(col_order))
+    
+    # labels & y value
+    y_val   <- if (input$vc_metric == "count") plot_df$Count else plot_df$Pct
+    y_label <- if (input$vc_metric == "count") "Count" else "Percentage (%)"
+    plot_df$y_val <- y_val
+    plot_df$label <- if (input$vc_metric == "count") {
+      paste0(plot_df$Column, " [", plot_df$Group, "]: ", plot_df$Count, " / ", plot_df$Total)
+    } else {
+      paste0(plot_df$Column, " [", plot_df$Group, "]: ", plot_df$Pct, "%")
+    }
+    
+    # plot
+    if (input$vc_group_on && !is.null(input$vc_group_var)) {
+      
+      p <- ggplot(plot_df, aes(x = y_val, y = Column, colour = Group, text = label)) +
+        geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column,
+                         colour = Group),
+                     linewidth = 0.6,
+                     position  = position_dodge(width = 0.6)) +
+        geom_point(size = 3, position = position_dodge(width = 0.6)) +
+        labs(title = paste0('Occurrences of "', val, '" — grouped by ', input$vc_group_var),
+             x = y_label, y = NULL) +
+        theme_minimal(base_size = 11)
+      
+    } else {
+      
+      p <- ggplot(plot_df, aes(x = y_val, y = Column, text = label)) +
+        geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column),
+                     colour = "steelblue", linewidth = 0.8) +
+        geom_point(colour = "steelblue", size = 3) +
+        labs(title = paste0('Occurrences of "', val, '" across Selected Columns'),
+             x = y_label, y = NULL) +
+        theme_minimal(base_size = 11)
+    }
+    
+    ggplotly(p, tooltip = "text")
+  })
+  
+  
+  # ── SERVER RISING ORDER ───────────────────────────────────────────────────────
+  # update choices
+  observe({
+    df <- display_data()
+    req(df)
+    
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectInput(session, "rising_var", choices = numeric_vars, selected = numeric_vars[1])
+  })
+  
+  output$rising_plot <- renderPlotly({
+    req(input$rising_var)
+    df <- display_data()
+    
+    n <- length(input$rising_var)
+    
+    # better palettes depending on number of vars
+    if (n <= 8) {
+      colors <- RColorBrewer::brewer.pal(max(n, 3), "Set1")[1:n]
+    } else {
+      colors <- rainbow(n)
+    }
+    
+    # build long-format df for ggplot
+    plot_df <- do.call(rbind, lapply(seq_along(input$rising_var), function(i) {
+      v        <- input$rising_var[i]
+      y        <- df[[v]]
+      y        <- y[!is.na(y)]
+      y_sorted <- sort(y)
+      pct      <- seq_along(y_sorted) / length(y_sorted) * 100
+      data.frame(Percentile = pct, Value = y_sorted, Variable = v)
+    }))
+    
+    p <- ggplot(plot_df, aes(x = Percentile, y = Value, colour = Variable)) +
+      geom_line(linewidth = 0.8) +
+      scale_colour_manual(values = setNames(colors, input$rising_var)) +
+      labs(title = "Rising Value Chart", x = "Percentile", y = "Value") +
+      theme_minimal(base_size = 11)
+    
+    ggplotly(p, tooltip = c("x", "y", "colour"))
+  })
+  
+  
+  # ── SERVER Q-Q PLOT ───────────────────────────────────────────────────────────
+  # update variable choices for QQ Plot
+  observe({
+    df <- display_data()
+    req(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectInput(session, "qq_var", choices = numeric_vars)
+  })
+  
+  # dynamic UI for distribution parameters
+  output$qq_params <- renderUI({
+    req(input$qq_dist)
+    
+    switch(input$qq_dist,
+           "norm" = tagList(
+             numericInput("qq_mean", "Mean", value = 0),
+             numericInput("qq_sd", "SD", value = 1, min = 0.01)
+           ),
+           "exp" = tagList(
+             numericInput("qq_rate", "Rate (λ)", value = 1, min = 0.01)
+           ),
+           "lnorm" = tagList(
+             numericInput("qq_meanlog", "Meanlog", value = 0),
+             numericInput("qq_sdlog", "SDlog", value = 1, min = 0.01)
+           ),
+           "gamma" = tagList(
+             numericInput("qq_shape", "Shape (α)", value = 1, min = 0.01),
+             numericInput("qq_rate_g", "Rate (β)", value = 1, min = 0.01)
+           ),
+           "weibull" = tagList(
+             numericInput("qq_shape_w", "Shape (k)", value = 1, min = 0.01),
+             numericInput("qq_scale_w", "Scale (λ)", value = 1, min = 0.01)
+           )
+    )
+  })
+  
+  # render the QQ Plot
+  output$qq_plot <- renderPlotly({
+    req(input$qq_var, input$qq_dist)
+    df  <- display_data()
+    val <- df[[input$qq_var]]
+    val <- sort(val[!is.na(val)])  # ascending order/quantile
+    
+    # define distribution arguments based on user input
+    dist_args <- switch(input$qq_dist,
+                        "norm"    = list(mean = input$qq_mean,     sd    = input$qq_sd),
+                        "exp"     = list(rate = input$qq_rate),
+                        "lnorm"   = list(meanlog = input$qq_meanlog, sdlog = input$qq_sdlog),
+                        "gamma"   = list(shape = input$qq_shape,   rate  = input$qq_rate_g),
+                        "weibull" = list(shape = input$qq_shape_w, scale = input$qq_scale_w)
+    )
+    
+    # validate that args are not null
+    if (any(sapply(dist_args, is.null))) return(NULL)
+    
+    # generate theoretical quantiles
+    n     <- length(val)
+    probs <- (1:n - 0.5) / n
+    
+    # map string distribution names to their quantile functions (qnorm, qexp, etc)
+    q_func                <- match.fun(paste0("q", input$qq_dist))
+    theoretical_quantiles <- do.call(q_func, c(list(p = probs), dist_args))
+    
+    qq_df <- data.frame(Theoretical = theoretical_quantiles, Sample = val)
+    
+    p <- ggplot(qq_df, aes(x = Theoretical, y = Sample)) +
+      geom_point(colour = "steelblue", size = 1.5, alpha = 0.7) +
+      labs(title = paste("Q-Q Plot:", input$qq_var, "vs", input$qq_dist),
+           x = paste("Theoretical Quantiles (", input$qq_dist, ")"),
+           y = paste("Sample Quantiles:", input$qq_var)) +
+      theme_minimal(base_size = 11)
+    
+    if (input$qq_line) {
+      # reference line passing through 1st and 3rd quartiles (similar to qqline logic)
+      y_q   <- quantile(val, c(0.25, 0.75))
+      x_q   <- do.call(q_func, c(list(p = c(0.25, 0.75)), dist_args))
+      slope <- diff(y_q) / diff(x_q)
+      int   <- y_q[1] - slope * x_q[1]
+      p     <- p + geom_abline(intercept = int, slope = slope,
+                               colour = "red", linewidth = 0.8)
+    }
+    
+    ggplotly(p, tooltip = c("x", "y"))
+  })
+  
+  
+  # ── SERVER MOSAIC ─────────────────────────────────────────────────────────────
+  
+  # mosaic part1: mosaic plot
+  cat_cols <- reactive({
+    df <- display_data()
+    names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+  })
+  
+  output$mosaic_x_ui <- renderUI({
+    selectInput("mosaic_x", "Variable 1 (columns):", choices = cat_cols())
+  })
+  
+  output$mosaic_y_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_y", "Variable 2 (rows):", choices = cols, selected = cols[2])
+  })
+  
+  output$mosaic_z_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_z", "Variable 3 — optional (sub-rows):",
+                choices = c("None", cols), selected = "None")
+  })
+  
+  output$mosaic_plot <- renderPlot({
+    req(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    df <- display_data()
+    
+    # build 2-way or 3-way contingency table depending on Variable 3
+    if (input$mosaic_z == "None") {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y)
+    } else {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]], df[[input$mosaic_z]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    }
+    
+    title <- paste("Mosaic:", paste(
+      c(input$mosaic_x, input$mosaic_y,
+        if (input$mosaic_z != "None") input$mosaic_z),
+      collapse = " × "))
+    
+    vcd::mosaic(tbl,
+                shade  = input$mosaic_shade,
+                legend = input$mosaic_shade,
+                main   = title,
+                labeling     = labeling_border(
+                  rot_labels   = c(90, 0, 0, 0),      # rotate axis labels
+                  gp_labels    = gpar(fontsize = 9), # smaller font
+                  abbreviate   = TRUE,               # abbreaviated labels or not
+                ))
+  })
+  
+  
+  # mosaic part2: pair advisor
+  # (helper) compute CramerV for a 2-column contingency table
+  get_cramer <- function(df, v1, v2) {
+    tbl   <- table(df[[v1]], df[[v2]])
+    stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
+    if (is.null(stats)) return(NA)
+    stats$cramer
+  }
+  
+  pairs_result <- eventReactive(input$pairs_search, {
+    df   <- display_data()
+    cats <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    if (input$pairs_way == "2-way") {
+      
+      combos  <- combn(cats, 2, simplify = FALSE)
+      results <- lapply(combos, function(pair) {
+        tbl   <- table(df[[pair[1]]], df[[pair[2]]])
+        stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
+        if (is.null(stats)) return(NULL)
+        data.frame(
+          Var1    = pair[1],
+          Var2    = pair[2],
+          Var3    = NA_character_,
+          CramerV = round(stats$cramer, 4),
+          Chi_sq  = round(stats$chisq_tests["Pearson", "X^2"], 2),
+          p_value = round(stats$chisq_tests["Pearson", "P(> X^2)"], 6)
+        )
+      })
+      
+    } else {
+      
+      # 3-way: score = mean CramerV across all 3 pairwise combos within the trio
+      # this gives a single number summarising how interrelated the 3 variables are
+      combos  <- combn(cats, 3, simplify = FALSE)
+      results <- lapply(combos, function(trio) {
+        v12 <- get_cramer(df, trio[1], trio[2])
+        v13 <- get_cramer(df, trio[1], trio[3])
+        v23 <- get_cramer(df, trio[2], trio[3])
+        data.frame(
+          Var1    = trio[1],
+          Var2    = trio[2],
+          Var3    = trio[3],
+          CramerV = round(mean(c(v12, v13, v23), na.rm = TRUE), 4),  # avg of 3 pairs
+          V_1_2   = round(v12, 4),   # individual pair scores shown for context
+          V_1_3   = round(v13, 4),
+          V_2_3   = round(v23, 4),
+          Chi_sq  = NA,
+          p_value = NA
+        )
+      })
+    }
+    
+    out <- do.call(rbind, Filter(Negate(is.null), results))
+    out <- out[order(-out$CramerV), ]
+    
+    out$Strength <- ifelse(out$CramerV >= 0.5, "Strong",
+                           ifelse(out$CramerV >= 0.3, "Moderate",
+                                  ifelse(out$CramerV >= 0.1, "Weak", "Negligible")))
+    
+    head(out, input$pairs_top)
+  })
+  
+  output$pairs_table <- renderDT({
+    datatable(pairs_result(),
+              rownames  = FALSE,
+              selection = "single",
+              options   = list(pageLength = 15, dom = "tip")) %>%
+      formatStyle("CramerV",
+                  background         = styleColorBar(c(0, 1), "#a8d5a2"),
+                  backgroundSize     = "100% 80%",
+                  backgroundRepeat   = "no-repeat",
+                  backgroundPosition = "center") %>%
+      formatStyle("Strength",
+                  color = styleEqual(
+                    c("Strong", "Moderate", "Weak", "Negligible"),
+                    c("#155724",  "#856404",  "#856404", "#6c757d")
+                  ),
+                  fontWeight = "bold")
+  })
+  
+  # clicking a row loads variables into mosaic dropdowns
+  observeEvent(input$pairs_table_rows_selected, {
+    res  <- pairs_result()
+    sel  <- input$pairs_table_rows_selected
+    var1 <- res$Var1[sel]
+    var2 <- res$Var2[sel]
+    var3 <- res$Var3[sel]
+    
+    updateSelectInput(session, "mosaic_x", selected = var1)
+    updateSelectInput(session, "mosaic_y", selected = var2)
+    updateSelectInput(session, "mosaic_z", selected = if (!is.na(var3)) var3 else "None")
+  })
+  
+  
+  # ── SERVER SEQUENCE PLOT ──────────────────────────────────────────────────────
+  
+  # observe({
+  #   df <- selected_data()
+  #   req(df)
+  #   all_vars     <- names(df)
+  #   numeric_vars <- names(df)[sapply(df, is.numeric)]
+  #   updateSelectizeInput(session, "seq_var",      choices = numeric_vars, selected = numeric_vars[1])
+  #   updateSelectInput(   session, "seq_sort_var", choices = all_vars,     selected = numeric_vars[1])
+  # })
+  # 
+  # output$seq_plot <- renderPlot({
+  #   req(input$seq_var, input$seq_sort_var)
+  #   df <- selected_data()
+  #   
+  #   cols_needed <- unique(c(input$seq_sort_var, input$seq_var))
+  #   df_sub      <- df[, cols_needed]
+  #   
+  #   tabplot::tableplot(
+  #     df_sub,
+  #     sortCol    = input$seq_sort_var,
+  #     decreasing = (input$seq_sort_dir == "desc"),
+  #     nBins      = 100,
+  #     title      = paste("Table Lens — sorted by", input$seq_sort_var)
+  #   )
+  # })
+  
+  # ── TAB GGPAIRS ────────────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    all_vars     <- names(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    default_gg_vars <- c("Sensor4", "Sensor8", "Sensor11", "Sensor16", "Sensor22", "Sensor24", "Sensor28")
+    updateSelectizeInput(session, "gg_vars", choices  = all_vars, selected = intersect(default_gg_vars, all_vars))
+    updateSelectInput(session, "gg_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # populate level choices when group variable changes
+  observeEvent(input$gg_group_var, {
+    req(input$gg_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$gg_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "gg_group_levels",
+                         choices  = lvls,
+                         selected = lvls)
+  })
+  
+  output$gg_plot <- renderPlot({
+    input$gg_run
+    isolate({
+      req(input$gg_vars)
+      df <- display_data()
+      validate(need(length(input$gg_vars) >= 2, "Please select at least 2 variables."))
+      
+      if (input$gg_group_on && !is.null(input$gg_group_var)) {
+        
+        grp <- input$gg_group_var
+        
+        # build df with selected vars + group col, drop NAs in group
+        plot_df <- df[, c(input$gg_vars, grp), drop = FALSE]
+        plot_df <- plot_df[!is.na(plot_df[[grp]]), ]
+        
+        # filter to selected levels only
+        if (!is.null(input$gg_group_levels) && length(input$gg_group_levels) > 0) {
+          plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$gg_group_levels, ]
+          plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))  # drop unused levels from legend
+        }
+        
+        # columns to plot = only the selected vars (not the group col)
+        col_idx <- seq_along(input$gg_vars)
+        
+        GGally::ggpairs(
+          plot_df,
+          columns  = col_idx,
+          mapping  = aes(colour = .data[[grp]], alpha = 0.6),
+          upper    = list(
+            continuous = GGally::wrap("cor", size = 2.5),
+            combo      = GGally::wrap("box_no_facet", alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          lower    = list(
+            continuous = GGally::wrap("points", alpha = 0.3, size = 0.8),
+            combo      = GGally::wrap("facethist", bins = 20, alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          diag     = list(
+            continuous = GGally::wrap("densityDiag", alpha = 0.5),
+            discrete   = GGally::wrap("barDiag", alpha = 0.5)
+          ),
+          legend   = 1  # show legend
+        ) +
+          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme(
+            strip.text  = element_text(size = 7),
+            legend.position = "bottom"
+          ) +
+          ggplot2::labs(title = paste("GGPairs — grouped by", grp))
+        
+      } else {
+        
+        plot_df <- df[, input$gg_vars, drop = FALSE]
+        
+        GGally::ggpairs(
+          plot_df,
+          upper = list(continuous = GGally::wrap("cor", size = 3)),
+          lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
+          diag  = list(continuous = GGally::wrap("densityDiag"))
+        ) +
+          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme(strip.text = element_text(size = 7))
+      }
+    })
+  })
+  
+  
+  # ── SERVER CORRELATION ────────────────────────────────────────────────────────
+  
+  # populate variable choices when dataset changes
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "cor_vars", choices = num_vars, selected = character(0))
+  })
+  
+  
+  # (helper) compute correlation + p-value matrices
+  # - complete.obs  -> listwise delete rows with any NA first
+  # - pairwise      -> rcorr handles it internally
+  get_cor_mats <- function(df_num, method, use_arg) {
+    mat <- as.matrix(df_num)
+    
+    if (use_arg == "complete.obs") {
+      mat <- mat[complete.cases(mat), , drop = FALSE]
+    }
+    
+    validate(need(nrow(mat) >= 3,
+                  "Not enough complete rows to compute correlation (need >= 3)."))
+    
+    rc      <- tryCatch(Hmisc::rcorr(mat, type = method), error = function(e) NULL)
+    cor_mat <- if (!is.null(rc)) rc$r else cor(mat, use = use_arg, method = method)
+    p_mat   <- if (!is.null(rc)) rc$P else NULL
+    
+    list(cor = cor_mat, p = p_mat)
+  }
+  
+  
+  # reactive: raw correlation matrices — reacts to dataset / vars / method / NA
+  # - does NOT read input$cor_threshold so threshold never triggers a full recompute
+  cor_result <- reactive({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    selected <- if (!is.null(input$cor_vars) && length(input$cor_vars) > 0)
+      input$cor_vars else num_vars
+    
+    selected <- intersect(selected, num_vars)
+    validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+    
+    df_num <- df[, selected, drop = FALSE]
+    get_cor_mats(df_num, input$cor_method, input$cor_na)
+  })
+  
+  
+  # reactive: flip slider so left=1 (keep all), right=0 (drop most)
+  # - raw slider value 0 → threshold 1.0 (keep all)
+  # - raw slider value 1 → threshold 0.0 (drop everything)
+  cor_threshold <- reactive({ 1 - input$cor_threshold_raw })
+  
+  
+  # reactive: pairwise greedy elimination
+  # - while any pair has |r| > threshold, drop the variable in that pair
+  #   with the higher mean |r| across all other remaining variables
+  # - threshold = 1.00 → keep all (no pair ever has |r| strictly > 1)
+  # - threshold = 0.80 → drop anything with a collinear partner above 0.80
+  # - threshold = 0.00 → extremely strict
+  vars_to_keep <- reactive({
+    m         <- cor_result()
+    threshold <- input$cor_threshold
+    cor_mat   <- m$cor
+    remaining <- rownames(cor_mat)
+    
+    repeat {
+      sub_mat       <- abs(cor_mat[remaining, remaining, drop = FALSE])
+      diag(sub_mat) <- NA
+      
+      max_r <- max(sub_mat, na.rm = TRUE)
+      
+      # stop when no remaining pair exceeds the threshold
+      if (max_r <= threshold || length(remaining) <= 2) break
+      
+      # find the worst offending pair
+      idx   <- which(sub_mat == max_r, arr.ind = TRUE)[1, ]
+      var_a <- remaining[idx[1]]
+      var_b <- remaining[idx[2]]
+      
+      # drop whichever has higher mean |r| with all other remaining vars
+      mean_a <- mean(sub_mat[var_a, setdiff(remaining, var_a)], na.rm = TRUE)
+      mean_b <- mean(sub_mat[var_b, setdiff(remaining, var_b)], na.rm = TRUE)
+      
+      remaining <- setdiff(remaining, if (mean_a >= mean_b) var_a else var_b)
+    }
+    
+    remaining
+  })
+  
+  
+  # reactive: filtered matrix for heatmap
+  filtered_cor_mats <- reactive({
+    m    <- cor_result()
+    keep <- vars_to_keep()
+    
+    validate(need(length(keep) >= 2,
+                  paste0("All variables exceed the threshold. ",
+                         "Slide left to keep more variables.")))
+    
+    list(
+      cor = m$cor[keep, keep, drop = FALSE],
+      p   = if (!is.null(m$p)) m$p[keep, keep, drop = FALSE] else NULL
+    )
+  })
+  
+  
+  # heatmaply heatmap — shows only kept variables
+  output$cor_plot_gg <- renderPlotly({
+    m       <- filtered_cor_mats()
+    cor_mat <- m$cor
+    n_vars  <- nrow(cor_mat)
+    
+    heatmaply::heatmaply_cor(
+      cor_mat,
+      k_col        = min(3, max(1, n_vars - 1)),
+      k_row        = min(3, max(1, n_vars - 1)),
+      colors       = colorRampPalette(c("#2166ac", "white", "#b2182b"))(256),
+      limits       = c(-1, 1),
+      grid_gap     = 1,
+      main         = paste(tools::toTitleCase(input$cor_method), "Correlation"),
+      label_names  = c("X", "Y", "Correlation"),
+      fontsize_row = 8,
+      fontsize_col = 8,
+      margins      = c(80, 80, 40, 20)
+    )
+  })
+  
+  
+  # correlation table
+  # - shows ALL variable pairs (full matrix, not filtered)
+  # - Keep column flags whether BOTH variables in the pair survive the threshold
+  # - this lets you see what gets dropped and why
+  output$cor_table <- renderDT({
+    m       <- cor_result()
+    cor_mat <- m$cor
+    p_mat   <- m$p
+    vars    <- rownames(cor_mat)
+    keep    <- vars_to_keep()
+    
+    # melt upper triangle into rows
+    rows <- do.call(rbind, lapply(seq_along(vars), function(i) {
+      do.call(rbind, lapply(seq(i + 1, length(vars)), function(j) {
+        if (j > length(vars)) return(NULL)
+        data.frame(
+          Var1    = vars[i],
+          Var2    = vars[j],
+          r       = round(cor_mat[i, j], 4),
+          p_value = if (!is.null(p_mat)) round(p_mat[i, j], 6) else NA_real_,
+          Keep    = vars[i] %in% keep & vars[j] %in% keep,
+          stringsAsFactors = FALSE
+        )
+      }))
+    }))
+    
+    # sort: kept pairs first, then by |r| descending within each group
+    rows <- rows[order(-rows$Keep, -abs(rows$r)), ]
+    rows$Keep <- ifelse(rows$Keep, "Yes", "No")
+    
+    dt <- datatable(
+      rows,
+      rownames = FALSE,
+      filter   = "top",
+      options  = list(pageLength = 20, dom = "lftip")
+    ) %>%
+      formatRound(columns = "r", digits = 4) %>%
+      formatStyle(
+        "r",
+        background         = styleColorBar(c(-1, 1), "#a8d5e2"),
+        backgroundSize     = "100% 80%",
+        backgroundRepeat   = "no-repeat",
+        backgroundPosition = "center"
+      ) %>%
+      formatStyle(
+        "r",
+        color      = styleInterval(c(-0.5, -0.3, 0.3, 0.5),
+                                   c("#b2182b", "#d6604d", "#555555", "#4393c3", "#2166ac")),
+        fontWeight = "bold"
+      ) %>%
+      # highlight Keep column — green = keep, grey = drop
+      formatStyle(
+        "Keep",
+        color      = styleEqual(c("Yes", "No"), c("#198754", "#6c757d")),
+        fontWeight = "bold"
+      ) %>%
+      # dim entire row if both variables are dropped
+      formatStyle(
+        "Keep",
+        target          = "row",
+        backgroundColor = styleEqual(c("Yes", "No"), c("white", "#f8f9fa"))
+      )
+    
+    # colour p-values green if significant
+    if ("p_value" %in% names(rows)) {
+      dt <- dt %>%
+        formatStyle("p_value",
+                    color = styleInterval(0.05, c("#198754", "#6c757d")))
+    }
+    
+    dt
+  })
+  
+  
+  # ── SERVER BOXPLOT ────────────────────────────────────────────────────────────
+  
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectizeInput(session, "box_vars",      choices = num_vars, selected = intersect(paste0("Sensor", 1:30), num_vars))
+    updateSelectInput(   session, "box_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # add an observer to populate levels
+  observeEvent(input$box_group_var, {
+    req(input$box_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$box_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "box_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  output$box_plot <- renderPlotly({
+    req(input$box_vars)
+    df <- display_data()
+    validate(need(length(input$box_vars) >= 1, "Please select at least 1 variable."))
+    
+    plot_df <- tidyr::pivot_longer(df, cols = all_of(input$box_vars),
+                                   names_to = "Variable", values_to = "Value")
+    plot_df$Variable <- factor(plot_df$Variable, levels = input$box_vars)
+    
+    # build geom layer separately to avoid inline if/else issue
+    geom_layer <- if (input$box_violin) {
+      geom_violin(alpha = 0.7, trim = FALSE)
+    } else {
+      geom_boxplot(alpha = 0.7, outlier.size = 0.8)
+    }
+    
+    if (input$box_group_on && !is.null(input$box_group_var)) {
+      grp <- input$box_group_var
+      plot_df[[grp]] <- as.factor(plot_df[[grp]])
+      
+      if (!is.null(input$box_group_levels) && length(input$box_group_levels) > 0) {
+        plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$box_group_levels, ]
+        plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))
+      }
+      
+      validate(need(nrow(plot_df) > 0, ""))
+      
+      p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
+        geom_layer +
+        facet_wrap(as.formula(paste("~", grp)), scales = "free_y") +
+        labs(title = paste("Boxplot grouped by", grp), x = NULL, y = "Value") +
+        theme_minimal(base_size = 11) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              legend.position = "none")
+      
+    } else {
+      p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
+        geom_layer +
+        labs(title = if (input$box_violin) "Violin — variable comparison" else "Boxplot — variable comparison",
+             x = NULL, y = "Value") +
+        theme_minimal(base_size = 11) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              legend.position = "none")
+    }
+    
+    ggplotly(p) %>% layout(showlegend = FALSE)
+  })
+  
+  
+  # ── TAB WORD CLOUD ─────────────────────────────────────────────────────────
+  
+  observe({
+    df       <- display_data()
+    req(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "wc_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  output$wc_plot <- renderPlot({
+    req(input$wc_var)
+    df  <- display_data()
+    val <- as.character(df[[input$wc_var]])
+    val <- val[!is.na(val) & nchar(trimws(val)) > 0]
+    
+    # apply case folding on raw values before any splitting
+    if (!input$wc_case) val <- tolower(val)
+    
+    validate(need(length(val) > 0, "No non-missing values to display."))
+    
+    # optional splitting logic
+    tokens <- switch(input$wc_split_mode,
+                     "none" = val,
+                     "chars" = {
+                       t <- unlist(strsplit(val, ""))
+                       t[!grepl("\\s", t)]
+                     },
+                     "alphanum" = {
+                       t <- unlist(lapply(val, function(tok) {
+                         m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+                         regmatches(tok, m)[[1]]
+                       }))
+                       t[nchar(t) > 0]
+                     }
+    )
+    
+    freq_table <- sort(table(tokens), decreasing = TRUE)
+    freq_table <- freq_table[freq_table >= input$wc_min_freq]
+    validate(need(length(freq_table) > 0,
+                  paste0("No tokens appear at least ", input$wc_min_freq, " times.")))
+    freq_table <- head(freq_table, input$wc_max_words)
+    
+    words <- names(freq_table)
+    freqs <- as.integer(freq_table)
+    n     <- length(words)
+    
+    # colours
+    pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
+    colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
+    
+    # adaptive normalisation with outlier-aware contrast boost
+    freq_ranks <- rank(-freqs, ties.method = "first")   # 1 = most frequent
+    
+    # detect if top token(s) are genuine outliers vs the rest
+    # outlier = top freq is 3x the median freq
+    freq_ratio <- max(freqs) / max(median(freqs), 1)
+    
+    if (freq_ratio >= 3) {
+      # outlier mode: use sqrt-compressed raw freq → preserves contrast without
+      # letting the top token completely dwarf everyone else
+      freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
+                                 max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
+    } else {
+      # normal mode: pure rank-based (flat distribution, no outliers)
+      freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+    }
+    
+    # adaptive scale — use outlier ratio to decide canvas scale
+    # high ratio = we WANT a large max_scale so G/D are visually dominant
+    n_eff      <- min(n, 30)
+    base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+    # boost max_scale proportionally to outlier strength, cap at 12
+    max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
+    min_scale  <- max(0.3, max_scale * 0.15)   # tighter min so rare tokens stay small
+    
+    par(mar = c(0, 0, 0, 0), bg = "white")
+    
+    wordcloud::wordcloud(
+      words        = words,
+      freq         = freqs_norm,
+      max.words    = n,
+      min.freq     = 1,
+      random.order = FALSE,
+      rot.per      = 0.15,
+      colors       = colors,
+      scale        = c(max_scale, min_scale),
+      use.r.layout = FALSE
+    )
+  })
+  
+  
+  # ── SERVER R CONSOLE ──────────────────────────────────────────────────────────────
+  
+  output$rconsole_body <- renderUI({
+    if (!privacy_unlocked()) {
+      tagList(
+        br(),
+        div(style = "text-align: center; margin-top: 100px; color: #6c757d;",
+            icon("lock", style = "font-size: 48px;"),
+            h4("This tab is locked."),
+            p("Enter the passphrase (hint: 123) above to access the R Console.")
+        )
+      )
+    } else {
+      tagList(
+        sidebarLayout(
+          sidebarPanel(width = 3,
+                       helpText("Run arbitrary R expressions against the current dataset."),
+                       helpText("The current dataset is available as 'df'."),
+                       hr(),
+                       actionButton("rconsole_run", "Run", icon = icon("play"), width = "100%"),
+                       hr(),
+                       actionButton("rconsole_clear", "Clear", icon = icon("trash"), width = "100%")
+          ),
+          mainPanel(width = 9,
+                    tags$div(
+                      style = "font-family: monospace;",
+                      aceEditor("rconsole_input",
+                                mode     = "r",
+                                theme    = "tomorrow",
+                                height   = "500px",
+                                value    = "table(format(df$Date, '%A'))",
+                                fontSize = 14)
+                    ),
+                    hr(),
+                    verbatimTextOutput("rconsole_output")
+          )
+        )
+      )
+    }
+  })
+  
+  rconsole_history <- reactiveVal("")
+  
+  observeEvent(input$rconsole_clear, {
+    rconsole_history("")
+  })
+  
+  output$rconsole_output <- renderPrint({
+    input$rconsole_run
+    isolate({
+      # # ── DEBUG (remove when done) ──────────────────────
+      # cat("--- RUN CLICKED ---\n")
+      # cat("raw code: [", input$rconsole_input, "]\n")
+      # # show the actual character codes around position 19
+      # first_line <- strsplit(input$rconsole_input, "\n")[[1]][1]
+      # cat("first line chars: [", first_line, "]\n")
+      # cat("chartr check - char codes:\n")
+      # print(utf8ToInt(first_line))  # reveals the actual Unicode codepoints
+      # # ─────────────────────────────────────────────────
+      code <- input$rconsole_input
+      if (is.null(code) || trimws(code) == "") {
+        cat("# Type R code above and click Run\n")
+        return(invisible(NULL))
+      }
+      
+      # strip Windows carriage returns FIRST
+      code <- gsub("\r\n", "\n", code)  # Windows CRLF → LF
+      code <- gsub("\r",   "\n", code)  # bare CR → LF (old Mac)
+      
+      # sanitise pasted Unicode → ASCII
+      code <- gsub("\u2018|\u2019|\u00b4",             "'", code)
+      code <- gsub("\u201c|\u201d",                    '"', code)
+      code <- gsub("\uff08",                           "(", code)
+      code <- gsub("\uff09",                           ")", code)
+      code <- gsub("\u2013|\u2014",                    "-", code)
+      code <- gsub("\u00a0|\u202f|\u2009|\u3000",      " ", code)
+      code <- gsub("[\u2768\u276a\u27ee\u2985\u2987]", "(", code)
+      code <- gsub("[\u2769\u276b\u27ef\u2986\u2988]", ")", code)
+      code <- gsub("\u00d7",                           "*", code)
+      code <- gsub("\u2212",                           "-", code)
+      code <- iconv(code, from = "UTF-8", to = "ASCII", sub = "")
+      
+      # always refresh df in the env so latest dataset is available
+      assign("df", display_data(), envir = rconsole_env)
+      
+      # parse into individual expressions and eval each one, capturing output
+      exprs <- tryCatch(parse(text = code), error = function(e) {
+        cat("Parse error:", conditionMessage(e), "\n")
+        return(NULL)
+      })
+      if (is.null(exprs)) return(invisible(NULL))
+      
+      # eval each expression individually so multi-line scripts print everything
+      for (i in seq_along(exprs)) {
+        tryCatch({
+          res <- withVisible(eval(exprs[[i]], envir = rconsole_env))
+          if (res$visible) print(res$value)
+        },
+        error   = function(e) cat("Error:", conditionMessage(e), "\n"),
+        warning = function(w) cat("Warning:", conditionMessage(w), "\n"))
+      }
+    })
+  })
+  
+  # clear the ace editor content
+  observeEvent(input$rconsole_clear, {
+    updateAceEditor(session, "rconsole_input", value = "")
+  })
+  
+  
+  
+} # end server
+
+
+# =============================================================================
+# Run shiny app
+# =============================================================================
+
+shinyApp(ui, server)
