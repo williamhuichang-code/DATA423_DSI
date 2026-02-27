@@ -337,7 +337,7 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            checkboxInput("wc_varnames_mode", "Show variable names", value = FALSE),
+                            checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
                             hr(),
                             conditionalPanel(
                               condition = "input.wc_varnames_mode == false",
