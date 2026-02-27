@@ -343,6 +343,7 @@ ui <- fluidPage(
                sidebarPanel(width = 2,
                             sidebar_note("In General: <br><br>Can select a style to inspect the dataset structure."),
                             hr(),
+                            
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
@@ -364,15 +365,19 @@ ui <- fluidPage(
                             sidebar_note("Col Names & Grouping: <br><br>This word cloud helps identify inconsistencies 
                                          in variable names or categorical values, depending on the selected mode."),
                             hr(),
+                            
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
                             hr(),
+                            
                             conditionalPanel(
                               condition = "input.wc_varnames_mode == false",
                               selectInput("wc_var", "Categorical variable:", choices = NULL)
                             ),
                             hr(),
+                            
                             checkboxInput("wc_case", "Case sensitive", value = TRUE),
                             hr(),
+                            
                             radioButtons("wc_split_mode", "Token split mode:",
                                          choices = c(
                                            "None (whole value)"   = "none",
@@ -381,15 +386,18 @@ ui <- fluidPage(
                                          ),
                                          selected = "none"),
                             hr(),
+                            
                             sliderInput("wc_max_words", "Max words to show:",
                                         min = 10, max = 500, value = 360, step = 10),
                             sliderInput("wc_min_freq", "Min frequency:",
                                         min = 1, max = 50, value = 1, step = 1),
                             helpText("Font size is proportional to frequency."),
                             hr(),
+                            
                             sliderInput("wc_scale", "Plot scale:",
                                         min = 0.3, max = 3.0, value = 1.0, step = 0.1),
                             hr(),
+                            
                             selectInput("wc_palette", "Colour palette:",
                                         choices = c("Dark2", "Set1", "Set2", "Set3",
                                                     "Paired", "Accent", "Spectral"),
@@ -407,8 +415,8 @@ ui <- fluidPage(
     tabPanel("UpSet",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Missingness and content exploring: <br><br>The UpSet plot helps 
-                                     identify the number of missing values across variables, 
+                            sidebar_note("Missingness and general content exploring: <br><br>The UpSet plot 
+                                     helps identify the number of missing values across variables, 
                                      as well as patterns of missingness that occur together."),
                             hr(),
                             
@@ -459,6 +467,59 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          plotlyOutput("upset_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI LOLLIPOP ───────────────────────────────────────────────────────
+    
+    tabPanel("Lollipop",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            
+                            sidebar_note("Missingness and reasoning: <br><br>This lollipop chart helps 
+                                         explore potential reasons for missingness in the selected 
+                                         variable by examining it across different contextual groups."),
+                            hr(),
+                            
+                            textInput("vc_value", "Value to count:",
+                                      value = "NA",
+                                      placeholder = "e.g. Yes, High, NA"),
+                            
+                            checkboxInput("vc_case", "Case sensitive", value = FALSE),
+                            hr(),
+                            
+                            checkboxInput("vc_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.vc_group_on == true",
+                              selectInput("vc_group_var", "Group by:", choices = NULL),
+                              selectizeInput("vc_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),
+                            hr(),
+                            
+                            selectizeInput("vc_cols", "Search in columns:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            
+                            selectInput("vc_metric", "Show as:",
+                                        choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
+                            
+                            sliderInput("vc_min_count", "Min count to display:",
+                                        min = 0, max = 50, value = 0, step = 1),
+                            hr(),
+                            
+                            radioButtons("vc_sort", "Sort by:",
+                                         choices  = c("Column order"     = "col",
+                                                      "Ascending value"  = "asc",
+                                                      "Descending value" = "desc"),
+                                         selected = "desc"),
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("vc_plot", height = "80vh")
                )
              )
     ),  # end of tab panel
@@ -876,6 +937,138 @@ server <- function(input, output, session) {
   })
   
   
+  # ── SERVER LOLLIPOP ────────────────────────────────────────────────────
+  
+  observe({
+    df   <- display_data()
+    req(df)
+    all_cols <- names(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectizeInput(session, "vc_cols",      choices = all_cols, selected = all_cols)
+    updateSelectInput(   session, "vc_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # populate group levels when group variable changes
+  observeEvent(input$vc_group_var, {
+    req(input$vc_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$vc_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    # append (NA) as selectable level only if the grouping variable actually has NAs
+    if (any(is.na(df[[input$vc_group_var]]))) lvls <- c(lvls, "(NA)")
+    updateSelectizeInput(session, "vc_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  output$vc_plot <- renderPlotly({
+    req(input$vc_value, input$vc_cols)
+    df  <- display_data()
+    val <- input$vc_value
+    
+    # helper: count occurrences in a single df
+    count_val <- function(data, cols, val, case_sensitive) {
+      results <- lapply(cols, function(col) {
+        x     <- data[[col]]
+        total <- length(x)
+        n_match <- if (toupper(val) == "NA") {
+          sum(is.na(x))
+        } else if (case_sensitive) {
+          sum(as.character(x) == val, na.rm = TRUE)
+        } else {
+          sum(tolower(as.character(x)) == tolower(val), na.rm = TRUE)
+        }
+        data.frame(Column = col, Count = n_match,
+                   Pct = round(n_match / total * 100, 1), Total = total)
+      })
+      do.call(rbind, results)
+    }
+    
+    # grouped or ungrouped
+    if (input$vc_group_on && !is.null(input$vc_group_var)) {
+      
+      grp  <- input$vc_group_var
+      lvls <- if (!is.null(input$vc_group_levels) && length(input$vc_group_levels) > 0)
+        input$vc_group_levels
+      else
+        sort(unique(as.character(df[[grp]])))
+      
+      # compute counts per level — treat "(NA)" as a real level by subsetting on is.na()
+      plot_df <- do.call(rbind, lapply(lvls, function(lv) {
+        sub <- if (lv == "(NA)") {
+          df[is.na(df[[grp]]), ]
+        } else {
+          df[!is.na(df[[grp]]) & as.character(df[[grp]]) == lv, ]
+        }
+        res       <- count_val(sub, input$vc_cols, val, input$vc_case)
+        res$Group <- lv
+        res
+      }))
+      
+    } else {
+      plot_df        <- count_val(df, input$vc_cols, val, input$vc_case)
+      plot_df$Group  <- "All"
+    }
+    
+    # apply min count filter
+    # filter keeps a column if ANY group for that column passes the threshold
+    cols_pass <- unique(plot_df$Column[plot_df$Count >= input$vc_min_count])
+    plot_df   <- plot_df[plot_df$Column %in% cols_pass, ]
+    validate(need(nrow(plot_df) > 0, "No columns meet the minimum count threshold."))
+    
+    # sort
+    sort_col <- if (input$vc_metric == "count") "Count" else "Pct"
+    # sort by the max value across groups per column, for stable ordering
+    col_order <- tapply(plot_df[[sort_col]], plot_df$Column, max)
+    if (input$vc_sort == "desc") {
+      col_order <- names(sort(col_order, decreasing = TRUE))
+    } else if (input$vc_sort == "asc") {
+      col_order <- names(sort(col_order, decreasing = FALSE))
+    } else {
+      col_order <- input$vc_cols[input$vc_cols %in% names(col_order)]
+    }
+    plot_df$Column <- factor(plot_df$Column, levels = rev(col_order))
+    
+    # labels & y value
+    y_val   <- if (input$vc_metric == "count") plot_df$Count else plot_df$Pct
+    y_label <- if (input$vc_metric == "count") "Count" else "Percentage (%)"
+    plot_df$y_val <- y_val
+    plot_df$label <- if (input$vc_metric == "count") {
+      paste0(plot_df$Column, " [", plot_df$Group, "]: ", plot_df$Count, " / ", plot_df$Total)
+    } else {
+      paste0(plot_df$Column, " [", plot_df$Group, "]: ", plot_df$Pct, "%")
+    }
+    
+    # plot
+    if (input$vc_group_on && !is.null(input$vc_group_var)) {
+      
+      p <- ggplot(plot_df, aes(x = y_val, y = Column, colour = Group, text = label)) +
+        geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column,
+                         colour = Group),
+                     linewidth = 0.6,
+                     position  = position_dodge(width = 0.6)) +
+        geom_point(size = 3, position = position_dodge(width = 0.6)) +
+        labs(title = paste0('Occurrences of "', val, '" — grouped by ', input$vc_group_var),
+             x = y_label, y = NULL) +
+        theme_minimal(base_size = 11)
+      
+    } else {
+      
+      p <- ggplot(plot_df, aes(x = y_val, y = Column, text = label)) +
+        geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column),
+                     colour = "steelblue", linewidth = 0.8) +
+        geom_point(colour = "steelblue", size = 3) +
+        labs(title = paste0('Occurrences of "', val, '" across Selected Columns'),
+             x = y_label, y = NULL) +
+        theme_minimal(base_size = 11)
+    }
+    
+    ggplotly(p, tooltip = "text")
+  })
+  
+  
+  # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
+  # ── SERVER bla ──────────────────────────────────────────────
+  
+  
   # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
   
   # user sidebar action collection layer (reactive auto-detect)
@@ -916,7 +1109,8 @@ server <- function(input, output, session) {
       # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
-                     sidebar_note("Note: <br><br>Run R expressions against the current dataset. <br><br>The dataset is available as df."),
+                     sidebar_note("Note: <br><br>Run R expressions against the current dataset. 
+                                  <br><br>The dataset is available as df."),
                      hr(),
                      actionButton("rconsole_run",   "Run",   icon = icon("play"),  width = "100%"),
                      br(), br(),
