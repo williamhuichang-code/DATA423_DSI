@@ -63,7 +63,6 @@ reorder_cols <- function(df) {
 }
 
 
-
 # ── DATA STAGE ───────────────────────────────────────────────────────────────
 
 # ·· RAW DATASET ··························································
@@ -266,7 +265,6 @@ ui <- fluidPage(
   # ── GLOBAL UI CONTROLS ─────────────────────────────────────────────────────
   
   # dataset stage selector + privacy lock always visible at the top
-  
   fluidRow(
     
     # dataset stage selector (debug stage only injected when unlocked — see server)
@@ -288,7 +286,7 @@ ui <- fluidPage(
     
     # passphrase + lock toggle
     column(3,
-           div(style = "margin-top:0px; display:flex; align-items:center; gap:8px;",
+           div(style = "margin-top:24px; display:flex; align-items:center; gap:8px;",
                passwordInput("privacy_pass", label = NULL,
                              placeholder = "Passphrase 123 to unlock",
                              width = "200px"),
@@ -612,7 +610,7 @@ server <- function(input, output, session) {
 
 
 # =============================================================================
-# SECTION 5 — RUN
+# Run shiny app
 # =============================================================================
 
 shinyApp(ui, server)
