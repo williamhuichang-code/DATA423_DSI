@@ -407,17 +407,55 @@ ui <- fluidPage(
     tabPanel("UpSet",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Missingness: <br><br>The UpSet plot helps identify the number of missing 
-                                         values across variables, as well as patterns of missingness that occur together."),
+                            sidebar_note("Missingness and content exploring: <br><br>The UpSet plot helps 
+                                     identify the number of missing values across variables, 
+                                     as well as patterns of missingness that occur together."),
                             hr(),
+                            
+                            # ~~ column selector ~~
                             selectizeInput("upset_cols", "Columns to include:",
                                            choices  = NULL,
                                            multiple = TRUE),
-                            numericInput("upset_top", "Show top N combinations:", value = 20, min = 1),
                             hr(),
+                            
+                            # ~~ anomaly detectors ~~
+                            tags$label("Detect as missing:"),
+                            checkboxInput("upset_det_na",    "True NA in R (is.na)",     value = TRUE),
+                            checkboxInput("upset_det_empty", "Whitespace / Empty string",  value = TRUE),
+                            
+                            # preset pseudo-NA strings
+                            checkboxGroupInput("upset_det_text", "Text pseudo-NAs:",
+                                               choices  = c("na", "n/a", "null", "none", "nan", "nil", "-", "?"),
+                                               selected = NULL,
+                                               inline   = TRUE),
+                            
+                            # preset sentinel numbers
+                            checkboxGroupInput("upset_det_sentinel", "Sentinel numbers:",
+                                               choices  = c("9999", "-9999", "999", "-999", "0"),
+                                               selected = NULL,
+                                               inline   = TRUE),
+                            hr(),
+                            
+                            # custom numbers
+                            textInput("upset_custom_num", "Custom numeric sentinels:",
+                                      placeholder = "e.g.  99, -1, 9999999"),
+                            
+                            # negative numbers (numeric columns only)
+                            checkboxInput("upset_det_negative", "Flag all negative numbers", value = FALSE),
+                            
+                            # custom text
+                            textInput("upset_custom_text", "Custom text values:",
+                                      placeholder = "e.g.  unknown, missing, tbd"),
+                            
+                            # case sensitivity toggle
+                            checkboxInput("upset_case", "Case sensitive (text matching)", value = FALSE),
+                            hr(),
+                            
+                            # ~~ display options ~~
+                            numericInput("upset_top", "Show top N combinations:", value = 20, min = 1),
                             radioButtons("upset_sort", "Sort bars by:",
-                                         choices  = c("Frequency" = "freq", "Combination" = "combo"),
-                                         selected = "freq")
+                                         choices  = c("Descending" = "desc", "Ascending" = "asc"),
+                                         selected = "desc")
                ),
                mainPanel(width = 9,
                          plotlyOutput("upset_plot", height = "80vh")
@@ -719,10 +757,9 @@ server <- function(input, output, session) {
   observe({
     df <- display_data()
     req(df)
-    # default to columns that actually have NAs
     na_cols <- names(df)[sapply(df, function(x) any(is.na(x)))]
-    if (length(na_cols) == 0) na_cols <- names(df)  # fallback if no NAs
-    updateSelectizeInput(session, "upset_cols", choices = names(df), selected = na_cols)
+    if (length(na_cols) == 0) na_cols <- names(df)
+    updateSelectizeInput(session, "upset_cols", choices = names(df), selected = names(df))
   })
   
   output$upset_plot <- renderPlotly({
@@ -732,17 +769,82 @@ server <- function(input, output, session) {
     
     df_sub <- df[, input$upset_cols, drop = FALSE]
     
-    # build binary NA matrix (1 = missing, 0 = present)
-    na_mat <- as.data.frame(lapply(df_sub, function(x) as.integer(is.na(x))))
+    # ·· build anomaly token lists ··
     
-    # create a pattern string per row e.g. "Sensor1&Sensor3"
+    # preset + custom text tokens
+    text_tokens <- c(input$upset_det_text)
+    if (nchar(trimws(input$upset_custom_text)) > 0) {
+      extra <- strsplit(input$upset_custom_text, ",")[[1]]
+      text_tokens <- c(text_tokens, trimws(extra))
+    }
+    
+    # preset + custom numeric sentinel tokens (as strings for unified matching)
+    num_tokens <- c(input$upset_det_sentinel)
+    if (nchar(trimws(input$upset_custom_num)) > 0) {
+      extra <- strsplit(input$upset_custom_num, ",")[[1]]
+      num_tokens <- c(num_tokens, trimws(extra))
+    }
+    # also as numeric for numeric columns
+    num_sentinels <- suppressWarnings(as.numeric(num_tokens))
+    num_sentinels <- num_sentinels[!is.na(num_sentinels)]
+    
+    # ·· flag each cell ··
+    is_anomaly <- function(x, col_name) {
+      
+      n      <- length(x)
+      flag   <- rep(FALSE, n)
+      x_str  <- as.character(x)   # string view for all columns
+      
+      # empty / whitespace
+      if (isTRUE(input$upset_det_empty)) {
+        flag <- flag | (!is.na(x) & trimws(x_str) == "")
+      }
+      
+      # true NA
+      if (isTRUE(input$upset_det_na)) {
+        flag <- flag | is.na(x)
+      }
+      
+      # text pseudo-NAs + custom text (unified, respects case toggle)
+      if (length(text_tokens) > 0) {
+        if (isTRUE(input$upset_case)) {
+          flag <- flag | (trimws(x_str) %in% text_tokens)
+        } else {
+          flag <- flag | (tolower(trimws(x_str)) %in% tolower(text_tokens))
+        }
+      }
+      
+      # sentinel numbers — string path (applies to ALL column types)
+      if (length(num_tokens) > 0) {
+        flag <- flag | (trimws(x_str) %in% num_tokens)
+      }
+      
+      # sentinel numbers — numeric path (numeric columns only, catches 9999.0 etc.)
+      if (length(num_sentinels) > 0 && is.numeric(x)) {
+        flag <- flag | (x %in% num_sentinels)
+      }
+      
+      # negative numbers (numeric columns only)
+      if (isTRUE(input$upset_det_negative) && is.numeric(x)) {
+        flag <- flag | (!is.na(x) & x < 0)
+      }
+      
+      flag
+    }
+    
+    # build binary anomaly matrix
+    na_mat <- as.data.frame(
+      mapply(is_anomaly, df_sub, names(df_sub), SIMPLIFY = FALSE)
+    )
+    na_mat <- as.data.frame(lapply(na_mat, as.integer))
+    
+    # pattern string per row
     patterns <- apply(na_mat, 1, function(row) {
-      cols_missing <- input$upset_cols[row == 1]
-      if (length(cols_missing) == 0) return("(complete rows)")
-      paste(cols_missing, collapse = " & ")
+      cols_flagged <- input$upset_cols[row == 1]
+      if (length(cols_flagged) == 0) return("(Complementary Completeness)")
+      paste(cols_flagged, collapse = " & ")
     })
     
-    # count each pattern
     pattern_counts <- sort(table(patterns), decreasing = TRUE)
     pattern_counts <- head(pattern_counts, input$upset_top)
     
@@ -752,22 +854,20 @@ server <- function(input, output, session) {
     )
     
     # sort
-    if (input$upset_sort == "freq") {
-      plot_df <- plot_df[order(-plot_df$Count), ]
+    plot_df <- if (input$upset_sort == "desc") {
+      plot_df[order(-plot_df$Count), ]
     } else {
-      plot_df <- plot_df[order(plot_df$Pattern), ]
+      plot_df[order(plot_df$Count), ]
     }
     
     plot_df$Pattern <- factor(plot_df$Pattern, levels = rev(plot_df$Pattern))
-    
-    # colour complete rows differently
-    plot_df$Colour <- ifelse(plot_df$Pattern == "(complete rows)", "complete", "missing")
+    plot_df$Colour  <- ifelse(plot_df$Pattern == "(Complementary Completeness)", "complete", "missing")
     
     p <- ggplot(plot_df, aes(x = Count, y = Pattern, fill = Colour,
                              text = paste0(Pattern, "\n", Count, " rows"))) +
       geom_col() +
       scale_fill_manual(values = c("complete" = "steelblue", "missing" = "tomato")) +
-      labs(title = "Missing Value Intersection Patterns",
+      labs(title = "Anomaly Intersection Patterns",
            x = "Row Count", y = NULL) +
       theme_minimal(base_size = 11) +
       theme(legend.position = "none")
