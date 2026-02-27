@@ -347,6 +347,11 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
+    # ── COMING SOON ───────────────────────────────────────────────────────
+    
+    tabPanel("Coming Soon", p("This feature is under development.")), # end of tab panel
+    
+    
     # ── UI R CONSOLE ───────────────────────────────────────────────────────
     
     # the entire tab body is rendered server-side to stay hidden when locked
