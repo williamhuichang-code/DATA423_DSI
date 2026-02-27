@@ -592,10 +592,12 @@ server <- function(input, output, session) {
       
       for (expr in exprs) {
         tryCatch({
-          res <- withVisible(eval(expr, envir = rconsole_env))
-          if (res$visible) print(res$value)
+          res <- capture.output(
+            eval(expr, envir = rconsole_env)
+          )
+          if (length(res) > 0) cat(paste(res, collapse = "\n"), "\n")
         },
-        error   = function(e) cat("Error:",   conditionMessage(e), "\n"),
+        error = function(e) cat("Error:", conditionMessage(e), "\n"),
         warning = function(w) cat("Warning:", conditionMessage(w), "\n"))
       }
     })
