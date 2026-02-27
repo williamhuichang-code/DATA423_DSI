@@ -337,8 +337,12 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            selectInput("wc_var", "Categorical variable:",
-                                        choices = NULL),
+                            checkboxInput("wc_varnames_mode", "Show variable names", value = FALSE),
+                            hr(),
+                            conditionalPanel(
+                              condition = "input.wc_varnames_mode == false",
+                              selectInput("wc_var", "Categorical variable:", choices = NULL)
+                            ),
                             hr(),
                             checkboxInput("wc_case", "Case sensitive", value = TRUE),
                             hr(),
@@ -552,9 +556,17 @@ server <- function(input, output, session) {
   })
   
   output$wc_plot <- renderPlot({
-    req(input$wc_var)
+    
     df  <- display_data()
-    val <- as.character(df[[input$wc_var]])
+    
+    # add options to check variable names based on user need
+    if (isTRUE(input$wc_varnames_mode)) {
+      val <- names(df)
+    } else {
+      req(input$wc_var)
+      val <- as.character(df[[input$wc_var]])
+    }
+    
     val <- val[!is.na(val) & nchar(trimws(val)) > 0]
     
     # apply case folding on raw values before any splitting
