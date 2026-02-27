@@ -16,7 +16,7 @@ library(colorspace)
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
-# ·· SUCURITY LOCK ························································
+# ·· SECURITY LOCK ························································
 
 # What the lock controls (all three require authentication):
 #   PRIVATE_COLS  — hidden in all dataset views until unlocked (for stakeholder or authentised users)
@@ -608,7 +608,7 @@ ui <- fluidPage(
     tabPanel("Rising Value",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Comeplete but Improper Value: <br><br>
+                            sidebar_note("Complete but Improper Value: <br><br>
                                          This rising value chart helps identify incorrectly collected or 
                                          inconsistent numeric values.
                                          "),
@@ -641,7 +641,7 @@ ui <- fluidPage(
     tabPanel("GGPairs",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Suspecious Relationship and Density: <br><br>
+                            sidebar_note("Suspicious Relationship and Density: <br><br>
                                          This GGPairs graph is useful for quickly inspecting 
                                          pairwise relationships, correlations, and marginal 
                                          density distributions across multiple variables."),
@@ -756,7 +756,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # status badge next to the lock button
+  # status badge next to the lock button (bigger and nice looking, this is intended, not a bug)
   output$privacy_status_ui <- renderUI({
     if (is_unlocked()) {
       tagList(
@@ -1215,10 +1215,7 @@ server <- function(input, output, session) {
         geom_segment(aes(x = 0, xend = y_val, y = Column, yend = Column),
                      colour = "steelblue", linewidth = 0.8) +
         geom_point(colour = "steelblue", size = 3) +
-        labs(title = plot_title(
-          "Lollipop",
-          paste0('Occurrences of "', val, '" grouped by ', input$vc_group_var)
-        )) +
+        labs(title = plot_title("Lollipop", paste0('Occurrences of "', val, '"'))) +
         theme_minimal(base_size = 11)
     }
     
