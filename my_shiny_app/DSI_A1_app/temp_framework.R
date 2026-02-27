@@ -341,7 +341,7 @@ ui <- fluidPage(
     tabPanel("Summary",
              sidebarLayout(
                sidebarPanel(width = 2,
-                            sidebar_note("Can select a style to inspect the dataset structure."),
+                            sidebar_note("Note: <br><br>Can select a style to inspect the dataset structure."),
                             hr(),
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
@@ -361,7 +361,7 @@ ui <- fluidPage(
     tabPanel("Plot A",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("CONFIGURE: add my own controls here."),
+                            sidebar_note("Note: <br><br>add my own controls here."),
                             hr(),
                             selectInput("plotA_var", "Variable:", choices = NULL)
                ),
@@ -377,7 +377,7 @@ ui <- fluidPage(
     tabPanel("Coming Soon",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("This feature is under development."),
+                            sidebar_note("Note: <br><br>This feature is under development."),
                             hr(),
                             selectInput("x_var", "Variable:", choices = NULL)
                ),
@@ -581,7 +581,7 @@ server <- function(input, output, session) {
       # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
-                     sidebar_note("Run R expressions against the current dataset. <br><br>The dataset is available as df."),
+                     sidebar_note("Note: <br><br>Run R expressions against the current dataset. <br><br>The dataset is available as df."),
                      hr(),
                      actionButton("rconsole_run",   "Run",   icon = icon("play"),  width = "100%"),
                      br(), br(),
