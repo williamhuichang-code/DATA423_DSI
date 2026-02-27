@@ -13,6 +13,8 @@ library(DT)
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
+# ·· SUCURITY LOCK ························································
+
 # What the lock controls (all three require authentication):
 #   PRIVATE_COLS  — hidden in all dataset views until unlocked (for stakeholder or authentised users)
 #   R Console tab — completely hidden until unlocked (for user or developer me lol)
@@ -24,9 +26,16 @@ UNLOCK_PASSPHRASE <- "123"
 # columns to hide from unauthenticated users
 PRIVATE_COLS <- c("ID")
 
-# global master column order, that all datasets could follow (skipping cols that don't exist in that dataset)
+
+# ·· GLOBAL COL ORDERING ··················································
+
+# ~~ pre-defined global column order ~~
+
+# global master column order, that all datasets could follow 
+
 # Note:
 #   every time when I derived a col to enrich, I should add it here in a position
+#   it will also skip cols that don't exist in that dataset
 
 MASTER_COL_ORDER <- c(
   # target
@@ -52,12 +61,11 @@ MASTER_COL_ORDER <- c(
   "NormalisedSG1", "NormalisedSG2", "NormalisedSG3"
 )
 
+# ~~ reordering helper function ~~
 
-# ── GLOBAL HELPER ────────────────────────────────────────────────────────────
-
-# helper function: reorder a df by master order, skipping missing cols
+# reorder a df by global master order
 reorder_cols <- function(df) {
-  keep <- MASTER_COL_ORDER[MASTER_COL_ORDER %in% names(df)]  # only cols that exist
+  keep <- MASTER_COL_ORDER[MASTER_COL_ORDER %in% names(df)]  # only cols that exist, skipping missing cols
   df[, keep]
 }
 
