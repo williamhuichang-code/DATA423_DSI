@@ -361,7 +361,8 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("CONFIGURE: add my own controls here."),
+                            sidebar_note("This word cloud helps identify inconsistencies in variable names 
+                                         or categorical values, depending on the selected mode."),
                             hr(),
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
                             hr(),
@@ -384,13 +385,15 @@ ui <- fluidPage(
                                         min = 10, max = 500, value = 360, step = 10),
                             sliderInput("wc_min_freq", "Min frequency:",
                                         min = 1, max = 50, value = 1, step = 1),
+                            helpText("Font size is proportional to frequency."),
+                            hr(),
+                            sliderInput("wc_scale", "Plot scale:",
+                                        min = 0.3, max = 3.0, value = 1.0, step = 0.1),
                             hr(),
                             selectInput("wc_palette", "Colour palette:",
                                         choices = c("Dark2", "Set1", "Set2", "Set3",
                                                     "Paired", "Accent", "Spectral"),
-                                        selected = "Dark2"),
-                            hr(),
-                            helpText("Font size is proportional to frequency.")
+                                        selected = "Dark2")
                ),
                mainPanel(width = 9,
                          plotOutput("wc_plot", height = "80vh")
@@ -666,6 +669,8 @@ server <- function(input, output, session) {
     # boost max_scale proportionally to outlier strength, cap at 12
     max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
     min_scale  <- max(0.3, max_scale * 0.15)   # tighter min so rare tokens stay small
+    max_scale <- max_scale * input$wc_scale
+    min_scale <- min_scale * input$wc_scale
     
     par(mar = c(0, 0, 0, 0), bg = "white")
     
