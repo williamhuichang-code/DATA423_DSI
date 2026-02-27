@@ -9,7 +9,10 @@ library(shiny)
 library(shinyAce)  # R console ace editor
 library(dplyr)
 library(DT)
-
+library(plotly)
+library(ggplot2)
+library(paletteer) # global colour theme
+library(colorspace)
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
@@ -69,6 +72,70 @@ reorder_cols <- function(df) {
   df[, keep]
 }
 
+
+# ── GLOBAL COLOUR THEME ──────────────────────────────────────────────────────
+
+# grouping color strategy
+# interleave light/dark within each group for maximum within-group contrast
+sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
+sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
+
+sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+THEME_COLOURS <- c(
+  sensor1_cols,
+  sensor2_cols,
+  sensor3_cols,
+  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
+)
+
+# named designations (only pin variables that need a meaningful fixed colour)
+THEME_DESIGNATED <- c(
+  "Y" = "#C41E3A"   # target variable always red
+)
+
+# helper: give it any character vector of names -> get back a named colour vector
+#   designated names always get their fixed colour
+#   everything else samples from THEME_COLOURS automatically
+
+theme_colours_for <- function(vars) {
+  colours <- character(length(vars))
+  names(colours) <- vars
+  
+  for (v in vars) {
+    
+    # 1️⃣ designated colours
+    if (v %in% names(THEME_DESIGNATED)) {
+      colours[v] <- THEME_DESIGNATED[v]
+      next
+    }
+    
+    # 2️⃣ raw sensors 1–30 (true grouping logic)
+    if (grepl("^Sensor[0-9]+$", v)) {
+      num <- as.integer(sub("Sensor", "", v))
+      
+      if (num <= 10) {
+        colours[v] <- sensor1_cols[num]
+      } else if (num <= 20) {
+        colours[v] <- sensor2_cols[num - 10]
+      } else {
+        colours[v] <- sensor3_cols[num - 20]
+      }
+      
+      next
+    }
+    
+    # 3️⃣ everything else (fallback deterministic mapping)
+    idx <- abs(sum(utf8ToInt(v)))
+    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
+  }
+  
+  colours
+}
 
 
 # ── GENERAL HELPER ───────────────────────────────────────────────────────────
@@ -362,8 +429,9 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Col Names & Grouping: <br><br>This word cloud helps identify inconsistencies 
-                                         in variable names or categorical values, depending on the selected mode."),
+                            sidebar_note("Col Names & Missingness Cooccurrence & Improper Collecting: <br><br>
+                                         This word cloud helps identify inconsistencies in variable names 
+                                         or categorical values, depending on the selected mode."),
                             hr(),
                             
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
@@ -415,7 +483,7 @@ ui <- fluidPage(
     tabPanel("UpSet",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Missingness and general content exploring: <br><br>The UpSet plot 
+                            sidebar_note("Missingness and General Content Exploring: <br><br>The UpSet plot 
                                      helps identify the number of missing values across variables, 
                                      as well as patterns of missingness that occur together."),
                             hr(),
@@ -478,7 +546,7 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 3,
                             
-                            sidebar_note("Missingness and reasoning: <br><br>This lollipop chart helps 
+                            sidebar_note("Missingness and Reasoning: <br><br>This lollipop chart helps 
                                          explore potential reasons for missingness in the selected 
                                          variable by examining it across different contextual groups."),
                             hr(),
@@ -523,6 +591,39 @@ ui <- fluidPage(
                )
              )
     ),  # end of tab panel
+    
+    
+    # ── UI RISING VALUE ───────────────────────────────────────────────────
+    
+    tabPanel("Rising Value",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Comeplete but Improper Value: <br><br>
+                                         This rising value chart helps identify incorrectly collected or 
+                                         inconsistent numeric values.
+                                         "),
+                            selectizeInput("rising_var", "Select numeric variable:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            sliderInput("rising_lwd", "Line width:",
+                                        min = 0.2, max = 5, value = 1.6, step = 0.1, width = "100%"),
+                            hr(),
+                            radioButtons("rising_lty", "Line type:",
+                                         choices = c(
+                                           "Solid"    = "solid",
+                                           "Dashed"   = "dashed",
+                                           "Dotted"   = "dotted",
+                                           "Dotdash"  = "dotdash",
+                                           "Longdash" = "longdash"
+                                         ),
+                                         selected = "dotdash")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("rising_output", height = "85vh")
+               )
+             )
+    ), # end of tab panel
     
     
     # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
@@ -707,7 +808,7 @@ server <- function(input, output, session) {
     df <- display_data()
     switch(input$summary_style,
            "base"    = summary(df),
-           "glimpse" = tibble::glimpse(df),
+           "glimpse" = cat(capture.output(tibble::glimpse(df)), sep = "\n"),
            "dfsummary" = summarytools::dfSummary(df))
   })
   
@@ -1065,8 +1166,46 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
-  # ── SERVER bla ──────────────────────────────────────────────
+  # ── SERVER RISING VALUE ────────────────────────────────────────────────
+  
+  # user sidebar action collection layer (reactive auto-detect)
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    default_sel  <- num_vars[num_vars %in% 
+                               c("Y", "Sensor4", "Sensor6", "Sensor8", "Sensor11", 
+                                 "Sensor16", "Sensor22", "Sensor24", "Sensor28")]
+    updateSelectizeInput(session, "rising_var", choices = num_vars, selected = default_sel)
+  })
+  
+  # render layer — rising value lines, ggplotly
+  output$rising_output <- renderPlotly({
+    req(input$rising_var)
+    df       <- display_data()
+    num_vars <- input$rising_var
+    colours  <- theme_colours_for(num_vars)
+    
+    # build long-format df
+    plot_df <- do.call(rbind, lapply(num_vars, function(v) {
+      y   <- sort(na.omit(df[[v]]))
+      pct <- seq_along(y) / length(y) * 100
+      data.frame(Percentile = pct, Value = y, Variable = v)
+    }))
+    
+    p <- ggplot(plot_df, aes(x = Percentile, y = Value,
+                             colour = Variable,
+                             group  = Variable,
+                             text   = paste0(Variable,
+                                             "<br>Percentile: ", round(Percentile, 1),
+                                             "<br>Value: ",      round(Value, 3)))) +
+      geom_line(linewidth = input$rising_lwd / 3, linetype = input$rising_lty) +
+      scale_colour_manual(values = colours) +
+      labs(title = "Rising Value Chart", x = "Percentile", y = "Value") +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "right")
+    
+    ggplotly(p, tooltip = "text")
+  })
   
   
   # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
