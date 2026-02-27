@@ -341,7 +341,7 @@ ui <- fluidPage(
     tabPanel("Summary",
              sidebarLayout(
                sidebarPanel(width = 2,
-                            sidebar_note("Can select a style to inspect the dataset structure."),
+                            sidebar_note("In General: <br><br>Can select a style to inspect the dataset structure."),
                             hr(),
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
@@ -361,8 +361,8 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("This word cloud helps identify inconsistencies in variable names 
-                                         or categorical values, depending on the selected mode."),
+                            sidebar_note("Col Names & Grouping: <br><br>This word cloud helps identify inconsistencies 
+                                         in variable names or categorical values, depending on the selected mode."),
                             hr(),
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
                             hr(),
@@ -402,12 +402,36 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
+    # ── UI UPSET ──────────────────────────────────────────────────────────
+    
+    tabPanel("UpSet",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Missingness: <br><br>The UpSet plot helps identify the number of missing 
+                                         values across variables, as well as patterns of missingness that occur together."),
+                            hr(),
+                            selectizeInput("upset_cols", "Columns to include:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            numericInput("upset_top", "Show top N combinations:", value = 20, min = 1),
+                            hr(),
+                            radioButtons("upset_sort", "Sort bars by:",
+                                         choices  = c("Frequency" = "freq", "Combination" = "combo"),
+                                         selected = "freq")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("upset_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
     
     tabPanel("Plot A",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("CONFIGURE: add my own controls here."),
+                            sidebar_note("Hint: <br><br>add my own controls here."),
                             hr(),
                             selectInput("plotA_var", "Variable:", choices = NULL)
                ),
@@ -423,7 +447,7 @@ ui <- fluidPage(
     tabPanel("Coming Soon",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("This feature is under development."),
+                            sidebar_note("Note: <br><br>This feature is under development."),
                             hr(),
                             selectInput("x_var", "Variable:", choices = NULL)
                ),
@@ -690,6 +714,68 @@ server <- function(input, output, session) {
   })
   
   
+  # ── SERVER UPSET ───────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    # default to columns that actually have NAs
+    na_cols <- names(df)[sapply(df, function(x) any(is.na(x)))]
+    if (length(na_cols) == 0) na_cols <- names(df)  # fallback if no NAs
+    updateSelectizeInput(session, "upset_cols", choices = names(df), selected = na_cols)
+  })
+  
+  output$upset_plot <- renderPlotly({
+    req(input$upset_cols)
+    df <- display_data()
+    validate(need(length(input$upset_cols) >= 1, "Please select at least 1 column."))
+    
+    df_sub <- df[, input$upset_cols, drop = FALSE]
+    
+    # build binary NA matrix (1 = missing, 0 = present)
+    na_mat <- as.data.frame(lapply(df_sub, function(x) as.integer(is.na(x))))
+    
+    # create a pattern string per row e.g. "Sensor1&Sensor3"
+    patterns <- apply(na_mat, 1, function(row) {
+      cols_missing <- input$upset_cols[row == 1]
+      if (length(cols_missing) == 0) return("(complete rows)")
+      paste(cols_missing, collapse = " & ")
+    })
+    
+    # count each pattern
+    pattern_counts <- sort(table(patterns), decreasing = TRUE)
+    pattern_counts <- head(pattern_counts, input$upset_top)
+    
+    plot_df <- data.frame(
+      Pattern = names(pattern_counts),
+      Count   = as.integer(pattern_counts)
+    )
+    
+    # sort
+    if (input$upset_sort == "freq") {
+      plot_df <- plot_df[order(-plot_df$Count), ]
+    } else {
+      plot_df <- plot_df[order(plot_df$Pattern), ]
+    }
+    
+    plot_df$Pattern <- factor(plot_df$Pattern, levels = rev(plot_df$Pattern))
+    
+    # colour complete rows differently
+    plot_df$Colour <- ifelse(plot_df$Pattern == "(complete rows)", "complete", "missing")
+    
+    p <- ggplot(plot_df, aes(x = Count, y = Pattern, fill = Colour,
+                             text = paste0(Pattern, "\n", Count, " rows"))) +
+      geom_col() +
+      scale_fill_manual(values = c("complete" = "steelblue", "missing" = "tomato")) +
+      labs(title = "Missing Value Intersection Patterns",
+           x = "Row Count", y = NULL) +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "none")
+    
+    ggplotly(p, tooltip = "text") %>% layout(showlegend = FALSE)
+  })
+  
+  
   # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
   
   # user sidebar action collection layer (reactive auto-detect)
@@ -730,7 +816,7 @@ server <- function(input, output, session) {
       # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
-                     sidebar_note("Run R expressions against the current dataset. <br><br>The dataset is available as df."),
+                     sidebar_note("Note: <br><br>Run R expressions against the current dataset. <br><br>The dataset is available as df."),
                      hr(),
                      actionButton("rconsole_run",   "Run",   icon = icon("play"),  width = "100%"),
                      br(), br(),
