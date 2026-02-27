@@ -421,10 +421,16 @@ server <- function(input, output, session) {
   
   output$dataset_selector_ui <- renderUI({
     choices <- c("Raw Dataset", "Enriched Dataset", "Model Dataset")
+    
     # (injects "Debug Dataset" when unlocked)
     if (is_unlocked()) choices <- c(choices, "Debug Dataset")
+    
+    # preserve current selection
+    current <- isolate(input$dataset_choice)
+    if (is.null(current) || !current %in% choices) current <- "Enriched Dataset"
+    
     selectInput("dataset_choice", "Dataset Stage:",
-                choices = choices, selected = "Enriched Dataset")
+                choices = choices, selected = current)
   })
   
   # info modal explaining each stage
