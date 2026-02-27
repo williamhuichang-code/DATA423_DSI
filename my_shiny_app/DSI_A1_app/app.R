@@ -532,7 +532,9 @@ server <- function(input, output, session) {
         tags$dt("Model Dataset"),
         tags$dd("Enriched with identifiers and leaky columns removed. Ready for modelling."),
         tags$dt("Debug Dataset", style = "color:#856404;"),
-        tags$dd("Enriched + diagnostic flags and intermediate values. Only visible when unlocked.")
+        tags$dd("Enriched + diagnostic flags and intermediate values. Only visible when unlocked."),
+        tags$dt("Note: ", style = "color:#856404;"),
+        tags$dd("ID column is intentionally hidden across all datasets. Only visible when unlocked."),
       ),
       easyClose = TRUE,
       footer    = modalButton("Close")
