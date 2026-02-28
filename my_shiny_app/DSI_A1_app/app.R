@@ -796,6 +796,22 @@ ui <- fluidPage(
                                              options  = list(placeholder = "All levels shown by default"))
                             ),
                             hr(),
+                            sliderInput("box_iqr",
+                                        HTML("Outlier threshold &nbsp;<small>(IQR multiplier)</small>"),
+                                        min   = 0,
+                                        max   = 5,
+                                        value = 1.5,
+                                        step  = 0.1),
+                            helpText("Whiskers extend to the furthest point within",
+                                     "± multiplier × IQR from the box edges.",
+                                     "Points beyond are plotted individually."),
+                            hr(),
+                            checkboxGroupInput("box_transform",
+                                               "Standardisation:",
+                                               choices  = c("Center (subtract mean)" = "center",
+                                                            "Scale (divide by SD)"   = "scale"),
+                                               selected = NULL),
+                            hr(),
                             checkboxInput("box_violin", "Show as violin", value = FALSE),
                ),
                mainPanel(width = 9,
@@ -810,45 +826,50 @@ ui <- fluidPage(
     tabPanel("Boxplot 2",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Outlier Identification: <br><br>
-                                     car::Boxplot labels outlier points with their 
-                                     row index so you can track down exactly which 
-                                     observations are problematic."),
+                            sidebar_note("Boxplot 2: <br><br>
+                                     car::Boxplot alternative."),
                             hr(),
                             
-                            selectizeInput("ob_vars", "Numeric variables:",
+                            selectizeInput("bp2_vars", "Numeric variables:",
                                            choices  = NULL,
+                                           selected = paste0("Sensor", 1:30),
                                            multiple = TRUE),
                             hr(),
                             
-                            checkboxInput("ob_group_on", "Group by variable", value = FALSE),
+                            checkboxInput("bp2_group_on", "Group by variable", value = FALSE),
                             conditionalPanel(
-                              condition = "input.ob_group_on == true",
-                              selectInput("ob_group_var", "Group by:", choices = NULL),
-                              selectizeInput("ob_group_levels", "Show levels:",
+                              condition = "input.bp2_group_on == true",
+                              selectInput("bp2_group_var", "Group by:", choices = NULL),
+                              selectizeInput("bp2_group_levels", "Show levels:",
                                              choices  = NULL,
                                              multiple = TRUE,
                                              options  = list(placeholder = "All levels shown by default"))
                             ),
                             hr(),
                             
-                            selectInput("ob_label_var", "Label outliers by:",
-                                        choices = NULL),
+                            sliderInput("bp2_iqr",
+                                        HTML("Outlier threshold &nbsp;<small>(IQR multiplier)</small>"),
+                                        min   = 0,
+                                        max   = 5,
+                                        value = 1.5,
+                                        step  = 0.1),
+                            helpText("Whiskers extend to the furthest point within",
+                                     "± multiplier × IQR from the box edges.",
+                                     "Points beyond are plotted individually."),
                             hr(),
                             
-                            numericInput("ob_id_n", "Max outliers to label:",
-                                         value = 0, min = 1, max = 100, step = 1),
-                            hr(),
-                            
-                            sliderInput("ob_iqr", "IQR multiplier:",
-                                        min = 0.5, max = 3.0, value = 1.5, step = 0.25),
-                            helpText("1.5 = standard outlier rule. 3.0 = extreme outliers only.")
-               ),
+                            checkboxGroupInput("bp2_transform",
+                                               "Standardisation:",
+                                               choices  = c("Center (subtract mean)" = "center",
+                                                            "Scale (divide by SD)"   = "scale"),
+                                               selected = NULL)
+                            ),
                mainPanel(width = 9,
-                         plotOutput("ob_plot", height = "85vh")
+                         plotOutput("bp2_plot", height = "85vh"),
+                         uiOutput("bp2_warning")
                )
              )
-    ),  # end of tab panel
+    ), # end of tab panel
     
     
     # ── UI Q-Q PLOT ───────────────────────────────────────────────────────
@@ -1838,19 +1859,80 @@ server <- function(input, output, session) {
     df <- display_data()
     validate(need(length(input$box_vars) >= 1, "Please select at least 1 variable."))
     
-    plot_df <- tidyr::pivot_longer(df, cols = all_of(input$box_vars),
+    # apply centering / scaling before pivoting
+    do_center <- "center" %in% input$box_transform
+    do_scale  <- "scale"  %in% input$box_transform
+    
+    # define grp FIRST so scaling block can use it
+    grp <- if (input$box_group_on && !is.null(input$box_group_var)) input$box_group_var else NULL
+    
+    df_sel <- df[, input$box_vars, drop = FALSE]
+    
+    num_cols <- names(df_sel)[sapply(df_sel, is.numeric)]
+    
+    if ((do_center || do_scale) && length(num_cols) > 0) {
+      
+      if (!is.null(grp) && grp %in% names(df)) {
+        # within-group scaling
+        # scale each numeric column separately per group level
+        # so SD=1 means "1 SD within that group", not globally
+        grp_vals <- df[[grp]]
+        for (col in num_cols) {
+          for (lv in unique(grp_vals)) {
+            idx <- which(grp_vals == lv)
+            df_sel[idx, col] <- as.numeric(
+              scale(df_sel[idx, col, drop = TRUE], center = do_center, scale = do_scale)
+            )
+          }
+        }
+      } else {
+        # global scaling (ungrouped, original behaviour)
+        df_sel[, num_cols] <- as.data.frame(
+          scale(df_sel[, num_cols, drop = FALSE], center = do_center, scale = do_scale)
+        )
+      }
+    }
+    
+    if (!is.null(grp) && grp %in% names(df)) {
+      df_sel[[grp]] <- df[[grp]]   # attach group col to the scaled df before pivoting
+    }
+    
+    pivot_cols <- input$box_vars   # only pivot the numeric vars, not the group col
+    plot_df <- tidyr::pivot_longer(df_sel, cols = all_of(pivot_cols),
                                    names_to = "Variable", values_to = "Value")
     plot_df$Variable <- factor(plot_df$Variable, levels = input$box_vars)
     
-    # build geom layer separately to avoid inline if/else issue
+    y_label <- if (do_center && do_scale) {
+      "Z-score (centered + scaled)"
+    } else if (do_center) {
+      "Mean-centred value"
+    } else if (do_scale) {
+      "SD-scaled value"
+    } else {
+      "Value"
+    }
+    
+    transform_tag <- if (do_center || do_scale)
+      paste0(" | ", paste(c("centered"[do_center], "scaled"[do_scale]), collapse = " + "))
+    else ""
+    subtitle_text <- if (input$box_violin) {
+      # violin: no IQR, only report transforms if active
+      if (do_center || do_scale)
+        paste(c("centered"[do_center], "scaled"[do_scale]), collapse = " + ")
+      else
+        ""
+    } else {
+      # boxplot: report IQR + transforms
+      sprintf("IQR multiplier: %.1f%s", input$box_iqr, transform_tag)
+    }
+    
     geom_layer <- if (input$box_violin) {
       geom_violin(alpha = 0.7, trim = FALSE)
     } else {
-      geom_boxplot(alpha = 0.7, outlier.size = 0.8)
+      geom_boxplot(coef = input$box_iqr, alpha = 0.7, outlier.size = 0.8)
     }
     
-    if (input$box_group_on && !is.null(input$box_group_var)) {
-      grp <- input$box_group_var
+    if (!is.null(grp)) {
       plot_df[[grp]] <- as.factor(plot_df[[grp]])
       
       if (!is.null(input$box_group_levels) && length(input$box_group_levels) > 0) {
@@ -1858,17 +1940,17 @@ server <- function(input, output, session) {
         plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))
       }
       
-      validate(need(nrow(plot_df) > 0, ""))
+      validate(need(nrow(plot_df) > 0, "No rows remain after filtering group levels."))
       
       p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
         geom_layer +
         facet_wrap(as.formula(paste("~", grp)), scales = "free_y") +
         labs(
-          title = paste(
+          title = plot_title(
             if (input$box_violin) "Violin" else "Boxplot",
-            "grouped by", grp
+            paste0("grouped by ", grp, " | ", subtitle_text)
           ),
-          x = NULL, y = "Value") +
+          x = NULL, y = y_label) +
         theme_minimal(base_size = 11) +
         theme(axis.text.x = element_text(angle = 45, hjust = 1),
               legend.position = "none")
@@ -1877,8 +1959,11 @@ server <- function(input, output, session) {
       p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
         geom_layer +
         labs(
-          title = if (input$box_violin) "Violin — variable comparison" else "Boxplot — variable comparison",
-          x = NULL, y = "Value") +
+          title = plot_title(
+            if (input$box_violin) "Violin" else "Boxplot",
+            subtitle_text
+          ),
+          x = NULL, y = y_label) +
         theme_minimal(base_size = 11) +
         theme(axis.text.x = element_text(angle = 45, hjust = 1),
               legend.position = "none")
@@ -1889,105 +1974,149 @@ server <- function(input, output, session) {
   
   
   # ── SERVER BOXPLOT 2 ───────────────────────────────────────────────────
-
-observe({
-  df       <- display_data()
-  req(df)
-  num_vars <- names(df)[sapply(df, is.numeric)]
-  cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
-  all_vars <- names(df)
   
-  updateSelectizeInput(session, "ob_vars",      choices = num_vars, selected = num_vars[1])
-  updateSelectInput(   session, "ob_group_var", choices = cat_vars, selected = cat_vars[1])
-  updateSelectInput(   session, "ob_label_var",
-                       choices  = c("Row index" = ".rowindex", all_vars),
-                       selected = ".rowindex")
-})
-
-observeEvent(input$ob_group_var, {
-  req(input$ob_group_var)
-  df   <- display_data()
-  lvls <- sort(unique(as.character(df[[input$ob_group_var]])))
-  lvls <- lvls[!is.na(lvls)]
-  updateSelectizeInput(session, "ob_group_levels", choices = lvls, selected = lvls)
-})
-
-output$ob_plot <- renderPlot({
-  req(input$ob_vars)
-  df    <- display_data()
-  vars  <- input$ob_vars
-  
-  validate(need(length(vars) >= 1, "Please select at least 1 variable."))
-  
-  # build label vector
-  labels <- if (input$ob_label_var == ".rowindex") {
-    as.character(seq_len(nrow(df)))
-  } else {
-    as.character(df[[input$ob_label_var]])
-  }
-  
-  # layout: one plot per variable
-  n_vars <- length(vars)
-  par(mfrow = c(1, n_vars), mar = c(5, 4, 4, 1))
-  
-  for (v in vars) {
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
     
-    if (input$ob_group_on && !is.null(input$ob_group_var)) {
-      
-      grp     <- input$ob_group_var
-      plot_df <- df
-      plot_df$..label.. <- labels
-      
-      if (!is.null(input$ob_group_levels) && length(input$ob_group_levels) > 0) {
-        plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$ob_group_levels, ]
-      }
-      plot_df <- plot_df[!is.na(plot_df[[v]]), ]
-      
-      validate(
-        need(nrow(plot_df) >= 2, "No data after filtering — try different levels."),
-        need(any(is.finite(plot_df[[v]])), "No finite values in selected variable.")
-      )
-      
-      car::Boxplot(
-        plot_df[[v]] ~ as.factor(plot_df[[grp]]),
-        id    = list(n      = input$ob_id_n,
-                     labels = plot_df$..label..,
-                     cex    = 0.7,
-                     col    = "tomato"),
-        main  = plot_title("Outlier Boxplot", paste(v, "by", grp)),
-        xlab  = grp,
-        ylab  = v,
-        col   = "lightblue",
-        range = input$ob_iqr
-      )
-      
-    } else {
-      
-      valid   <- !is.na(df[[v]])
-      plot_df <- df[valid, ]
-      lab_sub <- labels[valid]
-      
-      validate(
-        need(nrow(plot_df) >= 2, "No finite values in selected variable.")
-      )
-      
-      car::Boxplot(
-        plot_df[[v]],
-        id    = list(n      = input$ob_id_n,
-                     labels = lab_sub,
-                     cex    = 0.7,
-                     col    = "tomato"),
-        main  = plot_title("Outlier Boxplot", v),
-        ylab  = v,
-        col   = "lightblue",
-        range = input$ob_iqr
-      )
-    }
-  }
+    # default to Sensor1:Sensor30, falling back to whatever numeric cols exist
+    default_sel <- intersect(paste0("Sensor", 1:30), num_vars)
+    if (length(default_sel) == 0) default_sel <- num_vars[1]
+    
+    updateSelectizeInput(session, "bp2_vars",
+                         choices  = num_vars,
+                         selected = default_sel)
+  })
   
-  # reset layout
-  par(mfrow = c(1, 1))
-})
+  output$bp2_warning <- renderUI({
+    if (is.null(input$bp2_vars) || length(input$bp2_vars) == 0)
+      tags$p(style = "color:#c0392b; font-style:italic; padding-left:15px;",
+             "Please select at least one variable.")
+  })
+  
+  # populate bp2 group var choices
+  observe({
+    df       <- display_data()
+    req(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "bp2_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  observeEvent(input$bp2_group_var, {
+    req(input$bp2_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$bp2_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "bp2_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  
+  output$bp2_plot <- renderPlot({
+    req(input$bp2_vars, input$bp2_iqr)
+    df <- display_data()
+    
+    vars <- intersect(input$bp2_vars, names(df))
+    validate(need(length(vars) > 0, "None of the selected variables exist in the current dataset."))
+    
+    do_center <- "center" %in% input$bp2_transform
+    do_scale  <- "scale"  %in% input$bp2_transform
+    
+    # define grp early so scaling block can use it
+    grp <- if (input$bp2_group_on && !is.null(input$bp2_group_var)) input$bp2_group_var else NULL
+    
+    df_sel <- df[, vars, drop = FALSE]
+    
+    if (do_center || do_scale) {
+      if (!is.null(grp) && grp %in% names(df)) {
+        # within-group scaling
+        grp_vals <- df[[grp]]
+        for (col in vars) {
+          for (lv in unique(grp_vals)) {
+            idx <- which(grp_vals == lv)
+            df_sel[idx, col] <- as.numeric(
+              scale(df_sel[idx, col, drop = TRUE], center = do_center, scale = do_scale)
+            )
+          }
+        }
+      } else {
+        df_sel <- as.data.frame(
+          scale(df_sel, center = do_center, scale = do_scale)
+        )
+      }
+    }
+    
+    # attach group col before pivoting
+    if (!is.null(grp) && grp %in% names(df)) {
+      df_sel[[grp]] <- df[[grp]]
+    }
+    
+    plot_df <- tidyr::pivot_longer(
+      df_sel,
+      cols      = all_of(vars),
+      names_to  = "Variable",
+      values_to = "Value"
+    ) %>% filter(!is.na(Value))
+    
+    plot_df$Variable <- factor(plot_df$Variable, levels = vars)
+    
+    # filter group levels
+    if (!is.null(grp)) {
+      plot_df[[grp]] <- as.factor(plot_df[[grp]])
+      if (!is.null(input$bp2_group_levels) && length(input$bp2_group_levels) > 0) {
+        plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$bp2_group_levels, ]
+        plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))
+      }
+      validate(need(nrow(plot_df) > 0, "No rows remain after filtering group levels."))
+    }
+    
+    y_label <- if (do_center && do_scale) "Z-score (centered + scaled)" else
+      if (do_center) "Mean-centred value" else
+        if (do_scale)  "SD-scaled value" else "Value"
+    
+    subtitle_text <- sprintf(
+      "IQR multiplier: %.1f%s%s",
+      input$bp2_iqr,
+      if (!is.null(grp)) paste0(" | grouped by ", grp) else "",
+      if (do_center || do_scale)
+        paste0(" | ", paste(c("centered"[do_center], "scaled"[do_scale]), collapse = " + "))
+      else ""
+    )
+    
+    n_vars    <- length(vars)
+    angle_val <- if (n_vars > 10) 45 else 0
+    hjust_val <- if (n_vars > 10) 1  else 0.5
+    colours   <- theme_colours_for(vars)
+    
+    p <- ggplot(plot_df, aes(x = Variable, y = Value, fill = Variable)) +
+      geom_boxplot(
+        coef           = input$bp2_iqr,
+        outlier.shape  = 21,
+        outlier.size   = 1.5,
+        outlier.alpha  = 0.5,
+        outlier.colour = "grey30",
+        width          = 0.6,
+        colour         = "grey25",
+        alpha          = 0.75
+      ) +
+      scale_fill_manual(values = colours, guide = "none") +
+      labs(title = plot_title("Boxplot", subtitle_text), x = NULL, y = y_label) +
+      theme_minimal(base_size = 15) +
+      theme(
+        plot.title         = element_text(face = "bold", size = 18),
+        panel.grid.major.x = element_blank(),
+        axis.text.x        = element_text(angle = angle_val, hjust = hjust_val,
+                                          size  = if (n_vars > 20) 14 else 16),
+        axis.text.y        = element_text(size = 13),
+        axis.title.y       = element_text(size = 13)
+      )
+    
+    if (!is.null(grp)) {
+      p <- p + facet_wrap(as.formula(paste("~", grp)), scales = "free_y")
+    }
+    
+    p
+  })
   
   
   # ── SERVER Q-Q PLOT ────────────────────────────────────────────────────
