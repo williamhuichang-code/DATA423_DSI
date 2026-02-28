@@ -466,14 +466,16 @@ ui <- fluidPage(
                             hr(),
                             sidebar_note("My EDA Notes 2: Some Level of Seriousness (descending) in Inference — 
                                          <br><br>
-                                         a. the assumed distribution of y response
+                                         a. potential multi-labelled y overlapping
                                          <br>
-                                         b. interactions of features on y response
+                                         b. the assumed distribution of y response
                                          <br>
-                                         c. dependent features (multilinearity)
+                                         c. interactions of features on y response
+                                         <br>
+                                         d. dependent features (multilinearity)
                                          "),
                             hr(),
-                            sidebar_note("My EDA Notes 3: Conceptualised Dataset Stage — 
+                            sidebar_note("My EDA Notes 3: Conceptualised Dataset Stages — 
                                          <br><br>
                                          1. raw dataset
                                          <br>
