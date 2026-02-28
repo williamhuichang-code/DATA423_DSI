@@ -500,7 +500,9 @@ ui <- fluidPage(
                sidebarPanel(width = 3,
                             sidebar_note("Col Names & Missingness Cooccurrence & Improper Collecting: <br><br>
                                          This word cloud helps identify inconsistencies in variable names 
-                                         or categorical values, depending on the selected mode."),
+                                         or categorical values, depending on the selected mode.
+                                         Typical scenarios are like col name cleaning, distinct variable values 
+                                         and y label overlapping"),
                             hr(),
                             
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
