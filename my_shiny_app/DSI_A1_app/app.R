@@ -451,7 +451,7 @@ ui <- fluidPage(
                                                      "dfSummary"   = "dfsummary"),
                                          selected = "glimpse"),
                             hr(),
-                            sidebar_note("My EDA Notes 1: Some Level of Seriousness (descending) in Data Integrity — 
+                            sidebar_note("My EDA Notes 1: Some Level of Seriousness in Data Integrity — 
                                          <br><br>
                                          1. missingness and potential reasons
                                          <br>
@@ -459,12 +459,12 @@ ui <- fluidPage(
                                          <br>
                                          3. seemingly good existing values, but hidden gaps
                                          <br>
-                                         4. proper values, but redundant (justified by primary key)
+                                         4. proper values, but improper grouping logic
                                          <br>
-                                         5. proper values, but improper grouping logic
+                                         5. proper values, but redundant (justified by primary key)
                                          "),
                             hr(),
-                            sidebar_note("My EDA Notes 2: Some Level of Seriousness (descending) in Inference — 
+                            sidebar_note("My EDA Notes 2: Some Level of Seriousness in Inference — 
                                          <br><br>
                                          a. potential multi-labelled y overlapping
                                          <br>
