@@ -1770,7 +1770,7 @@ server <- function(input, output, session) {
           columns  = col_idx,
           mapping  = aes(colour = .data[[grp]], alpha = 0.6),
           upper    = list(
-            continuous = GGally::wrap("cor", size = 2.5),
+            continuous = GGally::wrap("cor", size = 4),
             combo      = GGally::wrap("box_no_facet", alpha = 0.5),
             discrete   = GGally::wrap("facetbar", alpha = 0.5)
           ),
@@ -1783,11 +1783,12 @@ server <- function(input, output, session) {
             continuous = GGally::wrap("densityDiag", alpha = 0.5),
             discrete   = GGally::wrap("barDiag", alpha = 0.5)
           ),
-          legend   = 1  # show legend
+          legend   = 1
         ) +
-          ggplot2::theme_minimal(base_size = 9) +
+          ggplot2::theme_minimal(base_size = 13) +
           ggplot2::theme(
-            strip.text  = element_text(size = 7),
+            plot.title  = element_text(size = 16, face = "bold"),
+            strip.text  = element_text(size = 11, face = "bold"),
             legend.position = "bottom"
           ) +
           ggplot2::labs(title = plot_title("GGPairs", paste("Grouped by", grp)))
@@ -1798,12 +1799,15 @@ server <- function(input, output, session) {
         
         GGally::ggpairs(
           plot_df,
-          upper = list(continuous = GGally::wrap("cor", size = 3)),
+          upper = list(continuous = GGally::wrap("cor", size = 4)),
           lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
           diag  = list(continuous = GGally::wrap("densityDiag"))
         ) +
-          ggplot2::theme_minimal(base_size = 9) +
-          ggplot2::theme(strip.text = element_text(size = 7))
+          ggplot2::theme_minimal(base_size = 13) +
+          ggplot2::theme(
+            plot.title = element_text(size = 16, face = "bold"),
+            strip.text = element_text(size = 11, face = "bold")
+          )
       }
     })
   })
@@ -1885,7 +1889,6 @@ server <- function(input, output, session) {
   
   
   # ── SERVER BOXPLOT 2 ───────────────────────────────────────────────────
-  # ── SERVER OUTLIER BOXPLOT ─────────────────────────────────────────────
 
 observe({
   df       <- display_data()
