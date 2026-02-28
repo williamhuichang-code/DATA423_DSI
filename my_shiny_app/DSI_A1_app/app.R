@@ -53,7 +53,11 @@ MASTER_COL_ORDER <- c(
   "Priority", "Price", "Speed", "Duration", "Temp",
   "Location", "Agreed", "State", "Class", "Surface",
   # raw sensors
-  paste0("Sensor", 1:30),
+  paste0("Sensor", 1:30), 
+  # D idgrouped sensors
+  "Sensor4D", "Sensor8D", "Sensor11D", "Sensor16D", "Sensor22D", "Sensor24D", "Sensor28D",
+  # G idgrouped sensors
+  "Sensor4G", "Sensor8G", "Sensor11G", "Sensor16G", "Sensor22G", "Sensor24G", "Sensor28G",
   # sensor group 1 (averaged raw)
   "SensorGroup1", "SensorGroup2", "SensorGroup3",
   # centred sensor group (subtract mean)
@@ -330,6 +334,25 @@ enriched_dataset <- ds_typed %>%
     #   (max(SensorGroup2, na.rm = TRUE) - min(SensorGroup2, na.rm = TRUE)),
     # NormalisedSG3 = (SensorGroup3 - min(SensorGroup3, na.rm = TRUE)) /
     #   (max(SensorGroup3, na.rm = TRUE) - min(SensorGroup3, na.rm = TRUE))
+    
+    # split Sensor6 by IdGroup (numeric output guaranteed)
+    # split selected sensors by IdGroup
+    Sensor4D  = ifelse(IdGroup == "D", Sensor4,  NA_real_),
+    Sensor8D  = ifelse(IdGroup == "D", Sensor8,  NA_real_),
+    Sensor11D = ifelse(IdGroup == "D", Sensor11, NA_real_),
+    Sensor16D = ifelse(IdGroup == "D", Sensor16, NA_real_),
+    Sensor22D = ifelse(IdGroup == "D", Sensor22, NA_real_),
+    Sensor24D = ifelse(IdGroup == "D", Sensor24, NA_real_),
+    Sensor28D = ifelse(IdGroup == "D", Sensor28, NA_real_),
+    
+    Sensor4G  = ifelse(IdGroup == "G", Sensor4,  NA_real_),
+    Sensor8G  = ifelse(IdGroup == "G", Sensor8,  NA_real_),
+    Sensor11G = ifelse(IdGroup == "G", Sensor11, NA_real_),
+    Sensor16G = ifelse(IdGroup == "G", Sensor16, NA_real_),
+    Sensor22G = ifelse(IdGroup == "G", Sensor22, NA_real_),
+    Sensor24G = ifelse(IdGroup == "G", Sensor24, NA_real_),
+    Sensor28G = ifelse(IdGroup == "G", Sensor28, NA_real_)
+    
   ) %>% # end of enriching mutation
   
   # reordering dataset after enriching
