@@ -15,6 +15,7 @@ library(vcd)
 library(dbscan)
 library(paletteer) # global colour theme
 library(colorspace)
+library(visdat)
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
@@ -555,6 +556,34 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          plotOutput("wc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI VIS MISS ───────────────────────────────────────────────────────
+    
+    tabPanel("Vis Miss",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Missingness Overview: <br><br>
+                                     vis_miss gives a full-dataset pixel view of where 
+                                     NAs occur. Each column is a variable, each row is 
+                                     an observation. Black = missing, grey = present."),
+                            hr(),
+                            selectizeInput("vmiss_cols", "Columns to include:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "Default: all columns")),
+                            hr(),
+                            checkboxInput("vmiss_cluster", "Cluster rows by missingness pattern", value = FALSE),
+                            checkboxInput("vmiss_sort",    "Sort columns by missingness %",        value = FALSE),
+                            hr(),
+                            sliderInput("vmiss_text_size", "Axis text size:",
+                                        min = 4, max = 14, value = 8, step = 1)
+               ),
+               mainPanel(width = 9,
+                         plotOutput("vmiss_plot", height = "85vh")
                )
              )
     ),  # end of tab panel
@@ -1318,6 +1347,32 @@ server <- function(input, output, session) {
       scale        = c(max_scale, min_scale),
       use.r.layout = FALSE
     )
+  })
+  
+  
+  # ── SERVER VIS MISS ────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    updateSelectizeInput(session, "vmiss_cols", choices = names(df), selected = names(df))
+  })
+  
+  output$vmiss_plot <- renderPlot({
+    df   <- display_data()
+    cols <- if (!is.null(input$vmiss_cols) && length(input$vmiss_cols) > 0)
+      input$vmiss_cols else names(df)
+    
+    visdat::vis_miss(
+      df[, cols, drop = FALSE],
+      cluster   = isTRUE(input$vmiss_cluster),
+      sort_miss = isTRUE(input$vmiss_sort),
+      show_perc = TRUE
+    ) +
+      theme(
+        axis.text.x = element_text(size = input$vmiss_text_size, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = input$vmiss_text_size)
+      )
   })
   
   
@@ -2097,7 +2152,8 @@ server <- function(input, output, session) {
     df       <- display_data()
     req(df)
     num_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectizeInput(session, "cor_vars", choices = num_vars, selected = num_vars)
+    default_cor <- intersect(c("Y", paste0("Sensor", 1:30)), num_vars)
+    updateSelectizeInput(session, "cor_vars", choices = num_vars, selected = default_cor)
   })
   
   
@@ -2303,7 +2359,8 @@ server <- function(input, output, session) {
     df       <- display_data()
     req(df)
     num_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectizeInput(session, "cg_vars", choices = num_vars, selected = num_vars)
+    default_cg <- intersect(c("Y", paste0("Sensor", 1:30)), num_vars)
+    updateSelectizeInput(session, "cg_vars", choices = num_vars, selected = default_cg)
   })
   
   # shared reactive: computes the final trimmed + indexed correlation matrix
@@ -2350,6 +2407,12 @@ server <- function(input, output, session) {
                   "All variables exceed the threshold. Slide right to keep more variables."))
     
     cor_mat <- cor_mat[remaining, remaining, drop = FALSE]
+    
+    # reorder by hierarchical clustering
+    dist_mat  <- as.dist(1 - cor_mat)          # dissimilarity: 1 - r
+    hc        <- hclust(dist_mat, method = "average")
+    clust_ord <- hc$order                      # row indices in cluster order
+    cor_mat   <- cor_mat[clust_ord, clust_ord, drop = FALSE]
     
     # build smart abbreviations:
     #   - name has digits: first letter + digit sequence (e.g. Sensor22D -> S22, Sensor4G -> S4)
