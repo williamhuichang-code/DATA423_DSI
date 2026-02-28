@@ -441,14 +441,48 @@ ui <- fluidPage(
     tabPanel("Summary",
              sidebarLayout(
                sidebarPanel(width = 2,
-                            sidebar_note("In General: <br><br>Can select a style to inspect the dataset structure."),
+                            sidebar_note("Data Summary: <br><br>
+                                         Can select a style to inspect the dataset structure."),
                             hr(),
                             
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
                                                      "dfSummary"   = "dfsummary"),
-                                         selected = "glimpse")
+                                         selected = "glimpse"),
+                            hr(),
+                            sidebar_note("My EDA Notes 1: Some Level of Seriousness (descending) in Data Integrity — 
+                                         <br><br>
+                                         1. missingness and potential reasons
+                                         <br>
+                                         2. collected, but obvious improper value
+                                         <br>
+                                         3. seemingly good existing values, but hidden gaps
+                                         <br>
+                                         4. proper values, but redundant (justified by primary key)
+                                         <br>
+                                         5. proper values, but improper grouping logic
+                                         "),
+                            hr(),
+                            sidebar_note("My EDA Notes 2: Some Level of Seriousness (descending) in Inference — 
+                                         <br><br>
+                                         a. the assumed distribution of y response
+                                         <br>
+                                         b. interactions of features on y response
+                                         <br>
+                                         c. dependent features (multilinearity)
+                                         "),
+                            hr(),
+                            sidebar_note("My EDA Notes 3: Conceptualised Dataset Stage — 
+                                         <br><br>
+                                         1. raw dataset
+                                         <br>
+                                         2. enriched dataset (add derived cols)
+                                         <br>
+                                         3. model dataset (remove unnecessary cols)
+                                         <br>
+                                         4. debug dataset (with flag cols and flagging logic)
+                                         "),
                ),
                mainPanel(width = 10,
                          verbatimTextOutput("summary_output")
