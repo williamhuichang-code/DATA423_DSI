@@ -12,8 +12,10 @@ library(DT)
 library(plotly)
 library(ggplot2)
 library(vcd)
+library(dbscan)
 library(paletteer) # global colour theme
 library(colorspace)
+
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
@@ -885,7 +887,7 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── UI CORRELATION ──────────────────────────────────────────────────────
+    # ── UI CORRELATION ────────────────────────────────────────────────────
     
     tabPanel("Correlation",
              sidebarLayout(
@@ -937,7 +939,58 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── COMING SOON ───────────────────────────────────────────────────────
+    # ── UI HDBSCAN ────────────────────────────────────────────────────────
+    
+    tabPanel("HDBSCAN",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Hierarchical Clustering: <br><br>
+                                     HDBSCAN identifies dense clusters and flags sparse 
+                                     observations as outliers. The hierarchy plot shows 
+                                     how clusters form and persist across eps values."),
+                            hr(),
+                            
+                            selectizeInput("hdb_vars", "Variables (numeric):",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "Select numeric variables")),
+                            hr(),
+                            
+                            numericInput("hdb_minpts", "minPts:",
+                                         value = 5, min = 2, max = 100, step = 1),
+                            helpText("Minimum cluster size. Higher = fewer, denser clusters."),
+                            hr(),
+                            
+                            checkboxInput("hdb_scale", "Scale variables before clustering", value = TRUE),
+                            hr(),
+                            
+                            actionButton("hdb_run", "Run HDBSCAN", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Run. Large selections may be slow.")
+               ),
+               mainPanel(width = 9,
+                         
+                         # summary stat row
+                         fluidRow(
+                           column(3,
+                                  div(style = "margin-top:10px;",
+                                      h2(textOutput("hdb_n_clusters")),
+                                      p("Number of clusters"))),
+                           column(3,
+                                  div(style = "margin-top:10px;",
+                                      h2(textOutput("hdb_n_outliers")),
+                                      p("Number of outliers")))
+                         ),
+                         
+                         hr(),
+                         
+                         # base R hierarchy plot
+                         plotOutput("hdb_plot", height = "70vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI COMING SOON ─────────────────────────────────────────────────────
     
     tabPanel("Coming Soon",
              sidebarLayout(
@@ -2195,6 +2248,75 @@ server <- function(input, output, session) {
     }
     
     dt
+  })
+  
+  
+  # ── SERVER HDBSCAN ─────────────────────────────────────────────────────
+  
+  # populate variable choices
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    default_hdb <- intersect(paste0("Sensor", 1:30), num_vars)
+    updateSelectizeInput(session, "hdb_vars", choices = num_vars, selected = default_hdb)
+  })
+  
+  # run HDBSCAN
+  hdb_result <- eventReactive(input$hdb_run, {
+    req(input$hdb_vars)
+    df       <- display_data()
+    num_vars <- input$hdb_vars
+    
+    validate(
+      need(length(num_vars) >= 2,
+           "Please select at least 2 variables."),
+      need(all(num_vars %in% names(df)),
+           "Some selected variables are missing from the dataset.")
+    )
+    
+    mat <- df[, num_vars, drop = FALSE]
+    mat <- mat[complete.cases(mat), , drop = FALSE]
+    
+    validate(need(nrow(mat) >= input$hdb_minpts * 2,
+                  paste0("Only ", nrow(mat), " complete rows after dropping NAs across selected variables ",
+                         "(need ≥ ", input$hdb_minpts * 2, "). ",
+                         "Reduce minPts, deselect sparse variables (e.g. SensorXD / SensorXG), or uncheck Scale.")))
+    
+    if (isTRUE(input$hdb_scale)) mat <- as.data.frame(scale(mat))
+    
+    dbscan::hdbscan(as.matrix(mat), minPts = input$hdb_minpts)
+    
+  }, ignoreNULL = FALSE)
+  
+  
+  # summary stats
+  output$hdb_n_clusters <- renderText({
+    res <- hdb_result()
+    req(res)
+    length(unique(res$cluster[res$cluster != 0]))
+  })
+  
+  output$hdb_n_outliers <- renderText({
+    res <- hdb_result()
+    req(res)
+    sum(res$cluster == 0)
+  })
+  
+  
+  # hierarchy plot
+  output$hdb_plot <- renderPlot({
+    input$hdb_run
+    isolate({
+      res <- hdb_result()
+      req(res)
+      plot(res,
+           main      = plot_title("HDBSCAN", "Cluster Hierarchy"),
+           xlab      = "Observation spread",
+           ylab      = "eps value",
+           col.noise = "yellow",
+           show_flat = TRUE)
+    })
   })
   
   
