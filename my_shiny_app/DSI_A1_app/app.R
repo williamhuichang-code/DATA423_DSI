@@ -763,6 +763,36 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
+    # ── UI Q-Q PLOT ───────────────────────────────────────────────────────
+    
+    tabPanel("Q-Q Plot",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("The Distribution of Y Response: <br><br>
+                                         Q-Q plot evaluates distributional assumptions. 
+                                         Particularly useful for assessing the Y response before modeling."),
+                            hr(),
+                            selectInput("qq_var", "Select Variable:", choices = NULL),
+                            selectInput("qq_dist", "Distribution:", 
+                                        choices = c("Normal" = "norm", 
+                                                    "Exponential" = "exp", 
+                                                    "Log-normal" = "lnorm", 
+                                                    "Gamma" = "gamma", 
+                                                    "Weibull" = "weibull")),
+                            hr(),
+                            h4("Distribution Parameters"),
+                            uiOutput("qq_params"),
+                            hr(),
+                            checkboxInput("qq_line", "Show Reference Line", value = TRUE)
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("qq_plot", height = "80vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
+  
     # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
     
     tabPanel("Plot A",
@@ -1523,6 +1553,97 @@ server <- function(input, output, session) {
     }
     
     ggplotly(p) %>% layout(showlegend = FALSE)
+  })
+  
+  
+  # ── SERVER Q-Q PLOT ────────────────────────────────────────────────────
+  
+  # update variable choices for QQ Plot
+  observe({
+    df <- display_data()
+    req(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectInput(session, "qq_var", choices = numeric_vars)
+  })
+  
+  # dynamic UI for distribution parameters
+  output$qq_params <- renderUI({
+    req(input$qq_dist)
+    
+    switch(input$qq_dist,
+           "norm" = tagList(
+             numericInput("qq_mean", "Mean", value = 0),
+             numericInput("qq_sd", "SD", value = 1, min = 0.01)
+           ),
+           "exp" = tagList(
+             numericInput("qq_rate", "Rate (λ)", value = 1, min = 0.01)
+           ),
+           "lnorm" = tagList(
+             numericInput("qq_meanlog", "Meanlog", value = 0),
+             numericInput("qq_sdlog", "SDlog", value = 1, min = 0.01)
+           ),
+           "gamma" = tagList(
+             numericInput("qq_shape", "Shape (α)", value = 1, min = 0.01),
+             numericInput("qq_rate_g", "Rate (β)", value = 1, min = 0.01)
+           ),
+           "weibull" = tagList(
+             numericInput("qq_shape_w", "Shape (k)", value = 1, min = 0.01),
+             numericInput("qq_scale_w", "Scale (λ)", value = 1, min = 0.01)
+           )
+    )
+  })
+  
+  # render the QQ Plot
+  output$qq_plot <- renderPlotly({
+    req(input$qq_var, input$qq_dist)
+    df  <- display_data()
+    val <- df[[input$qq_var]]
+    val <- sort(val[!is.na(val)])  # ascending order/quantile
+    
+    # define distribution arguments based on user input
+    dist_args <- switch(input$qq_dist,
+                        "norm"    = list(mean = input$qq_mean,     sd    = input$qq_sd),
+                        "exp"     = list(rate = input$qq_rate),
+                        "lnorm"   = list(meanlog = input$qq_meanlog, sdlog = input$qq_sdlog),
+                        "gamma"   = list(shape = input$qq_shape,   rate  = input$qq_rate_g),
+                        "weibull" = list(shape = input$qq_shape_w, scale = input$qq_scale_w)
+    )
+    
+    # validate that args are not null
+    if (any(sapply(dist_args, is.null))) return(NULL)
+    
+    # generate theoretical quantiles
+    n     <- length(val)
+    probs <- (1:n - 0.5) / n
+    
+    # map string distribution names to their quantile functions (qnorm, qexp, etc)
+    q_func                <- match.fun(paste0("q", input$qq_dist))
+    theoretical_quantiles <- do.call(q_func, c(list(p = probs), dist_args))
+    
+    qq_df <- data.frame(Theoretical = theoretical_quantiles, Sample = val)
+    
+    dot_colour <- "#A6CEE3"
+    
+    p <- ggplot(qq_df, aes(x = Theoretical, y = Sample)) +
+      geom_point(shape = 21, fill  = dot_colour, colour = "black", size = 2, stroke = 0.25, alpha = 0.7) +
+      labs(
+        title = plot_title(
+          "Q-Q Plot",
+          paste0(input$qq_var, " ~ ", input$qq_dist, "(μ=", input$qq_mean, ", σ=", input$qq_sd, ")")
+        )) +
+      theme_minimal(base_size = 11)
+    
+    if (input$qq_line) {
+      # reference line passing through 1st and 3rd quartiles (similar to qqline logic)
+      y_q   <- quantile(val, c(0.25, 0.75))
+      x_q   <- do.call(q_func, c(list(p = c(0.25, 0.75)), dist_args))
+      slope <- diff(y_q) / diff(x_q)
+      int   <- y_q[1] - slope * x_q[1]
+      p     <- p + geom_abline(intercept = int, slope = slope,
+                               colour = THEME_DESIGNATED[["Y"]], linewidth = 0.8)
+    }
+    
+    ggplotly(p, tooltip = c("x", "y"))
   })
   
   
