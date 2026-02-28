@@ -413,10 +413,15 @@ ui <- fluidPage(
                                border:none; padding:0;")
     ),
     
-    # student ID
+    # assignment info and student info
     column(6,
-           div(style = "margin-top:28px; text-align:center; font-size:18px; font-weight:600; color:#495057;",
-               "William Hui Chang (69051925)")
+           div(
+             style = "margin-top:28px; text-align:center; font-size:24px; font-weight:600; color:#495057;",
+             
+             "DATA423-26S1 Assignment 1 (EDA with Shiny)",
+             br(),
+             "William Hui Chang (69051925)"
+             )
     ),
     
     # passphrase + lock toggle
