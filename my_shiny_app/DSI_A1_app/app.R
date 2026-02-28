@@ -413,8 +413,11 @@ ui <- fluidPage(
                                border:none; padding:0;")
     ),
     
-    # spacer
-    column(6),
+    # student ID
+    column(6,
+           div(style = "margin-top:28px; text-align:center; font-size:18px; font-weight:600; color:#495057;",
+               "William Hui Chang (69051925)")
+    ),
     
     # passphrase + lock toggle
     column(3,
