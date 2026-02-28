@@ -440,7 +440,7 @@ ui <- fluidPage(
     
     tabPanel("Summary",
              sidebarLayout(
-               sidebarPanel(width = 2,
+               sidebarPanel(width = 3,
                             sidebar_note("Data Summary: <br><br>
                                          Can select a style to inspect the dataset structure."),
                             hr(),
@@ -486,7 +486,7 @@ ui <- fluidPage(
                                          4. debug dataset (with flag cols and flagging logic)
                                          "),
                ),
-               mainPanel(width = 10,
+               mainPanel(width = 9,
                          verbatimTextOutput("summary_output")
                )
              )
