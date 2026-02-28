@@ -895,9 +895,9 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── UI CORRELATION ────────────────────────────────────────────────────
+    # ── UI CORRELATION HEATMAP 1 ──────────────────────────────────────────
     
-    tabPanel("Correlation",
+    tabPanel("Heatmap 1",
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("Note: <br><br>
@@ -942,6 +942,44 @@ ui <- fluidPage(
                          hr(),
                          h4("Correlation Matrix"),
                          DTOutput("cor_table")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI CORRELATION HEATMAP 2 ──────────────────────────────────────────
+    
+    tabPanel("Heatmap 2",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Correlation Heatmap (Corrgram version): <br><br>
+                                     A visual alternative to Heatmap 1 using the corrgram library."),
+                            hr(),
+                            
+                            selectizeInput("cg_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "Default: all numeric")),
+                            hr(),
+                            
+                            radioButtons("cg_cor", "Correlation method:",
+                                         choices  = c("Pearson"  = "pearson",
+                                                      "Spearman" = "spearman",
+                                                      "Kendall"  = "kendall"),
+                                         selected = "pearson"),
+                            hr(),
+                            
+                            sliderInput("cg_threshold", "Collinearity threshold:",
+                                        min = 0, max = 1, value = 1, step = 0.01),
+                            helpText("1.00 = keep all variables.",
+                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
+                                     "0.00 = extremely strict.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("cg_plot", height = "85vh"),
+                         hr(),
+                         h4("Variable Index Legend"),
+                         DTOutput("cg_legend_table")
                )
              )
     ),  # end of tab panel
@@ -2052,7 +2090,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER CORRELATION ─────────────────────────────────────────────────
+  # ── SERVER CORRELATION HEATMAP 1 ───────────────────────────────────────
   
   # populate variable choices when dataset changes
   observe({
@@ -2256,6 +2294,144 @@ server <- function(input, output, session) {
     }
     
     dt
+  })
+  
+  
+  # ── SERVER CORRELATION HEATMAP 2 ───────────────────────────────────────
+  
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "cg_vars", choices = num_vars, selected = num_vars)
+  })
+  
+  # shared reactive: computes the final trimmed + indexed correlation matrix
+  cg_result <- reactive({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    selected <- if (!is.null(input$cg_vars) && length(input$cg_vars) >= 2)
+      input$cg_vars else num_vars
+    selected <- intersect(selected, num_vars)
+    
+    validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+    
+    df_num <- df[, selected, drop = FALSE]
+    
+    # drop columns with fewer than 3 non-NA values or zero variance
+    valid_cols <- sapply(df_num, function(x) {
+      non_na <- x[!is.na(x)]
+      length(non_na) >= 3 && var(non_na) > 0
+    })
+    df_num <- df_num[, valid_cols, drop = FALSE]
+    validate(need(ncol(df_num) >= 2, "Not enough valid columns after removing all-NA or constant variables."))
+    
+    # pre-compute correlation matrix with pairwise NA handling
+    cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = input$cg_cor)
+    cor_mat[!is.finite(cor_mat)] <- 0
+    
+    # greedy threshold elimination
+    threshold <- input$cg_threshold
+    remaining <- rownames(cor_mat)
+    repeat {
+      sub_mat       <- abs(cor_mat[remaining, remaining, drop = FALSE])
+      diag(sub_mat) <- NA
+      max_r         <- max(sub_mat, na.rm = TRUE)
+      if (max_r <= threshold || length(remaining) <= 2) break
+      idx    <- which(sub_mat == max_r, arr.ind = TRUE)[1, ]
+      var_a  <- remaining[idx[1]]
+      var_b  <- remaining[idx[2]]
+      mean_a <- mean(sub_mat[var_a, setdiff(remaining, var_a)], na.rm = TRUE)
+      mean_b <- mean(sub_mat[var_b, setdiff(remaining, var_b)], na.rm = TRUE)
+      remaining <- setdiff(remaining, if (mean_a >= mean_b) var_a else var_b)
+    }
+    validate(need(length(remaining) >= 2,
+                  "All variables exceed the threshold. Slide right to keep more variables."))
+    
+    cor_mat <- cor_mat[remaining, remaining, drop = FALSE]
+    
+    # build smart abbreviations:
+    #   - name has digits: first letter + digit sequence (e.g. Sensor22D -> S22, Sensor4G -> S4)
+    #   - name is pure digits: keep as-is
+    #   - name has no digits: first char + last char, uppercased (e.g. WeekNum -> WM, Season_sin -> SN)
+    full_names <- rownames(cor_mat)
+    
+    make_abbrev <- function(nm) {
+      digits <- regmatches(nm, gregexpr("[0-9]+", nm))[[1]]
+      alphas <- gsub("[^A-Za-z_]", "", nm)
+      
+      if (nchar(alphas) == 0) {
+        # pure number
+        toupper(nm)
+      } else if (length(digits) > 0 && nchar(digits[1]) > 0) {
+        # has both letters and digits: first letter + first digit run
+        paste0(toupper(substr(nm, 1, 1)), digits[1])
+      } else {
+        # letters only: first + last char
+        paste0(toupper(substr(nm, 1, 1)), toupper(substr(nm, nchar(nm), nchar(nm))))
+      }
+    }
+    
+    raw_abbrevs <- sapply(full_names, make_abbrev)
+    
+    # deduplicate: append position counter to any clashing abbreviations
+    abbrevs <- raw_abbrevs
+    for (ab in unique(raw_abbrevs[duplicated(raw_abbrevs)])) {
+      hits           <- which(raw_abbrevs == ab)
+      abbrevs[hits]  <- paste0(ab, "_", seq_along(hits))
+    }
+    
+    rownames(cor_mat) <- abbrevs
+    colnames(cor_mat) <- abbrevs
+    
+    list(
+      cor_mat    = cor_mat,
+      full_names = full_names,
+      idx_labels = abbrevs
+    )
+  })
+  
+  output$cg_plot <- renderPlot({
+    res <- cg_result()
+    
+    resolve_panel <- function(name) {
+      get(name, envir = asNamespace("corrgram"))
+    }
+    
+    # scale margins to number of variables — more vars need more room
+    n    <- nrow(res$cor_mat)
+    marg <- max(4, min(12, n * 0.25))
+    par(mar = c(marg, marg, 4, 2))
+    
+    corrgram::corrgram(
+      res$cor_mat,
+      order       = TRUE,
+      upper.panel = resolve_panel("panel.pie"),
+      lower.panel = resolve_panel("panel.shade"),
+      diag.panel  = resolve_panel("panel.density"),
+      main        = plot_title("Corrgram",
+                               paste0(tools::toTitleCase(input$cg_cor),
+                                      " | threshold: ", input$cg_threshold))
+    )
+  })
+  
+  output$cg_legend_table <- renderDT({
+    res <- cg_result()
+    legend_df <- data.frame(
+      Index        = res$idx_labels,
+      Variable     = res$full_names,
+      stringsAsFactors = FALSE
+    )
+    datatable(
+      legend_df,
+      rownames = FALSE,
+      options  = list(
+        pageLength = 20,
+        dom        = "tip",
+        columnDefs = list(list(className = "dt-left", targets = "_all"))
+      )
+    )
   })
   
   
