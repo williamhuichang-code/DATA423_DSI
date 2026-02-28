@@ -953,7 +953,14 @@ ui <- fluidPage(
                             uiOutput("mosaic_y_ui"),
                             uiOutput("mosaic_z_ui"),
                             checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
+                            hr(),
                             
+                            # font adjusting
+                            sliderInput("mosaic_rot_labels", "Rotate Variable 1 labels (degrees):",
+                                        min = 0, max = 360, value = 90, step = 15),
+                            checkboxInput("mosaic_abbreviate", "Abbreviate labels", value = TRUE),
+                            sliderInput("mosaic_fontsize", "Label font size:",
+                                        min = 6, max = 24, value = 12, step = 1),
                             hr(),
                             
                             # side bar for mosaic pair advisor controls
@@ -2324,9 +2331,9 @@ server <- function(input, output, session) {
                     if (input$mosaic_z != "None") input$mosaic_z),
                   collapse = " × ")),
                 labeling     = labeling_border(
-                  rot_labels   = c(90, 0, 0, 0),      # rotate axis labels
-                  gp_labels    = gpar(fontsize = 9), # smaller font
-                  abbreviate   = TRUE,               # abbreaviated labels or not
+                  rot_labels   = c(input$mosaic_rot_labels, 0, 0, 0),     # rotate axis labels
+                  gp_labels    = gpar(fontsize = input$mosaic_fontsize),  # smaller font
+                  abbreviate   = input$mosaic_abbreviate,                 # abbreaviated labels or not
                 ))
   })
   
