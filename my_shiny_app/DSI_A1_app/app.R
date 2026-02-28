@@ -11,6 +11,7 @@ library(dplyr)
 library(DT)
 library(plotly)
 library(ggplot2)
+library(vcd)
 library(paletteer) # global colour theme
 library(colorspace)
 
@@ -719,7 +720,7 @@ ui <- fluidPage(
                                              choices  = NULL,
                                              multiple = TRUE,
                                              options  = list(placeholder = "All levels shown by default"))
-                            ),   # ← conditionalPanel closed here
+                            ),   # conditionalPanel closed here
                             hr(),
                             actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
                             helpText("Select variables then click Plot. Large selections may be slow.")
@@ -793,22 +794,147 @@ ui <- fluidPage(
              )
     ), # end of tab panel
     
+    # ── UI INTERACTION PLOT ───────────────────────────────────────────────
     
-  
-    # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
-    
-    tabPanel("Plot A",
+    tabPanel("Interaction Plot",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Hint: <br><br>add my own controls here."),
+                            sidebar_note("Feature Interactions on Y: <br><br>
+                            Select a continuous predictor and a moderator variable to see how 
+                            their interaction affects Y. For example, season could change how 
+                                         the cyclic month signal influences Y."),
                             hr(),
-                            selectInput("plotA_var", "Variable:", choices = NULL)
+                            selectInput("ip_y", "Y response:", choices = NULL),
+                            hr(),
+                            selectInput("ip_x", "X predictor:", choices = NULL),
+                            hr(),
+                            checkboxInput("ip_use_mod", "Use moderator", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.ip_use_mod == true",
+                              selectInput("ip_mod", "Moderator (colour/facet):", choices = NULL),
+                              hr(),
+                              radioButtons("ip_mod_type", "Moderator type:",
+                                           choices = c("Categorical" = "cat", "Continuous (binned)" = "cont"),
+                                           selected = "cat"),
+                              conditionalPanel(
+                                condition = "input.ip_mod_type == 'cont'",
+                                sliderInput("ip_bins", "Number of bins:", min = 2, max = 5, value = 3, step = 1)
+                              ),
+                              hr(),
+                              checkboxInput("ip_facet", "Facet instead of colour", value = TRUE)
+                            ), 
+                            hr(),
+                            checkboxInput("ip_se", "Show confidence ribbon", value = TRUE)
                ),
                mainPanel(width = 9,
-                         plotOutput("plotA_output", height = "85vh")
+                         plotlyOutput("ip_plot", height = "80vh")
                )
              )
     ), # end of tab panel
+    
+    
+    # ── UI MOSAIC ─────────────────────────────────────────────────────────
+    
+    tabPanel("Mosaic",
+             sidebarLayout(
+               sidebarPanel(width = 3,   # 3/12 = 25%, narrow sidebar
+                            sidebar_note("Feature Dependency: <br><br>
+                                         This Mosaic Plot is good for exploring dependency 
+                                         between categorical features."),
+                            hr(),
+                            # side bar for mosaic plot controls
+                            uiOutput("mosaic_x_ui"),
+                            uiOutput("mosaic_y_ui"),
+                            uiOutput("mosaic_z_ui"),
+                            checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
+                            
+                            hr(),
+                            
+                            # side bar for mosaic pair advisor controls
+                            strong("Pair Advisor"),
+                            br(),
+                            helpText("Ranks variable combinations by Cramér's V (effect size). Higher = stronger association."),
+                            br(),
+                            radioButtons("pairs_way", "Combinations:",
+                                         choices = c("2-way", "3-way"), selected = "2-way",
+                                         inline = TRUE),
+                            numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
+                            actionButton("pairs_search", "Find Pairs", icon = icon("search"), width = "100%"),
+                            br(), br(),
+                            helpText("Click a row to load variables into the plot above.")
+               ),
+               
+               mainPanel(
+                 width = 9,     # must add up to 12
+                 
+                 # mosaic plotting
+                 plotOutput("mosaic_plot", height = "90vh"),
+                 
+                 hr(),
+                 
+                 # pair advisor results (hidden until Search clicked)
+                 conditionalPanel(
+                   condition = "input.pairs_search > 0",
+                   h4("Pair Advisor Results — ranked by Cramér's V"),
+                   helpText("Cramér's V: 0.1 = weak, 0.3 = moderate, 0.5+ = strong. Not inflated by sample size."),
+                   helpText("3-way score = average Cramér's V across the 3 possible pairs within the trio."),
+                   DTOutput("pairs_table")
+                 )
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI CORRELATION ──────────────────────────────────────────────────────
+    
+    tabPanel("Correlation",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Note: <br><br>
+                                         This correlation heatmap is good for diagnosing multicollinearity 
+                                         and detect highly correlated predictors before modeling."),
+                            hr(),
+                            
+                            # variable selection
+                            selectizeInput("cor_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "Default: all numeric")),
+                            hr(),
+                            
+                            # method
+                            radioButtons("cor_method", "Correlation method:",
+                                         choices  = c("Pearson"  = "pearson",
+                                                      "Spearman" = "spearman",
+                                                      "Kendall"  = "kendall"),
+                                         selected = "pearson"),
+                            hr(),
+                            
+                            # threshold filter
+                            sliderInput("cor_threshold", "Collinearity threshold:",
+                                        min   = 0,
+                                        max   = 1,
+                                        value = 1,      # default = keep all
+                                        step  = 0.01),
+                            helpText("1.00 = keep all variables.",
+                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
+                                     "0.00 = extremely strict, keeps only uncorrelated variables."),
+                            hr(),
+                            
+                            # NA handling
+                            selectInput("cor_na", "Handle NAs:",
+                                        choices  = c("pairwise.complete.obs", "complete.obs"),
+                                        selected = "pairwise.complete.obs")
+               ),
+               
+               mainPanel(width = 9,
+                         plotlyOutput("cor_plot_gg", height = "90vh"),
+                         hr(),
+                         h4("Correlation Matrix"),
+                         DTOutput("cor_table")
+               )
+             )
+    ),  # end of tab panel
     
     
     # ── COMING SOON ───────────────────────────────────────────────────────
@@ -1649,23 +1775,426 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
+  # ── SERVER INTERACTION PLOT ────────────────────────────────────────────
   
-  # user sidebar action collection layer (reactive auto-detect)
   observe({
-    df       <- display_data()
-    num_vars <- names(df)[sapply(df, is.numeric)]
-    updateSelectInput(session, "plotA_var", choices = num_vars, selected = num_vars[1])
+    df           <- display_data()
+    num_vars_all <- names(df)[sapply(df, is.numeric)]
+    cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    updateSelectInput(session, "ip_y", choices = num_vars_all, selected = "Y")
+    
+    num_vars <- num_vars_all[num_vars_all != input$ip_y]
+    
+    updateSelectInput(session, "ip_x",   choices = num_vars, selected = num_vars[1])
+    updateSelectInput(session, "ip_mod", choices = c(cat_vars, num_vars), selected = cat_vars[1])
   })
   
-  # render layer (computation / visualization)
-  output$plotA_output <- renderPlot({
-    req(input$plotA_var)
+  output$ip_plot <- renderPlotly({
+    req(input$ip_x, input$ip_y)
+    if (isTRUE(input$ip_use_mod)) req(input$ip_mod)
+    
+    df      <- display_data()
+    x_var   <- input$ip_x
+    y_var   <- input$ip_y
+    mod_var <- input$ip_mod
+    
+    cols_needed <- if (isTRUE(input$ip_use_mod)) c(y_var, x_var, mod_var) else c(y_var, x_var)
+    plot_df <- df[, cols_needed, drop = FALSE]
+    plot_df <- plot_df[complete.cases(plot_df), ]
+    
+    if (!isTRUE(input$ip_use_mod)) {
+      
+      p <- ggplot(plot_df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+        geom_point(alpha = 0.2, size = 0.8, colour = "steelblue") +
+        geom_smooth(method = "lm", se = input$ip_se, colour = THEME_DESIGNATED[["Y"]]) +
+        labs(title = plot_title("Interaction", paste(x_var, "→", y_var))) +
+        theme_minimal(base_size = 11)
+      
+    } else {
+      
+      if (input$ip_mod_type == "cont" && is.numeric(plot_df[[mod_var]])) {
+        plot_df[[mod_var]] <- cut(plot_df[[mod_var]], breaks = input$ip_bins,
+                                  include.lowest = TRUE, dig.lab = 3)
+      }
+      
+      plot_df[[mod_var]] <- as.factor(plot_df[[mod_var]])
+      
+      if (input$ip_facet) {
+        p <- ggplot(plot_df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+          geom_point(alpha = 0.2, size = 0.8) +
+          geom_smooth(method = "lm", se = input$ip_se, colour = THEME_DESIGNATED[["Y"]]) +
+          facet_wrap(as.formula(paste("~", mod_var))) +
+          labs(title = plot_title("Interaction", paste(x_var, "×", y_var, "faceted by", mod_var))) +
+          theme_minimal(base_size = 11)
+      } else {
+        colours <- theme_colours_for(levels(plot_df[[mod_var]]))
+        p <- ggplot(plot_df, aes(x = .data[[x_var]], y = .data[[y_var]],
+                                 colour = .data[[mod_var]],
+                                 fill   = .data[[mod_var]])) +
+          geom_smooth(method = "lm", se = input$ip_se, alpha = 0.15) +
+          scale_colour_manual(values = colours) +
+          scale_fill_manual(  values = colours) +
+          labs(title  = plot_title("Interaction", paste(x_var, "×", y_var, "moderated by", mod_var)),
+               colour = mod_var, fill = mod_var) +
+          theme_minimal(base_size = 11)
+      }
+    } # end if/else
+    
+    ggplotly(p)
+  })
+  
+  
+  # ── SERVER MOSAIC ──────────────────────────────────────────────────────
+  
+  # mosaic part1: mosaic plot
+  cat_cols <- reactive({
     df <- display_data()
-    # random plot example
-    hist(df[[input$plotA_var]],
-         main = paste("Histogram —", input$plotA_var),
-         xlab = input$plotA_var, col = "steelblue", border = "white")
+    names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+  })
+  
+  output$mosaic_x_ui <- renderUI({
+    selectInput("mosaic_x", "Variable 1 (columns):", choices = cat_cols())
+  })
+  
+  output$mosaic_y_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_y", "Variable 2 (rows):", choices = cols, selected = cols[2])
+  })
+  
+  output$mosaic_z_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_z", "Variable 3 — optional (sub-rows):",
+                choices = c("None", cols), selected = "None")
+  })
+  
+  output$mosaic_plot <- renderPlot({
+    req(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    df <- display_data()
+    
+    # build 2-way or 3-way contingency table depending on Variable 3
+    if (input$mosaic_z == "None") {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y)
+    } else {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]], df[[input$mosaic_z]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    }
+    
+    vcd::mosaic(tbl,
+                shade  = input$mosaic_shade,
+                legend = input$mosaic_shade,
+                main   = plot_title("Mosaic", paste(
+                  c(input$mosaic_x, input$mosaic_y,
+                    if (input$mosaic_z != "None") input$mosaic_z),
+                  collapse = " × ")),
+                labeling     = labeling_border(
+                  rot_labels   = c(90, 0, 0, 0),      # rotate axis labels
+                  gp_labels    = gpar(fontsize = 9), # smaller font
+                  abbreviate   = TRUE,               # abbreaviated labels or not
+                ))
+  })
+  
+  
+  # mosaic part2: pair advisor
+  # (helper) compute CramerV for a 2-column contingency table
+  get_cramer <- function(df, v1, v2) {
+    tbl   <- table(df[[v1]], df[[v2]])
+    stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
+    if (is.null(stats)) return(NA)
+    stats$cramer
+  }
+  
+  pairs_result <- eventReactive(input$pairs_search, {
+    df   <- display_data()
+    cats <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    if (input$pairs_way == "2-way") {
+      
+      combos  <- combn(cats, 2, simplify = FALSE)
+      results <- lapply(combos, function(pair) {
+        tbl   <- table(df[[pair[1]]], df[[pair[2]]])
+        stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
+        if (is.null(stats)) return(NULL)
+        data.frame(
+          Var1    = pair[1],
+          Var2    = pair[2],
+          Var3    = NA_character_,
+          CramerV = round(stats$cramer, 4),
+          Chi_sq  = round(stats$chisq_tests["Pearson", "X^2"], 2),
+          p_value = round(stats$chisq_tests["Pearson", "P(> X^2)"], 6)
+        )
+      })
+      
+    } else {
+      
+      # 3-way: score = mean CramerV across all 3 pairwise combos within the trio
+      # this gives a single number summarising how interrelated the 3 variables are
+      combos  <- combn(cats, 3, simplify = FALSE)
+      results <- lapply(combos, function(trio) {
+        v12 <- get_cramer(df, trio[1], trio[2])
+        v13 <- get_cramer(df, trio[1], trio[3])
+        v23 <- get_cramer(df, trio[2], trio[3])
+        data.frame(
+          Var1    = trio[1],
+          Var2    = trio[2],
+          Var3    = trio[3],
+          CramerV = round(mean(c(v12, v13, v23), na.rm = TRUE), 4),  # avg of 3 pairs
+          V_1_2   = round(v12, 4),   # individual pair scores shown for context
+          V_1_3   = round(v13, 4),
+          V_2_3   = round(v23, 4),
+          Chi_sq  = NA,
+          p_value = NA
+        )
+      })
+    }
+    
+    out <- do.call(rbind, Filter(Negate(is.null), results))
+    out <- out[order(-out$CramerV), ]
+    
+    out$Strength <- ifelse(out$CramerV >= 0.5, "Strong",
+                           ifelse(out$CramerV >= 0.3, "Moderate",
+                                  ifelse(out$CramerV >= 0.1, "Weak", "Negligible")))
+    
+    head(out, input$pairs_top)
+  })
+  
+  output$pairs_table <- renderDT({
+    datatable(pairs_result(),
+              rownames  = FALSE,
+              selection = "single",
+              options   = list(pageLength = 15, dom = "tip")) %>%
+      formatStyle("CramerV",
+                  background         = styleColorBar(c(0, 1), "#a8d5a2"),
+                  backgroundSize     = "100% 80%",
+                  backgroundRepeat   = "no-repeat",
+                  backgroundPosition = "center") %>%
+      formatStyle("Strength",
+                  color = styleEqual(
+                    c("Strong", "Moderate", "Weak", "Negligible"),
+                    c("#155724",  "#856404",  "#856404", "#6c757d")
+                  ),
+                  fontWeight = "bold")
+  })
+  
+  # clicking a row loads variables into mosaic dropdowns
+  observeEvent(input$pairs_table_rows_selected, {
+    res  <- pairs_result()
+    sel  <- input$pairs_table_rows_selected
+    var1 <- res$Var1[sel]
+    var2 <- res$Var2[sel]
+    var3 <- res$Var3[sel]
+    
+    updateSelectInput(session, "mosaic_x", selected = var1)
+    updateSelectInput(session, "mosaic_y", selected = var2)
+    updateSelectInput(session, "mosaic_z", selected = if (!is.na(var3)) var3 else "None")
+  })
+  
+  
+  # ── SERVER CORRELATION ─────────────────────────────────────────────────
+  
+  # populate variable choices when dataset changes
+  observe({
+    df       <- display_data()
+    req(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "cor_vars", choices = num_vars, selected = num_vars)
+  })
+  
+  
+  # (helper) compute correlation + p-value matrices
+  # - complete.obs  -> listwise delete rows with any NA first
+  # - pairwise      -> rcorr handles it internally
+  get_cor_mats <- function(df_num, method, use_arg) {
+    mat <- as.matrix(df_num)
+    
+    if (use_arg == "complete.obs") {
+      mat <- mat[complete.cases(mat), , drop = FALSE]
+    }
+    
+    validate(need(nrow(mat) >= 3,
+                  "Not enough complete rows to compute correlation (need >= 3)."))
+    
+    rc      <- tryCatch(Hmisc::rcorr(mat, type = method), error = function(e) NULL)
+    cor_mat <- if (!is.null(rc)) rc$r else cor(mat, use = use_arg, method = method)
+    p_mat   <- if (!is.null(rc)) rc$P else NULL
+    
+    list(cor = cor_mat, p = p_mat)
+  }
+  
+  
+  # reactive: raw correlation matrices — reacts to dataset / vars / method / NA
+  # - does NOT read input$cor_threshold so threshold never triggers a full recompute
+  cor_result <- reactive({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    selected <- if (!is.null(input$cor_vars) && length(input$cor_vars) > 0)
+      input$cor_vars else num_vars
+    
+    selected <- intersect(selected, num_vars)
+    validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+    
+    df_num <- df[, selected, drop = FALSE]
+    get_cor_mats(df_num, input$cor_method, input$cor_na)
+  })
+  
+  
+  # reactive: flip slider so left=1 (keep all), right=0 (drop most)
+  # - raw slider value 0 → threshold 1.0 (keep all)
+  # - raw slider value 1 → threshold 0.0 (drop everything)
+  cor_threshold <- reactive({ 1 - input$cor_threshold_raw })
+  
+  
+  # reactive: pairwise greedy elimination
+  # - while any pair has |r| > threshold, drop the variable in that pair
+  #   with the higher mean |r| across all other remaining variables
+  # - threshold = 1.00 → keep all (no pair ever has |r| strictly > 1)
+  # - threshold = 0.80 → drop anything with a collinear partner above 0.80
+  # - threshold = 0.00 → extremely strict
+  vars_to_keep <- reactive({
+    m         <- cor_result()
+    threshold <- input$cor_threshold
+    cor_mat   <- m$cor
+    remaining <- rownames(cor_mat)
+    
+    repeat {
+      sub_mat       <- abs(cor_mat[remaining, remaining, drop = FALSE])
+      diag(sub_mat) <- NA
+      
+      max_r <- max(sub_mat, na.rm = TRUE)
+      
+      # stop when no remaining pair exceeds the threshold
+      if (max_r <= threshold || length(remaining) <= 2) break
+      
+      # find the worst offending pair
+      idx   <- which(sub_mat == max_r, arr.ind = TRUE)[1, ]
+      var_a <- remaining[idx[1]]
+      var_b <- remaining[idx[2]]
+      
+      # drop whichever has higher mean |r| with all other remaining vars
+      mean_a <- mean(sub_mat[var_a, setdiff(remaining, var_a)], na.rm = TRUE)
+      mean_b <- mean(sub_mat[var_b, setdiff(remaining, var_b)], na.rm = TRUE)
+      
+      remaining <- setdiff(remaining, if (mean_a >= mean_b) var_a else var_b)
+    }
+    
+    remaining
+  })
+  
+  
+  # reactive: filtered matrix for heatmap
+  filtered_cor_mats <- reactive({
+    m    <- cor_result()
+    keep <- vars_to_keep()
+    
+    validate(need(length(keep) >= 2,
+                  paste0("All variables exceed the threshold. ",
+                         "Slide left to keep more variables.")))
+    
+    list(
+      cor = m$cor[keep, keep, drop = FALSE],
+      p   = if (!is.null(m$p)) m$p[keep, keep, drop = FALSE] else NULL
+    )
+  })
+  
+  
+  # heatmaply heatmap — shows only kept variables
+  output$cor_plot_gg <- renderPlotly({
+  m       <- filtered_cor_mats()
+  cor_mat <- m$cor
+  n_vars  <- nrow(cor_mat)
+  
+  heatmaply::heatmaply_cor(
+    cor_mat,
+    k_col        = min(3, max(1, n_vars - 1)),
+    k_row        = min(3, max(1, n_vars - 1)),
+    colors       = colorRampPalette(c("#2166ac", "white", "#b2182b"))(256),
+    limits       = c(-1, 1),
+    grid_gap     = 1,
+    main = plot_title("Correlation", 
+                      paste0(tools::toTitleCase(input$cor_method), 
+                             " | threshold: ", 
+                             input$cor_threshold)),
+    label_names  = c("X", "Y", "Correlation"),
+    fontsize_row = 8,
+    fontsize_col = 8,
+    margins      = c(80, 80, 40, 20)
+  )
+})
+  
+  
+  # correlation table
+  # - shows ALL variable pairs (full matrix, not filtered)
+  # - Keep column flags whether BOTH variables in the pair survive the threshold
+  # - this lets you see what gets dropped and why
+  output$cor_table <- renderDT({
+    m       <- cor_result()
+    cor_mat <- m$cor
+    p_mat   <- m$p
+    vars    <- rownames(cor_mat)
+    keep    <- vars_to_keep()
+    
+    # melt upper triangle into rows
+    rows <- do.call(rbind, lapply(seq_along(vars), function(i) {
+      do.call(rbind, lapply(seq(i + 1, length(vars)), function(j) {
+        if (j > length(vars)) return(NULL)
+        data.frame(
+          Var1    = vars[i],
+          Var2    = vars[j],
+          r       = round(cor_mat[i, j], 4),
+          p_value = if (!is.null(p_mat)) round(p_mat[i, j], 6) else NA_real_,
+          Keep    = vars[i] %in% keep & vars[j] %in% keep,
+          stringsAsFactors = FALSE
+        )
+      }))
+    }))
+    
+    # sort: kept pairs first, then by |r| descending within each group
+    rows <- rows[order(-rows$Keep, -abs(rows$r)), ]
+    rows$Keep <- ifelse(rows$Keep, "Yes", "No")
+    
+    dt <- datatable(
+      rows,
+      rownames = FALSE,
+      filter   = "top",
+      options  = list(pageLength = 20, dom = "lftip")
+    ) %>%
+      formatRound(columns = "r", digits = 4) %>%
+      formatStyle(
+        "r",
+        background         = styleColorBar(c(-1, 1), "#a8d5e2"),
+        backgroundSize     = "100% 80%",
+        backgroundRepeat   = "no-repeat",
+        backgroundPosition = "center"
+      ) %>%
+      formatStyle(
+        "r",
+        color      = styleInterval(c(-0.5, -0.3, 0.3, 0.5),
+                                   c("#b2182b", "#d6604d", "#555555", "#4393c3", "#2166ac")),
+        fontWeight = "bold"
+      ) %>%
+      # highlight Keep column — green = keep, grey = drop
+      formatStyle(
+        "Keep",
+        color      = styleEqual(c("Yes", "No"), c("#198754", "#6c757d")),
+        fontWeight = "bold"
+      ) %>%
+      # dim entire row if both variables are dropped
+      formatStyle(
+        "Keep",
+        target          = "row",
+        backgroundColor = styleEqual(c("Yes", "No"), c("white", "#f8f9fa"))
+      )
+    
+    # colour p-values green if significant
+    if ("p_value" %in% names(rows)) {
+      dt <- dt %>%
+        formatStyle("p_value",
+                    color = styleInterval(0.05, c("#198754", "#6c757d")))
+    }
+    
+    dt
   })
   
   
