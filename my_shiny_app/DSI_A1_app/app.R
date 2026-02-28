@@ -771,9 +771,9 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── UI BOXPLOT ────────────────────────────────────────────────────────
+    # ── UI BOXPLOT 1 ──────────────────────────────────────────────────────
     
-    tabPanel("Boxplot",
+    tabPanel("Boxplot 1",
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("Distribution and Improper Value: <br><br>
@@ -800,6 +800,52 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          plotlyOutput("box_plot", height = "85vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI BOXPLOT 2 ──────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot 2",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Outlier Identification: <br><br>
+                                     car::Boxplot labels outlier points with their 
+                                     row index so you can track down exactly which 
+                                     observations are problematic."),
+                            hr(),
+                            
+                            selectizeInput("ob_vars", "Numeric variables:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            
+                            checkboxInput("ob_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.ob_group_on == true",
+                              selectInput("ob_group_var", "Group by:", choices = NULL),
+                              selectizeInput("ob_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),
+                            hr(),
+                            
+                            selectInput("ob_label_var", "Label outliers by:",
+                                        choices = NULL),
+                            hr(),
+                            
+                            numericInput("ob_id_n", "Max outliers to label:",
+                                         value = 0, min = 1, max = 100, step = 1),
+                            hr(),
+                            
+                            sliderInput("ob_iqr", "IQR multiplier:",
+                                        min = 0.5, max = 3.0, value = 1.5, step = 0.25),
+                            helpText("1.5 = standard outlier rule. 3.0 = extreme outliers only.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("ob_plot", height = "85vh")
                )
              )
     ),  # end of tab panel
@@ -1763,7 +1809,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER BOXPLOT ─────────────────────────────────────────────────────
+  # ── SERVER BOXPLOT 1 ───────────────────────────────────────────────────
   
   observe({
     df       <- display_data()
@@ -1836,6 +1882,109 @@ server <- function(input, output, session) {
     
     ggplotly(p) %>% layout(showlegend = FALSE)
   })
+  
+  
+  # ── SERVER BOXPLOT 2 ───────────────────────────────────────────────────
+  # ── SERVER OUTLIER BOXPLOT ─────────────────────────────────────────────
+
+observe({
+  df       <- display_data()
+  req(df)
+  num_vars <- names(df)[sapply(df, is.numeric)]
+  cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+  all_vars <- names(df)
+  
+  updateSelectizeInput(session, "ob_vars",      choices = num_vars, selected = num_vars[1])
+  updateSelectInput(   session, "ob_group_var", choices = cat_vars, selected = cat_vars[1])
+  updateSelectInput(   session, "ob_label_var",
+                       choices  = c("Row index" = ".rowindex", all_vars),
+                       selected = ".rowindex")
+})
+
+observeEvent(input$ob_group_var, {
+  req(input$ob_group_var)
+  df   <- display_data()
+  lvls <- sort(unique(as.character(df[[input$ob_group_var]])))
+  lvls <- lvls[!is.na(lvls)]
+  updateSelectizeInput(session, "ob_group_levels", choices = lvls, selected = lvls)
+})
+
+output$ob_plot <- renderPlot({
+  req(input$ob_vars)
+  df    <- display_data()
+  vars  <- input$ob_vars
+  
+  validate(need(length(vars) >= 1, "Please select at least 1 variable."))
+  
+  # build label vector
+  labels <- if (input$ob_label_var == ".rowindex") {
+    as.character(seq_len(nrow(df)))
+  } else {
+    as.character(df[[input$ob_label_var]])
+  }
+  
+  # layout: one plot per variable
+  n_vars <- length(vars)
+  par(mfrow = c(1, n_vars), mar = c(5, 4, 4, 1))
+  
+  for (v in vars) {
+    
+    if (input$ob_group_on && !is.null(input$ob_group_var)) {
+      
+      grp     <- input$ob_group_var
+      plot_df <- df
+      plot_df$..label.. <- labels
+      
+      if (!is.null(input$ob_group_levels) && length(input$ob_group_levels) > 0) {
+        plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$ob_group_levels, ]
+      }
+      plot_df <- plot_df[!is.na(plot_df[[v]]), ]
+      
+      validate(
+        need(nrow(plot_df) >= 2, "No data after filtering — try different levels."),
+        need(any(is.finite(plot_df[[v]])), "No finite values in selected variable.")
+      )
+      
+      car::Boxplot(
+        plot_df[[v]] ~ as.factor(plot_df[[grp]]),
+        id    = list(n      = input$ob_id_n,
+                     labels = plot_df$..label..,
+                     cex    = 0.7,
+                     col    = "tomato"),
+        main  = plot_title("Outlier Boxplot", paste(v, "by", grp)),
+        xlab  = grp,
+        ylab  = v,
+        col   = "lightblue",
+        range = input$ob_iqr
+      )
+      
+    } else {
+      
+      valid   <- !is.na(df[[v]])
+      plot_df <- df[valid, ]
+      lab_sub <- labels[valid]
+      
+      validate(
+        need(nrow(plot_df) >= 2, "No finite values in selected variable.")
+      )
+      
+      car::Boxplot(
+        plot_df[[v]],
+        id    = list(n      = input$ob_id_n,
+                     labels = lab_sub,
+                     cex    = 0.7,
+                     col    = "tomato"),
+        main  = plot_title("Outlier Boxplot", v),
+        ylab  = v,
+        col   = "lightblue",
+        range = input$ob_iqr
+      )
+    }
+  }
+  
+  # reset layout
+  par(mfrow = c(1, 1))
+})
   
   
   # ── SERVER Q-Q PLOT ────────────────────────────────────────────────────
