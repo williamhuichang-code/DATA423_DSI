@@ -69,7 +69,9 @@ MASTER_COL_ORDER <- c(
   # standardised sensor group (z-score)
   "StandardisedSG1", "StandardisedSG2", "StandardisedSG3",
   # normalised sensor group (min-max)
-  "NormalisedSG1", "NormalisedSG2", "NormalisedSG3"
+  "NormalisedSG1", "NormalisedSG2", "NormalisedSG3",
+  # na flag specific for Sensor6
+  "NaFlag_S6"
 )
 
 # ~~ reordering helper function ~~
@@ -355,7 +357,10 @@ enriched_dataset <- ds_typed %>%
     Sensor16G = ifelse(IdGroup == "G", Sensor16, NA_real_),
     Sensor22G = ifelse(IdGroup == "G", Sensor22, NA_real_),
     Sensor24G = ifelse(IdGroup == "G", Sensor24, NA_real_),
-    Sensor28G = ifelse(IdGroup == "G", Sensor28, NA_real_)
+    Sensor28G = ifelse(IdGroup == "G", Sensor28, NA_real_),
+    
+    # NA flag specifically for Sensor6
+    NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
     
   ) %>% # end of enriching mutation
   
