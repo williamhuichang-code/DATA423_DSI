@@ -567,9 +567,9 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("Missingness Overview: <br><br>
-                                     vis_miss gives a full-dataset pixel view of where 
-                                     NAs occur. Each column is a variable, each row is 
-                                     an observation. Black = missing, grey = present."),
+                     vis_miss gives a full-dataset pixel view of where 
+                     NAs occur. Each column is a variable, each row is 
+                     an observation. Black = missing, grey = present."),
                             hr(),
                             selectizeInput("vmiss_cols", "Columns to include:",
                                            choices  = NULL,
@@ -580,12 +580,22 @@ ui <- fluidPage(
                             checkboxInput("vmiss_sort",    "Sort columns by missingness %",        value = FALSE),
                             hr(),
                             sliderInput("vmiss_text_size", "Axis text size:",
-                                        min = 4, max = 14, value = 8, step = 1)
-               ),
+                                        min = 4, max = 24, value = 12, step = 1),
+                            hr(),
+                            checkboxInput("vmiss_group_on", "Facet by categorical variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.vmiss_group_on == true",
+                              selectInput("vmiss_group_var", "Group by:", choices = NULL),
+                              selectizeInput("vmiss_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                              )
+                            ),
                mainPanel(width = 9,
                          plotOutput("vmiss_plot", height = "85vh")
+                         )
                )
-             )
     ),  # end of tab panel
     
     
@@ -1430,6 +1440,16 @@ server <- function(input, output, session) {
     df <- display_data()
     req(df)
     updateSelectizeInput(session, "vmiss_cols", choices = names(df), selected = names(df))
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "vmiss_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  observeEvent(input$vmiss_group_var, {
+    req(input$vmiss_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$vmiss_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "vmiss_group_levels", choices = lvls, selected = lvls)
   })
   
   output$vmiss_plot <- renderPlot({
@@ -1437,16 +1457,73 @@ server <- function(input, output, session) {
     cols <- if (!is.null(input$vmiss_cols) && length(input$vmiss_cols) > 0)
       input$vmiss_cols else names(df)
     
-    visdat::vis_miss(
+    # base vis_miss plot
+    p <- visdat::vis_miss(
       df[, cols, drop = FALSE],
-      cluster   = isTRUE(input$vmiss_cluster),
+      cluster   = isTRUE(input$vmiss_cluster) && !isTRUE(input$vmiss_sort),
       sort_miss = isTRUE(input$vmiss_sort),
       show_perc = TRUE
     ) +
       theme(
-        axis.text.x = element_text(size = input$vmiss_text_size, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = input$vmiss_text_size)
+        axis.text.x  = element_text(size = input$vmiss_text_size, angle = 45, hjust = 1),
+        axis.text.y  = element_text(size = input$vmiss_text_size),
+        axis.title.x = element_text(size = input$vmiss_text_size + 2),
+        axis.title.y = element_text(size = input$vmiss_text_size + 2),
+        legend.text  = element_text(size = input$vmiss_text_size),
+        legend.title = element_text(size = input$vmiss_text_size + 2),
+        plot.title   = element_text(size = input$vmiss_text_size + 4),
+        strip.text   = element_text(size = input$vmiss_text_size + 2, face = "bold")
       )
+    
+    # optional faceting by categorical group
+    if (isTRUE(input$vmiss_group_on) && !is.null(input$vmiss_group_var)) {
+      grp <- input$vmiss_group_var
+      
+      if (!grp %in% names(df)) return(p)
+      
+      lvls <- if (!is.null(input$vmiss_group_levels) && length(input$vmiss_group_levels) > 0)
+        input$vmiss_group_levels
+      else
+        sort(unique(as.character(df[[grp]])))
+      
+      df_sub  <- df[as.character(df[[grp]]) %in% lvls, cols, drop = FALSE]
+      grp_col <- df[[grp]][as.character(df[[grp]]) %in% lvls]
+      
+      if (nrow(df_sub) == 0) return(p)
+      
+      miss_df        <- as.data.frame(is.na(df_sub))
+      miss_df[[grp]] <- as.character(grp_col)
+      
+      pivot_cols <- setdiff(cols, grp)
+      
+      miss_long <- tidyr::pivot_longer(
+        miss_df,
+        cols      = all_of(pivot_cols),
+        names_to  = "variable",
+        values_to = "missing"
+      )
+      miss_long$variable <- factor(miss_long$variable, levels = pivot_cols)
+      miss_long$missing  <- ifelse(miss_long$missing, "Missing", "Present")
+      
+      p <- ggplot(miss_long, aes(x = variable, fill = missing)) +
+        geom_bar(position = "fill") +
+        scale_fill_manual(values = c("Missing" = "#080808", "Present" = "#d3d3d3")) +
+        facet_wrap(as.formula(paste("~", grp))) +
+        scale_y_continuous(labels = scales::percent) +
+        labs(x = NULL, y = "% Missing", fill = NULL,
+             title = plot_title("Vis Miss", paste("faceted by", grp))) +
+        theme_minimal() +
+        theme(
+          axis.text.x  = element_text(size = input$vmiss_text_size, angle = 45, hjust = 1),
+          axis.text.y  = element_text(size = input$vmiss_text_size),
+          axis.title.y = element_text(size = input$vmiss_text_size + 2),
+          legend.text  = element_text(size = input$vmiss_text_size),
+          strip.text   = element_text(size = input$vmiss_text_size + 2, face = "bold"),
+          plot.title   = element_text(size = input$vmiss_text_size + 4)
+        )
+    }
+    
+    p
   })
   
   
