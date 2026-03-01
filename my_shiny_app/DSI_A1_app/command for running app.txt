@@ -1,0 +1,16 @@
+app_path = "D:/DS/VS git code/DATA423_DSI/my_shiny_app/DSI_A1_app"
+shiny::runApp(app_path)
+
+
+
+
+
+
+
+later on process
+
+in global, i need
+	a custom title function (applying to each tab) (custom content, size, position)
+	a axis text size slider (applying to each tab)
+	a global font that control font type
+	
