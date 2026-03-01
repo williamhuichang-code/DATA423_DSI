@@ -305,7 +305,7 @@ enriched_dataset <- ds_typed %>%
     # get weekdays potentially from Monday to Sunday
     Weekday = factor(format(Date, "%A")),
     
-    # ISO week number 1-53
+    # ISO week number 1-53 as factor
     WeekNum = as.integer(format(Date, "%V")),
     
     # # day-of-month is likely just noise (data weekly collected on Thursdays and Fridays)
@@ -381,7 +381,8 @@ model_dataset <- enriched_dataset %>%
 debug_dataset <- enriched_dataset %>%
   mutate(
     # example: flag
-    Flag = NA_character_   # empty string column — fill in manually later
+    # Flag = NA_character_   # empty string column — fill in manually later
+    NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
   )
 
 
@@ -679,6 +680,11 @@ ui <- fluidPage(
                             checkboxInput("vc_case", "Case sensitive", value = FALSE),
                             hr(),
                             
+                            selectizeInput("vc_cols", "Search in columns:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            
+                            hr(),
                             checkboxInput("vc_group_on", "Group by variable", value = FALSE),
                             conditionalPanel(
                               condition = "input.vc_group_on == true",
@@ -689,10 +695,6 @@ ui <- fluidPage(
                                              options  = list(placeholder = "All levels shown by default"))
                             ),
                             hr(),
-                            
-                            selectizeInput("vc_cols", "Search in columns:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
                             
                             selectInput("vc_metric", "Show as:",
                                         choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
@@ -2301,12 +2303,18 @@ server <- function(input, output, session) {
     num_vars_all <- names(df)[sapply(df, is.numeric)]
     cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
     
-    updateSelectInput(session, "ip_y", choices = num_vars_all, selected = "Y")
+    # preserve current selections, only default on first load or dataset switch
+    current_y   <- isolate(input$ip_y)
+    current_x   <- isolate(input$ip_x)
+    current_mod <- isolate(input$ip_mod)
     
-    num_vars <- num_vars_all[num_vars_all != input$ip_y]
+    sel_y   <- if (!is.null(current_y)   && current_y   %in% num_vars_all) current_y   else "Y"
+    sel_x   <- if (!is.null(current_x)   && current_x   %in% num_vars_all) current_x   else num_vars_all[num_vars_all != sel_y][1]
+    sel_mod <- if (!is.null(current_mod) && current_mod %in% c(cat_vars, num_vars_all)) current_mod else cat_vars[1]
     
-    updateSelectInput(session, "ip_x",   choices = num_vars, selected = num_vars[1])
-    updateSelectInput(session, "ip_mod", choices = c(cat_vars, num_vars), selected = cat_vars[1])
+    updateSelectInput(session, "ip_y",   choices = num_vars_all,            selected = sel_y)
+    updateSelectInput(session, "ip_x",   choices = num_vars_all,            selected = sel_x)
+    updateSelectInput(session, "ip_mod", choices = c(cat_vars, num_vars_all), selected = sel_mod)
   })
   
   output$ip_plot <- renderPlotly({
