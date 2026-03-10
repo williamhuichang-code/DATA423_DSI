@@ -1,0 +1,37 @@
+app_path = "D:/DS/VS git code/DATA423_DSI/my_shiny_app/DSI_A1_app"
+shiny::runApp(app_path)
+
+
+
+app_path = "D:/DS/VS git code/DATA423_DSI/my_shiny_app/testing_app"
+shiny::runApp(app_path)
+
+
+
+# note for installing tabplot
+library(devtools)
+install_github("edwindj/ffbase", subdir="pkg") 
+library(ffbase) 
+install_github("mtennekes/tabplot")
+
+
+
+
+later on process
+
+in global, i need
+	a global control to visualize with or without NAs
+	a global control to visualize with or without centering, scaling for all numerical variables
+	need a test to justify missingness is not MCAR
+	restrict cardinality control for mosaic
+	an option to treat non-double variables as factors for plotting
+	a hand write title/caption function (applying to each tab) (custom content, size, position)
+	a automatic subtitle for parameters in plotting
+	a global label size slider and position arrow control, font and font size
+	a variable role control
+	4 types of grouping choices for correlation
+	outlier label for boxplot
+	should not omit missing values in any plot, including rising value, make it an option
+	add summary as appendix in my report
+	change necessary interpretation in my report
+	

@@ -8,6 +8,8 @@
 library(shiny)
 library(shinyAce)  # R console ace editor
 library(tidyverse)
+
+
 # library(dplyr)
 # library(DT)
 # library(plotly)
@@ -17,6 +19,10 @@ library(tidyverse)
 # library(paletteer) # global colour theme
 # library(colorspace)
 # library(visdat)
+# library(shinyjs)
+# library(tidytext)
+# library(wordcloud2)
+# library(pls)
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
@@ -273,6 +279,9 @@ eda_dataset <- ds_typed %>%
     # too few years prefer factor, purely categorical regimes
     Year   = factor(format(Date, "%Y")),
     
+    # get weekdays potentially from Monday to Sunday
+    Weekday = factor(format(Date, "%A")),
+    
     # NA flag specifically for Sensor6
     NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
     
@@ -318,8 +327,8 @@ enriched_dataset <- eda_dataset %>%
     # factorise the integer month
     Month      = factor(Month),
     
-    # get weekdays potentially from Monday to Sunday
-    Weekday = factor(format(Date, "%A")),
+    # # get weekdays potentially from Monday to Sunday
+    # Weekday = factor(format(Date, "%A")),
     
     # ISO week number 1-53 as factor
     WeekNum = as.integer(format(Date, "%V")),
@@ -530,6 +539,88 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
+    # ── UI RISING VALUE ───────────────────────────────────────────────────
+    
+    tabPanel("Rising Value",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Note: <br><br>
+                                         This rising value chart is useful for examining continuity.
+                                         If a variable is truly continuous, the sorted values should increase smoothly; 
+                                         visible gaps or steps may therefore signal suspicious patterns in the data. 
+                                         Unlike histograms, rising value charts do not rely on binning (which may hide gaps) 
+                                         and can support comparison across multiple variables.
+                                         "),
+                            hr(),
+                            checkboxInput("rising_omit_na", "Ignore NAs", value = FALSE),
+                            hr(),
+                            selectizeInput("rising_var", "Select numeric variable:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            radioButtons("rising_transform", "Transform:",
+                                         choices = c("None"         = "none",
+                                                     "Centre"       = "center",
+                                                     "Standardise"  = "standardise",
+                                                     "Normalise"    = "normalise"),
+                                         selected = "none"),
+                            hr(),
+                            textInput("rising_title", "Plot title:", placeholder = "Auto-generated if empty"),
+                            hr(),
+                            sliderInput("rising_lwd", "Line width:",
+                                        min = 0.2, max = 5, value = 1.6, step = 0.1, width = "100%"),
+                            hr(),
+                            radioButtons("rising_lty", "Line type:",
+                                         choices = c(
+                                           "Solid"    = "solid",
+                                           "Dashed"   = "dashed",
+                                           "Dotted"   = "dotted",
+                                           "Dotdash"  = "dotdash",
+                                           "Longdash" = "longdash"
+                                         ),
+                                         selected = "dotdash")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("rising_output", height = "85vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI GGPAIRS ────────────────────────────────────────────────────────
+    
+    tabPanel("GGPairs",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Suspicious Relationship and Density: <br><br>
+                                         This GGPairs graph is useful for quickly inspecting 
+                                         pairwise relationships, correlations, and marginal 
+                                         density distributions across multiple variables."),
+                            hr(),
+                            selectizeInput("gg_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            checkboxInput("gg_group_on", "Group by variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.gg_group_on == true",
+                              selectInput("gg_group_var", "Group by:", choices = NULL),
+                              selectizeInput("gg_group_levels", "Show levels:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),   # conditionalPanel closed here
+                            hr(),
+                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Plot. Large selections may be slow.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("gg_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── UI COMING SOON ─────────────────────────────────────────────────────
     
     tabPanel("Coming Soon",
@@ -713,6 +804,165 @@ server <- function(input, output, session) {
            "base"    = summary(df),
            "glimpse" = cat(capture.output(tibble::glimpse(df)), sep = "\n"),
            "dfsummary" = summarytools::dfSummary(df))
+  })
+  
+  
+  # ── SERVER RISING VALUE ────────────────────────────────────────────────
+  
+  # user sidebar action collection layer (reactive auto-detect)
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    default_sel  <- num_vars[num_vars %in% 
+                               c("Y", "Sensor4", "Sensor6", "Sensor8", "Sensor11", 
+                                 "Sensor16", "Sensor22", "Sensor24", "Sensor28")]
+    updateSelectizeInput(session, "rising_var", choices = num_vars, selected = default_sel)
+  })
+  
+  # render layer — rising value lines, ggplotly
+  output$rising_output <- renderPlotly({
+    req(input$rising_var)
+    df       <- display_data()
+    num_vars <- input$rising_var
+    colours  <- theme_colours_for(num_vars)
+    
+    # build long-format df
+    plot_df <- do.call(rbind, lapply(num_vars, function(v) {
+      y <- df[[v]]
+      if (input$rising_omit_na) y <- na.omit(y)
+      
+      y <- switch(input$rising_transform,
+                  "center"      = y - mean(y, na.rm = TRUE),
+                  "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+                  "normalise"   = (y - min(y, na.rm = TRUE)) / (max(y, na.rm = TRUE) - min(y, na.rm = TRUE)),
+                  y
+      )
+      
+      y   <- sort(y, na.last = TRUE)
+      pct <- seq_along(y) / length(y) * 100
+      data.frame(Percentile = pct, Value = y, Variable = v)
+    }))
+    
+    p <- ggplot(plot_df, aes(x = Percentile, y = Value,
+                             colour = Variable,
+                             group  = Variable,
+                             text   = paste0(Variable,
+                                             "<br>Percentile: ", round(Percentile, 1),
+                                             "<br>Value: ",      round(Value, 3)))) +
+      geom_line(linewidth = input$rising_lwd / 3, linetype = input$rising_lty) +
+      scale_colour_manual(values = colours) +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "right")
+    
+    default_title <- paste0(
+      "Rising Value Graph for Continuity",
+      if (input$rising_omit_na) " | NAs Omitted" else "",
+      if (input$rising_transform != "none") paste0(" | ", tools::toTitleCase(input$rising_transform)) else ""
+    )
+    
+    ggplotly(p, tooltip = "text") %>%
+      layout(title = list(
+        text = if (nzchar(input$rising_title)) paste0("<b>", input$rising_title, "</b>") else 
+          paste0("<b>", default_title, "</b>"),
+        font = list(size = 20, color = "black"), x = 0.5, y = 0.95
+      ))
+  })
+  
+  
+  # ── SERVER GGPAIRS ─────────────────────────────────────────────────────
+  
+  observe({
+    df <- display_data()
+    req(df)
+    all_vars     <- names(df)
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars     <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    default_gg_vars <- c("Sensor4", "Sensor8", "Sensor11", "Sensor16", "Sensor22", "Sensor24", "Sensor28")
+    updateSelectizeInput(session, "gg_vars", choices  = all_vars, selected = intersect(default_gg_vars, all_vars))
+    updateSelectInput(session, "gg_group_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  # populate level choices when group variable changes
+  observeEvent(input$gg_group_var, {
+    req(input$gg_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$gg_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "gg_group_levels",
+                         choices  = lvls,
+                         selected = lvls)
+  })
+  
+  output$gg_plot <- renderPlot({
+    input$gg_run
+    isolate({
+      req(input$gg_vars)
+      df <- display_data()
+      validate(need(length(input$gg_vars) >= 2, "Please select at least 2 variables."))
+      
+      if (input$gg_group_on && !is.null(input$gg_group_var)) {
+        
+        grp <- input$gg_group_var
+        
+        # build df with selected vars + group col, drop NAs in group
+        plot_df <- df[, c(input$gg_vars, grp), drop = FALSE]
+        plot_df <- plot_df[!is.na(plot_df[[grp]]), ]
+        
+        # filter to selected levels only
+        if (!is.null(input$gg_group_levels) && length(input$gg_group_levels) > 0) {
+          plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$gg_group_levels, ]
+          plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))  # drop unused levels from legend
+        }
+        
+        # columns to plot = only the selected vars (not the group col)
+        col_idx <- seq_along(input$gg_vars)
+        
+        GGally::ggpairs(
+          plot_df,
+          columns  = col_idx,
+          mapping  = aes(colour = .data[[grp]], alpha = 0.6),
+          upper    = list(
+            continuous = GGally::wrap("cor", size = 4),
+            combo      = GGally::wrap("box_no_facet", alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          lower    = list(
+            continuous = GGally::wrap("points", alpha = 0.3, size = 0.8),
+            combo      = GGally::wrap("facethist", bins = 20, alpha = 0.5),
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)
+          ),
+          diag     = list(
+            continuous = GGally::wrap("densityDiag", alpha = 0.5),
+            discrete   = GGally::wrap("barDiag", alpha = 0.5)
+          ),
+          legend   = 1
+        ) +
+          ggplot2::theme_minimal(base_size = 13) +
+          ggplot2::theme(
+            plot.title  = element_text(size = 16, face = "bold"),
+            strip.text  = element_text(size = 11, face = "bold"),
+            legend.position = "bottom"
+          ) +
+          ggplot2::labs(title = plot_title("GGPairs", paste("Grouped by", grp)))
+        
+      } else {
+        
+        plot_df <- df[, input$gg_vars, drop = FALSE]
+        
+        GGally::ggpairs(
+          plot_df,
+          upper = list(continuous = GGally::wrap("cor", size = 4)),
+          lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
+          diag  = list(continuous = GGally::wrap("densityDiag"))
+        ) +
+          ggplot2::theme_minimal(base_size = 13) +
+          ggplot2::theme(
+            plot.title = element_text(size = 16, face = "bold"),
+            strip.text = element_text(size = 11, face = "bold")
+          )
+      }
+    })
   })
   
   
