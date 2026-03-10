@@ -483,7 +483,7 @@ ui <- fluidPage(
                                                      "dfSummary"   = "dfsummary"),
                                          selected = "glimpse"),
                             hr(),
-                            sidebar_note("My EDA Notes 1: Some Level of Seriousness in Data Integrity — 
+                            sidebar_note("My EDA Notes: Some Level of Seriousness in Data Integrity - 
                                          <br><br>
                                          1. missingness and potential reasons
                                          <br>
@@ -496,26 +496,31 @@ ui <- fluidPage(
                                          5. proper values, but redundant (justified by primary key)
                                          "),
                             hr(),
-                            sidebar_note("My EDA Notes 2: Some Level of Seriousness in Inference — 
+                            sidebar_note("My Futher Inference Notes: Some Level of Seriousness in Inference — 
                                          <br><br>
-                                         a. potential multi-labelled y overlapping
+                                         1. five crucial assumptions as independence in obs, linearity, 
+                                         normality, constant variance, and no influential outliers
                                          <br>
-                                         b. the assumed distribution of y response
+                                         2. potential multi-labelled y overlapping
                                          <br>
-                                         c. interactions of features on y response
+                                         3. independence in features
                                          <br>
-                                         d. dependent features (multilinearity)
+                                         4. interactions of features on y response
+                                         <br>
+                                         5. multilinearity in features
                                          "),
                             hr(),
-                            sidebar_note("My EDA Notes 3: Conceptualised Dataset Stages — 
+                            sidebar_note("My Framework Notes: Conceptualised Dataset Stages — 
                                          <br><br>
                                          1. raw dataset
                                          <br>
-                                         2. enriched dataset (add derived cols)
+                                         2. eda dataset (anything related to integrity and patterns)
+                                         <br>
+                                         3. enriched dataset (add derived cols)
                                          <br>
                                          3. model dataset (remove unnecessary cols)
                                          <br>
-                                         4. debug dataset (with flag cols and flagging logic)
+                                         4. debug dataset (testing with flag cols and flagging logic)
                                          "),
                ),
                mainPanel(width = 9,
@@ -649,8 +654,13 @@ server <- function(input, output, session) {
         tags$dt("Debug Dataset", style = "color:#856404;"),
         tags$dd("Explore upon enriched dataset with diagnostic flags and intermediate values 
                 for debugging or testing. Only visible when unlocked."),
-        tags$dt("Note: ", style = "color:#856404;"),
-        tags$dd("ID column is intentionally hidden across all datasets. Only visible when unlocked."),
+        tags$dt("Note 1: ", style = "color:#856404;"),
+        tags$dd("The Enriched/Model dataset stages are shown here as placeholders within 
+                the overall framework. They are not meaningfully implemented at this stage."),
+        tags$dt("Note 2: ", style = "color:#856404;"),
+        tags$dd("The ID column is intentionally hidden across all dataset views 
+                to demonstrate how the framework can protect sensitive attributes. 
+                It becomes visible only when unlocked."),
       ),
       easyClose = TRUE,
       footer    = modalButton("Close")
