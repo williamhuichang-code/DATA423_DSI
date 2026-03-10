@@ -819,7 +819,7 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "rising_var", choices = num_vars, selected = default_sel)
   })
   
-  # render layer — rising value lines, ggplotly
+  # render layer - rising value lines, ggplotly
   output$rising_output <- renderPlotly({
     req(input$rising_var)
     df       <- display_data()
@@ -864,8 +864,9 @@ server <- function(input, output, session) {
       layout(title = list(
         text = if (nzchar(input$rising_title)) paste0("<b>", input$rising_title, "</b>") else 
           paste0("<b>", default_title, "</b>"),
-        font = list(size = 20, color = "black"), x = 0.5, y = 0.95
-      ))
+        font = list(size = 20, color = "black"), x = 0.5, y = 0.95),
+        legend = list(y = 0.8, yanchor = "middle")
+        )
   })
   
   
