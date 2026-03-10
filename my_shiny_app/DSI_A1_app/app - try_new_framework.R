@@ -90,7 +90,19 @@ reorder_cols <- function(df) {
 }
 
 
-# ── GLOBAL COLOUR THEME ──────────────────────────────────────────────────────
+# ·· SENSOR GROUPS ························································
+
+SENSOR_GROUPS <- list(
+  "Sensor 1-10"  = paste0("Sensor", 1:10),
+  "Sensor 11-20" = paste0("Sensor", 11:20),
+  "Sensor 21-30" = paste0("Sensor", 21:30),
+  "All Sensors"  = paste0("Sensor", 1:30),
+  "Sensors Spotted with Gaps"  = paste0("Sensor", c(4,6, 8,11,16,22,24,28)),
+  "Gapped Ones without Sensor6"  = paste0("Sensor", c(4,8,11,16,22,24,28))
+)
+
+
+# ·· GLOBAL COLOUR THEME ··················································
 
 # grouping color strategy
 # interleave light/dark within each group for maximum within-group contrast
@@ -155,7 +167,7 @@ theme_colours_for <- function(vars) {
 }
 
 
-# ── GENERAL HELPER ───────────────────────────────────────────────────────────
+# ·· GENERAL HELPER ·······················································
 
 # sidebar note
 sidebar_note <- function(text) {
@@ -552,11 +564,13 @@ ui <- fluidPage(
                                          and can support comparison across multiple variables.
                                          "),
                             hr(),
-                            checkboxInput("rising_omit_na", "Ignore NAs", value = FALSE),
-                            hr(),
                             selectizeInput("rising_var", "Select numeric variable:",
                                            choices  = NULL,
                                            multiple = TRUE),
+                            hr(),
+                            selectInput("rising_preset", "Quick select group:", choices = NULL),
+                            hr(),
+                            checkboxInput("rising_omit_na", "Ignore NAs", value = FALSE),
                             hr(),
                             radioButtons("rising_transform", "Transform:",
                                          choices = c("None"         = "none",
@@ -813,10 +827,25 @@ server <- function(input, output, session) {
   observe({
     df       <- display_data()
     num_vars <- names(df)[sapply(df, is.numeric)]
-    default_sel  <- num_vars[num_vars %in% 
-                               c("Y", "Sensor4", "Sensor6", "Sensor8", "Sensor11", 
+    default_sel  <- num_vars[num_vars %in%
+                               c("Y", "Sensor4", "Sensor6", "Sensor8", "Sensor11",
                                  "Sensor16", "Sensor22", "Sensor24", "Sensor28")]
     updateSelectizeInput(session, "rising_var", choices = num_vars, selected = default_sel)
+    
+    # populate preset dropdown from predefined groups
+    valid_groups <- Filter(function(vars) any(vars %in% num_vars), SENSOR_GROUPS)
+    choices <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "rising_preset", choices = choices)
+  })
+  
+  # apply preset selection to variable selector
+  observeEvent(input$rising_preset, {
+    req(input$rising_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel <- intersect(SENSOR_GROUPS[[input$rising_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "rising_var", selected = sel)
   })
   
   # render layer - rising value lines, ggplotly
