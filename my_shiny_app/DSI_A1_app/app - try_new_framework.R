@@ -6,8 +6,8 @@
 # ── LIBRARY ──────────────────────────────────────────────────────────────────
 
 library(shiny)
+library(shinyAce)  # R console ace editor
 library(tidyverse)
-# library(shinyAce)  # R console ace editor
 # library(dplyr)
 # library(DT)
 # library(plotly)
@@ -736,7 +736,10 @@ server <- function(input, output, session) {
       # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
-                     sidebar_note("Note: <br><br>Run R expressions against the current dataset. 
+                     sidebar_note("Note: 
+                                  <br><br>R console occupied when running shiny app, 
+                                  thus build the console in app as a debugging helper. 
+                                  <br><br>Run R expressions against the current dataset. 
                                   <br><br>The dataset is available as df."),
                      hr(),
                      actionButton("rconsole_run",   "Run",   icon = icon("play"),  width = "100%"),
