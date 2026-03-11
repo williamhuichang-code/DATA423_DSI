@@ -99,6 +99,7 @@ VAR_PRESETS <- list(
   "Sensor 11-20" = paste0("Sensor", 11:20),
   "Sensor 21-30" = paste0("Sensor", 21:30),
   "All Sensors"  = paste0("Sensor", 1:30),
+  "All Sensors vs Y"  = c("Y", paste0("Sensor", 1:30)),
   "Gapped Sensors"  = paste0("Sensor", c(4,6,8,11,16,22,24,28)),
   "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
   "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
@@ -107,17 +108,17 @@ VAR_PRESETS <- list(
 
 # which to display as preset choices (using this meta)
 VAR_PRESET_META <- tibble::tribble(
-  ~plot,        ~s1_10, ~s11_20, ~s21_30, ~sall, ~gapped, ~gapped_y, ~gapped_excl6, ~s1_10_excl48,
-  "rising",      1,      1,       1,       1,     1,       1,         1,             0,
-  "ggpairs",     1,      1,       1,       0,     1,       1,         1,             1,
-  "heatmap",     1,      1,       1,       1,     1,       1,         1,             1
+  ~plot,        ~s1_10, ~s11_20, ~s21_30, ~sall, ~sall_y, ~gapped, ~gapped_y, ~gapped_excl6, ~s1_10_excl48,
+  "rising",      1,      1,       1,       1,     1,       1,       1,         1,             0,
+  "ggpairs",     1,      1,       1,       0,     0,       1,       1,         1,             1,
+  "heatmap",     1,      1,       1,       1,     1,       1,       1,         1,             1
 )
 
 # default select box content per plot
 DEFAULT_PRESET <- list(
   rising  = "Gapped Sensors vs Y",
   ggpairs = "Sensor 1-10 (excl. 4,8)",
-  heatmap = "Gapped Sensors vs Y"
+  heatmap = "All Sensors vs Y"
   )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -727,16 +728,16 @@ ui <- fluidPage(
                                         choices  = c("Pearson"  = "pearson",
                                                      "Spearman" = "spearman",
                                                      "Kendall"  = "kendall"),
-                                        selected = "pearson"),
+                                        selected = "spearman"),
                             hr(),
                             selectInput("hm_order", "Variable ordering:",
                                         choices  = c("Original"               = "FALSE",
                                                      "AOE (Eigenvector)"      = "TRUE",
                                                      "HC (Hierarchical)"      = "HC",
                                                      "OLO (Optimal Leaf)"     = "OLO"),
-                                        selected = "FALSE"),
+                                        selected = "HC"),
                             hr(),
-                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = FALSE),
+                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = TRUE),
                             hr(),
                             textInput("hm_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
