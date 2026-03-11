@@ -483,11 +483,12 @@ model_dataset <- enriched_dataset %>%
 # ·· DEBUGGING DATASET ····················································
 
 # add a flag column, for exploring
-debug_dataset <- enriched_dataset %>%
+debug_dataset <- eda_dataset %>%
   mutate(
-    # example: flag
-    # Flag = NA_character_   # empty string column — fill in manually later
-    NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
+    # synthetic pair for testing extreme negative correlation (~-1)
+    # DebugPos: standardised Y; DebugNeg: its near-perfect mirror
+    DebugPos = as.numeric(scale(Y)),
+    DebugNeg = -DebugPos + rnorm(n(), mean = 0, sd = 0.02)# example: flag
   )
 
 
@@ -735,14 +736,7 @@ ui <- fluidPage(
                                                      "OLO (Optimal Leaf)"     = "OLO"),
                                         selected = "FALSE"),
                             hr(),
-                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = FALSE),
-                            hr(),
-                            sliderInput("hm_threshold", "Collinearity threshold:",
-                                        min = 0, max = 1, value = 1, step = 0.01,
-                                        width = "100%"),
-                            helpText("1.00 = keep all variables.",
-                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
-                                     "0.00 = extremely strict.")
+                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = FALSE)
                ),
                mainPanel(width = 9,
                          plotOutput("hm_output", height = "80vh"),
@@ -1192,12 +1186,17 @@ server <- function(input, output, session) {
     
     df_num <- df[, selected, drop = FALSE]
     
+    # compute correlation matrix first, then apply abs manually if checked
+    cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = input$hm_cor)
+    if (isTRUE(input$hm_abs)) cor_mat <- abs(cor_mat)
+    
     corrgram::corrgram(
-      df_num,
+      cor_mat,                                  # pass matrix directly instead of df
       order      = if (input$hm_order == "FALSE") FALSE else input$hm_order,
-      abs        = input$hm_abs,
+      abs        = FALSE,                       # already handled above
       cor.method = input$hm_cor,
-      main       = paste0("Corrgram | ", tools::toTitleCase(input$hm_cor))
+      main       = paste0("Corrgram | ", tools::toTitleCase(input$hm_cor),
+                          if (isTRUE(input$hm_abs)) " | Absolute" else "")
     )
   })
   
