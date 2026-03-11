@@ -9,6 +9,7 @@ library(shiny)
 library(shinyAce)  # R console ace editor
 library(tidyverse)
 library(plotly)
+library(seriation)
 
 # library(dplyr)
 # library(DT)
@@ -108,13 +109,15 @@ VAR_PRESETS <- list(
 VAR_PRESET_META <- tibble::tribble(
   ~plot,        ~s1_10, ~s11_20, ~s21_30, ~sall, ~gapped, ~gapped_y, ~gapped_excl6, ~s1_10_excl48,
   "rising",      1,      1,       1,       1,     1,       1,         1,             0,
-  "ggpairs",     1,      1,       1,       0,     1,       1,         1,             1
+  "ggpairs",     1,      1,       1,       0,     1,       1,         1,             1,
+  "heatmap",     1,      1,       1,       1,     1,       1,         1,             1
 )
 
 # default select box content per plot
 DEFAULT_PRESET <- list(
-  rising  = 6, 
-  ggpairs = 8
+  rising  = "Gapped Sensors vs Y",
+  ggpairs = "Sensor 1-10 (excl. 4,8)",
+  heatmap = "Gapped Sensors vs Y"
   )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -126,7 +129,8 @@ presets_for <- function(plot_name) {
 
 # logic helper: sets ONLY the selected values from preset, caller controls choices separately
 apply_preset_selection <- function(session, plot_name, input_id, available_vars) {
-  default_sel <- intersect(VAR_PRESETS[[DEFAULT_PRESET[[plot_name]]]], available_vars)
+  preset_name <- DEFAULT_PRESET[[plot_name]]
+  default_sel <- intersect(VAR_PRESETS[[preset_name]], available_vars)
   updateSelectizeInput(session, input_id, selected = default_sel)
 }
 
@@ -138,7 +142,8 @@ apply_preset_selection <- function(session, plot_name, input_id, available_vars)
 GROUPBY_META <- tibble::tribble(
   ~plot,      ~group_on, ~group_var,  ~group_levels,
   "rising",    0,         NA,          NULL,
-  "ggpairs",   1,         "NaFlag_S6",   NULL,
+  "ggpairs",   1,         "NaFlag_S6", NULL,
+  "heatmap",   0,         NA,          NULL,  
 )
 
 # lookup helper: for groupby default
@@ -455,7 +460,7 @@ enriched_dataset <- eda_dataset %>%
     Sensor28G = ifelse(IdGroup == "G", Sensor28, NA_real_),
     
     # # NA flag specifically for Sensor6
-    # NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
+    # NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
     
   ) %>% # end of enriching mutation
   
@@ -482,7 +487,7 @@ debug_dataset <- enriched_dataset %>%
   mutate(
     # example: flag
     # Flag = NA_character_   # empty string column — fill in manually later
-    NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
+    NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
   )
 
 
@@ -695,6 +700,55 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          plotOutput("gg_output", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI CORRELATION HEATMAP ────────────────────────────────────────────
+    
+    tabPanel("Heatmap",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Correlation Heatmap (Corrgram): <br><br>
+                                 Pairwise correlations visualised as a corrgram.
+                                 Pie panels show direction and magnitude above the diagonal,
+                                 shaded panels below. Collinearity threshold trims
+                                 highly correlated variables greedily before plotting."),
+                            hr(),
+                            selectizeInput("hm_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("hm_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            selectInput("hm_cor", "Correlation method:",
+                                        choices  = c("Pearson"  = "pearson",
+                                                     "Spearman" = "spearman",
+                                                     "Kendall"  = "kendall"),
+                                        selected = "pearson"),
+                            hr(),
+                            selectInput("hm_order", "Variable ordering:",
+                                        choices  = c("Original"               = "FALSE",
+                                                     "AOE (Eigenvector)"      = "TRUE",
+                                                     "HC (Hierarchical)"      = "HC",
+                                                     "OLO (Optimal Leaf)"     = "OLO"),
+                                        selected = "FALSE"),
+                            hr(),
+                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = FALSE),
+                            hr(),
+                            sliderInput("hm_threshold", "Collinearity threshold:",
+                                        min = 0, max = 1, value = 1, step = 0.01,
+                                        width = "100%"),
+                            helpText("1.00 = keep all variables.",
+                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
+                                     "0.00 = extremely strict.")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("hm_output", height = "80vh"),
+                         hr(),
+                         h4("Variable Index Legend"),
+                         DT::dataTableOutput("hm_legend")
                )
              )
     ),  # end of tab panel
@@ -1099,6 +1153,52 @@ server <- function(input, output, session) {
           ggplot2::labs(title = plot_title)
       }
     })
+  })
+  
+  
+  # ── SERVER HEATMAP ─────────────────────────────────────────────────────
+  
+  # 1st block: variable selector and preset dropdown initialisation
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "hm_vars", choices = num_vars)
+    apply_preset_selection(session, "heatmap", "hm_vars", num_vars)
+    # dropdown only shows presets valid for this tab
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("heatmap"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "hm_preset", choices = choices)
+  })
+  
+  # 2nd block: preset observer, apply selected preset to variable selector
+  observeEvent(input$hm_preset, {
+    req(input$hm_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel      <- intersect(VAR_PRESETS[[input$hm_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "hm_vars", selected = sel)
+  })
+  
+  # 3rd block: corrgram plot output
+  output$hm_output <- renderPlot({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    selected <- if (!is.null(input$hm_vars) && length(input$hm_vars) >= 2)
+      input$hm_vars else num_vars
+    selected <- intersect(selected, num_vars)
+    validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+    
+    df_num <- df[, selected, drop = FALSE]
+    
+    corrgram::corrgram(
+      df_num,
+      order      = if (input$hm_order == "FALSE") FALSE else input$hm_order,
+      abs        = input$hm_abs,
+      cor.method = input$hm_cor,
+      main       = paste0("Corrgram | ", tools::toTitleCase(input$hm_cor))
+    )
   })
   
   
