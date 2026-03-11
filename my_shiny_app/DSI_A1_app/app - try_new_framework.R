@@ -661,7 +661,7 @@ ui <- fluidPage(
                                          selected = "dotdash")
                ),
                mainPanel(width = 9,
-                         plotlyOutput("rv_output", height = "85vh")
+                         plotlyOutput("rv_output", height = "80vh")
                )
              )
     ), # end of tab panel
@@ -736,13 +736,12 @@ ui <- fluidPage(
                                                      "OLO (Optimal Leaf)"     = "OLO"),
                                         selected = "FALSE"),
                             hr(),
-                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = FALSE)
+                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = FALSE),
+                            hr(),
+                            textInput("hm_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
                mainPanel(width = 9,
-                         plotOutput("hm_output", height = "80vh"),
-                         hr(),
-                         h4("Variable Index Legend"),
-                         DT::dataTableOutput("hm_legend")
+                         plotOutput("hm_output", height = "80vh")
                )
              )
     ),  # end of tab panel
@@ -1190,14 +1189,34 @@ server <- function(input, output, session) {
     cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = input$hm_cor)
     if (isTRUE(input$hm_abs)) cor_mat <- abs(cor_mat)
     
-    corrgram::corrgram(
-      cor_mat,                                  # pass matrix directly instead of df
-      order      = if (input$hm_order == "FALSE") FALSE else input$hm_order,
-      abs        = FALSE,                       # already handled above
-      cor.method = input$hm_cor,
-      main       = paste0("Corrgram | ", tools::toTitleCase(input$hm_cor),
-                          if (isTRUE(input$hm_abs)) " | Absolute" else "")
+    # build order label
+    order_label <- switch(input$hm_order,
+                          "FALSE" = "Original Order",
+                          "TRUE"  = "AOE (Eigenvector)",
+                          "HC"    = "HC (Hierarchical)",
+                          "OLO"   = "OLO (Optimal Leaf)"
     )
+    
+    default_title <- paste0(
+      "Corrgram | ", tools::toTitleCase(input$hm_cor),
+      " | ", order_label,
+      if (isTRUE(input$hm_abs)) " | Absolute" else ""
+    )
+    
+    # outer top margin, pushes title up, 3 lines of space
+    par(oma = c(0, 0, 3, 0))
+    
+    corrgram::corrgram(
+      cor_mat,
+      order      = if (input$hm_order == "FALSE") FALSE else input$hm_order,
+      abs        = FALSE, # already handled above
+      cor.method = input$hm_cor,
+      cex.var    = 1.2
+    )
+    
+    # overlay larger title (base graphics workaround — corrgram uses base plot)
+    plot_title <- if (nzchar(input$hm_title)) input$hm_title else default_title
+    title(main = plot_title, cex.main = 2, font.main = 2, outer = TRUE, line = 1)
   })
   
   
