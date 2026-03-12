@@ -864,9 +864,9 @@ ui <- fluidPage(
                             #             min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
                             # helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
                             hr(),
-                            checkboxInput("box_violin", "Show as violin", value = FALSE),
+                            checkboxInput("box_violin", "Show as violin", value = TRUE),
                             hr(),
-                            checkboxInput("box_group_on", "Group by categorical variable", value = FALSE),
+                            checkboxInput("box_group_on", "Group by categorical variable", value = TRUE),
                             conditionalPanel(
                               condition = "input.box_group_on == true",
                               selectInput("box_group_var", "Grouping variable:", choices = NULL),
@@ -889,56 +889,56 @@ ui <- fluidPage(
     
     tabPanel("Mosaic",
              sidebarLayout(
-               sidebarPanel(width = 3,   # 3/12 = 25%, narrow sidebar
-                            sidebar_note("Feature Dependency: <br><br>
-                                         This Mosaic Plot is good for exploring dependency 
-                                         between categorical features."),
+               sidebarPanel(width = 3,
+                            sidebar_note("Mosaic: <br><br>
+                            Visualise dependency between categorical variables.
+                            Tile area reflects joint frequency; shading by residuals 
+                            reveals where observed counts deviate from independence.
+                            Use the Pair Advisor to rank variable combinations 
+                            by association strength (Cramér's V)."),
                             hr(),
-                            # side bar for mosaic plot controls
+                            sliderInput("mosaic_max_levels", "Max levels per variable (cardinality filter):",
+                                        min = 2, max = 10, value = 4, step = 1, width = "100%"),
+                            helpText("Variables with more unique levels than this are excluded from the dropdowns."),
+                            hr(),
                             uiOutput("mosaic_x_ui"),
                             uiOutput("mosaic_y_ui"),
                             uiOutput("mosaic_z_ui"),
+                            hr(),
                             checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
                             hr(),
-                            
-                            # font adjusting
                             sliderInput("mosaic_rot_labels", "Rotate Variable 1 labels (degrees):",
-                                        min = 0, max = 360, value = 90, step = 15),
+                                        min = 0, max = 360, value = 0, step = 15, width = "100%"),
                             checkboxInput("mosaic_abbreviate", "Abbreviate labels", value = TRUE),
                             sliderInput("mosaic_fontsize", "Label font size:",
-                                        min = 6, max = 24, value = 12, step = 1),
+                                        min = 6, max = 24, value = 10, step = 1, width = "100%"),
                             hr(),
-                            
-                            # side bar for mosaic pair advisor controls
-                            strong("Pair Advisor"),
-                            br(),
-                            helpText("Ranks variable combinations by Cramér's V (effect size). Higher = stronger association."),
-                            br(),
+                            textInput("mosaic_title", "Custom plot title:", 
+                                      placeholder = "Auto-generated if empty"),
+                            hr(),
+                            sidebar_note("Pair Advisor: <br><br>
+                            Ranks variable combinations by Cramér's V (effect size).
+                            Higher = stronger association.
+                            0.1 = weak, 0.3 = moderate, 0.5+ = strong.
+                            3-way score = average Cramér's V across all 3 pairs in the trio.
+                            <br><br>
+                            Click a row in the results table to load variables into the plot."),
+                            hr(),
                             radioButtons("pairs_way", "Combinations:",
                                          choices = c("2-way", "3-way"), selected = "2-way",
                                          inline = TRUE),
                             numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
-                            actionButton("pairs_search", "Find Pairs", icon = icon("search"), width = "100%"),
-                            br(), br(),
-                            helpText("Click a row to load variables into the plot above.")
+                            actionButton("pairs_search", "Find Pairs", 
+                                         icon = icon("search"), width = "100%")
                ),
-               
-               mainPanel(
-                 width = 9,     # must add up to 12
-                 
-                 # mosaic plotting
-                 plotOutput("mosaic_plot", height = "90vh"),
-                 
-                 hr(),
-                 
-                 # pair advisor results (hidden until Search clicked)
-                 conditionalPanel(
-                   condition = "input.pairs_search > 0",
-                   h4("Pair Advisor Results — ranked by Cramér's V"),
-                   helpText("Cramér's V: 0.1 = weak, 0.3 = moderate, 0.5+ = strong. Not inflated by sample size."),
-                   helpText("3-way score = average Cramér's V across the 3 possible pairs within the trio."),
-                   DTOutput("pairs_table")
-                 )
+               mainPanel(width = 9,
+                         plotOutput("mosaic_plot", height = "70vh"),
+                         conditionalPanel(
+                           condition = "input.pairs_search > 0",
+                           hr(),
+                           h4("Pair Advisor Results — ranked by Cramér's V"),
+                           DTOutput("pairs_table")
+                         )
                )
              )
     ),  # end of tab panel
@@ -1884,19 +1884,25 @@ server <- function(input, output, session) {
   
   # ── SERVER MOSAIC ──────────────────────────────────────────────────────
   
-  # mosaic part1: mosaic plot
+  # 1st block: dynamic variable selectors (categorical only)
   cat_cols <- reactive({
-    df <- display_data()
-    names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    df   <- display_data()
+    cols <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    max_lvls <- input$mosaic_max_levels
+    req(max_lvls)
+    # keep only cols whose cardinality is within the limit
+    cols[sapply(cols, function(v) length(unique(na.omit(df[[v]]))) <= max_lvls)]
   })
   
   output$mosaic_x_ui <- renderUI({
-    selectInput("mosaic_x", "Variable 1 (columns):", choices = cat_cols())
+    cols <- cat_cols()
+    selectInput("mosaic_x", "Variable 1 (columns):", choices = cols, selected = cols[1])
   })
   
   output$mosaic_y_ui <- renderUI({
     cols <- cat_cols()
-    selectInput("mosaic_y", "Variable 2 (rows):", choices = cols, selected = cols[2])
+    selectInput("mosaic_y", "Variable 2 (rows):", choices = cols,
+                selected = if (length(cols) >= 2) cols[2] else cols[1])
   })
   
   output$mosaic_z_ui <- renderUI({
@@ -1905,11 +1911,12 @@ server <- function(input, output, session) {
                 choices = c("None", cols), selected = "None")
   })
   
+  # 2nd block: mosaic plot output
   output$mosaic_plot <- renderPlot({
     req(input$mosaic_x, input$mosaic_y, input$mosaic_z)
     df <- display_data()
     
-    # build 2-way or 3-way contingency table depending on Variable 3
+    # build contingency table
     if (input$mosaic_z == "None") {
       tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]])
       names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y)
@@ -1918,25 +1925,23 @@ server <- function(input, output, session) {
       names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y, input$mosaic_z)
     }
     
-    # build title string directly
-    vars_used  <- c(input$mosaic_x, input$mosaic_y,
-                    if (input$mosaic_z != "None") input$mosaic_z)
-    auto_title <- paste0("Mosaic | ", paste(vars_used, collapse = " × "))
+    vars_used     <- c(input$mosaic_x, input$mosaic_y,
+                       if (input$mosaic_z != "None") input$mosaic_z)
+    default_title <- paste0("Mosaic | ", paste(vars_used, collapse = " × "))
+    plot_title    <- if (nzchar(input$mosaic_title)) input$mosaic_title else default_title
     
     vcd::mosaic(tbl,
                 shade    = input$mosaic_shade,
                 legend   = input$mosaic_shade,
-                main     = auto_title,
+                main     = plot_title,
                 labeling = vcd::labeling_border(
-                  rot_labels = c(input$mosaic_rot_labels, 0, 0, 0),           # rotate axis labels
-                  gp_labels  = grid::gpar(fontsize = input$mosaic_fontsize),  # smaller font
-                  abbreviate = input$mosaic_abbreviate                        # abbreaviated labels or not
+                  rot_labels = c(input$mosaic_rot_labels, 0, 0, 0),
+                  gp_labels  = grid::gpar(fontsize = input$mosaic_fontsize),
+                  abbreviate = input$mosaic_abbreviate
                 ))
   })
   
-  
-  # mosaic part2: pair advisor
-  # (helper) compute CramerV for a 2-column contingency table
+  # 3rd block: pair advisor — compute Cramér's V for all variable combos
   get_cramer <- function(df, v1, v2) {
     tbl   <- table(df[[v1]], df[[v2]])
     stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
@@ -1967,8 +1972,6 @@ server <- function(input, output, session) {
       
     } else {
       
-      # 3-way: score = mean CramerV across all 3 pairwise combos within the trio
-      # this gives a single number summarising how interrelated the 3 variables are
       combos  <- combn(cats, 3, simplify = FALSE)
       results <- lapply(combos, function(trio) {
         v12 <- get_cramer(df, trio[1], trio[2])
@@ -1978,8 +1981,8 @@ server <- function(input, output, session) {
           Var1    = trio[1],
           Var2    = trio[2],
           Var3    = trio[3],
-          CramerV = round(mean(c(v12, v13, v23), na.rm = TRUE), 4),  # avg of 3 pairs
-          V_1_2   = round(v12, 4),   # individual pair scores shown for context
+          CramerV = round(mean(c(v12, v13, v23), na.rm = TRUE), 4),
+          V_1_2   = round(v12, 4),
           V_1_3   = round(v13, 4),
           V_2_3   = round(v23, 4),
           Chi_sq  = NA,
@@ -1990,14 +1993,13 @@ server <- function(input, output, session) {
     
     out <- do.call(rbind, Filter(Negate(is.null), results))
     out <- out[order(-out$CramerV), ]
-    
     out$Strength <- ifelse(out$CramerV >= 0.5, "Strong",
                            ifelse(out$CramerV >= 0.3, "Moderate",
                                   ifelse(out$CramerV >= 0.1, "Weak", "Negligible")))
-    
     head(out, input$pairs_top)
   })
   
+  # 4th block: pair advisor table output
   output$pairs_table <- renderDT({
     datatable(pairs_result(),
               rownames  = FALSE,
@@ -2011,22 +2013,19 @@ server <- function(input, output, session) {
       formatStyle("Strength",
                   color = styleEqual(
                     c("Strong", "Moderate", "Weak", "Negligible"),
-                    c("#155724",  "#856404",  "#856404", "#6c757d")
+                    c("#155724", "#856404", "#856404", "#6c757d")
                   ),
                   fontWeight = "bold")
   })
   
-  # clicking a row loads variables into mosaic dropdowns
+  # 5th block: clicking a row loads variables into mosaic dropdowns
   observeEvent(input$pairs_table_rows_selected, {
-    res  <- pairs_result()
-    sel  <- input$pairs_table_rows_selected
-    var1 <- res$Var1[sel]
-    var2 <- res$Var2[sel]
-    var3 <- res$Var3[sel]
-    
-    updateSelectInput(session, "mosaic_x", selected = var1)
-    updateSelectInput(session, "mosaic_y", selected = var2)
-    updateSelectInput(session, "mosaic_z", selected = if (!is.na(var3)) var3 else "None")
+    res <- pairs_result()
+    sel <- input$pairs_table_rows_selected
+    updateSelectInput(session, "mosaic_x", selected = res$Var1[sel])
+    updateSelectInput(session, "mosaic_y", selected = res$Var2[sel])
+    updateSelectInput(session, "mosaic_z",
+                      selected = if (!is.na(res$Var3[sel])) res$Var3[sel] else "None")
   })
   
   
