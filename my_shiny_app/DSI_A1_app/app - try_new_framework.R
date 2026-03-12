@@ -793,7 +793,7 @@ ui <- fluidPage(
     
     # ── UI BOXPLOT 1 ──────────────────────────────────────────────────────
     
-    tabPanel("Boxplot",
+    tabPanel("Boxplot 1",
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("Boxplot: <br><br>
@@ -835,6 +835,54 @@ ui <- fluidPage(
                )
              )
     ), # end of tab panel
+    
+    
+    # ── UI BOXPLOT 2 ──────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot 2",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Boxplot 2 (Interactive): <br><br>
+                        Visualise distributions and outliers across numeric variables.
+                        Violin mode reveals distribution shape and density.
+                        Group by a categorical variable to compare across levels."),
+                            hr(),
+                            selectizeInput("box_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("box_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("box_transform", "Transform:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "none"),
+                            hr(),
+                            sliderInput("box_iqr", "IQR multiplier (outlier criterion):",
+                                        min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            hr(),
+                            checkboxInput("box_violin", "Show as violin", value = FALSE),
+                            hr(),
+                            checkboxInput("box_group_on", "Group by categorical variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.box_group_on == true",
+                              selectInput("box_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("box_group_levels", "Levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
+                            ),
+                            hr(),
+                            textInput("box_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("box_plot", height = "85vh")
+               )
+             )
+    ),  # end of tab panel
     
     
     # ── UI GGPAIRS ────────────────────────────────────────────────────────
@@ -1629,6 +1677,149 @@ server <- function(input, output, session) {
           axis.title.y = element_text(size = 16, face = "bold")
         )
     )
+  })
+  
+  
+  # ── SERVER BOXPLOT 2 ───────────────────────────────────────────────────
+  
+  # 1st block: variable selector, preset dropdown, group var initialisation
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    updateSelectizeInput(session, "box_vars", choices = num_vars)
+    apply_preset_selection(session, "boxplot", "box_vars", num_vars)
+    
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("boxplot"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "box_preset", choices = choices)
+    
+    apply_groupby_defaults(session, "boxplot", cat_vars, "box_group_var")
+  })
+  
+  # 2nd block: preset observer
+  observeEvent(input$box_preset, {
+    req(input$box_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel      <- intersect(VAR_PRESETS[[input$box_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "box_vars", selected = sel)
+  })
+  
+  # 3rd block: group level selector
+  observeEvent(input$box_group_var, {
+    req(input$box_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$box_group_var]]))))
+    updateSelectizeInput(session, "box_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  # 4th block: plot output
+  output$box_plot <- renderPlotly({
+    req(input$box_vars)
+    df       <- display_data()
+    sel_vars <- intersect(input$box_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 numeric variable."))
+    
+    # apply transform to a local copy only
+    df_plot <- df[, sel_vars, drop = FALSE]
+    if (input$box_transform != "none") {
+      df_plot[] <- lapply(df_plot, function(y) {
+        switch(input$box_transform,
+               "center"      = y - mean(y, na.rm = TRUE),
+               "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+               "normalise"   = (y - min(y, na.rm = TRUE)) /
+                 (max(y, na.rm = TRUE) - min(y, na.rm = TRUE))
+        )
+      })
+    }
+    
+    # resolve grouping
+    using_group <- isTRUE(input$box_group_on) &&
+      !is.null(input$box_group_var) &&
+      input$box_group_var %in% names(df)
+    
+    if (using_group) {
+      grp  <- input$box_group_var
+      lvls <- if (!is.null(input$box_group_levels) && length(input$box_group_levels) > 0)
+        input$box_group_levels else sort(unique(na.omit(as.character(df[[grp]]))))
+      df_plot[[grp]] <- df[[grp]]
+      df_plot <- df_plot[as.character(df_plot[[grp]]) %in% lvls, , drop = FALSE]
+      df_plot[[grp]] <- droplevels(as.factor(df_plot[[grp]]))
+    }
+    
+    # pivot to long format
+    df_long <- tidyr::pivot_longer(df_plot,
+                                   cols      = all_of(sel_vars),
+                                   names_to  = "Variable",
+                                   values_to = "Value")
+    df_long$Variable <- factor(df_long$Variable, levels = sel_vars)
+    
+    # build auto title
+    mode_label      <- if (isTRUE(input$box_violin)) "Violin" else "Boxplot"
+    transform_label <- if (input$box_transform != "none")
+      paste0(" | ", tools::toTitleCase(input$box_transform)) else ""
+    group_label     <- if (using_group) paste0(" | Grouped by ", input$box_group_var) else ""
+    iqr_label       <- if (!isTRUE(input$box_violin)) paste0(" | IQR ×", input$box_iqr) else ""
+    default_title   <- paste0(mode_label, iqr_label, transform_label, group_label)
+    plot_title      <- if (nzchar(input$box_title)) input$box_title else default_title
+    
+    # x aesthetic: Variable alone, or Variable × group level
+    if (using_group) {
+      p <- ggplot(df_long, aes(x = Variable, y = Value, fill = Variable)) +
+        facet_wrap(as.formula(paste("~", grp)), scales = "free_y")
+    } else {
+      p <- ggplot(df_long, aes(x = Variable, y = Value, fill = Variable))
+    }
+    
+    if (isTRUE(input$box_violin)) {
+      p <- p +
+        ggplot2::geom_violin(
+          alpha    = 0.7,
+          trim     = FALSE
+        )
+    } else {
+      p <- p +
+        geom_boxplot(
+          coef = input$box_iqr,
+          alpha = 0.7,
+          outlier.size = 0.8
+        )
+    }
+    
+    p <- p +
+      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 13),
+        axis.text.y     = element_text(size = 13),
+        legend.position = "none",
+        axis.title.y    = element_blank(),
+        strip.text      = element_text(size = 16, face = "bold")
+      ) +
+      ggplot2::labs(title = plot_title, x = NULL, y = NULL)
+    
+    ggplotly(p, tooltip = c("x", "y", "fill")) %>%
+      layout(
+        title  = list(
+          text = paste0("<b>", plot_title, "</b>"),
+          font = list(size = 22, color = "black"),
+          x = 0.5, y = 0.97
+        ),
+        margin = list(t = 78),
+        legend = list(
+          font  = list(size = 16),
+          title = list(
+            text = if (using_group) paste0("<b>", input$box_group_var, "</b>") else "<b>Variable</b>",
+            font = list(size = 16)
+          )
+        ),
+        xaxis  = list(title = list(text = "", font = list(size = 16)), tickfont = list(size = 16)),
+        xaxis2 = list(title = list(text = "", font = list(size = 16)), tickfont = list(size = 16)),
+        yaxis  = list(title = list(text = "<b>Value</b>", font = list(size = 16)), tickfont = list(size = 16)),
+        yaxis2 = list(tickfont = list(size = 16))
+      )
   })
   
   
