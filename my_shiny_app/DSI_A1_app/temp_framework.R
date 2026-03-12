@@ -7,18 +7,29 @@
 
 library(shiny)
 library(shinyAce)  # R console ace editor
-library(dplyr)
-library(DT)
+library(tidyverse)
 library(plotly)
-library(ggplot2)
-library(paletteer) # global colour theme
-library(colorspace)
+library(seriation)
+library(tabplot)
+library(visdat)
+library(DT)
+library(grid)
 
+# library(dplyr)
+# library(ggplot2)
+# library(vcd)
+# library(dbscan)
+# library(paletteer) # global colour theme
+# library(colorspace)
+# library(shinyjs)
+# library(tidytext)
+# library(wordcloud2)
+# library(pls)
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
-# ·· SUCURITY LOCK ························································
+# ·· SECURITY LOCK ························································
 
 # What the lock controls (all three require authentication):
 #   PRIVATE_COLS  — hidden in all dataset views until unlocked (for stakeholder or authentised users)
@@ -55,7 +66,11 @@ MASTER_COL_ORDER <- c(
   "Priority", "Price", "Speed", "Duration", "Temp",
   "Location", "Agreed", "State", "Class", "Surface",
   # raw sensors
-  paste0("Sensor", 1:30),
+  paste0("Sensor", 1:30), 
+  # D idgrouped sensors
+  "Sensor4D", "Sensor8D", "Sensor11D", "Sensor16D", "Sensor22D", "Sensor24D", "Sensor28D",
+  # G idgrouped sensors
+  "Sensor4G", "Sensor8G", "Sensor11G", "Sensor16G", "Sensor22G", "Sensor24G", "Sensor28G",
   # sensor group 1 (averaged raw)
   "SensorGroup1", "SensorGroup2", "SensorGroup3",
   # centred sensor group (subtract mean)
@@ -63,7 +78,9 @@ MASTER_COL_ORDER <- c(
   # standardised sensor group (z-score)
   "StandardisedSG1", "StandardisedSG2", "StandardisedSG3",
   # normalised sensor group (min-max)
-  "NormalisedSG1", "NormalisedSG2", "NormalisedSG3"
+  "NormalisedSG1", "NormalisedSG2", "NormalisedSG3",
+  # na flag specific for Sensor6
+  "NaFlag_S6"
 )
 
 # ~~ reordering helper function ~~
@@ -72,102 +89,6 @@ MASTER_COL_ORDER <- c(
 reorder_cols <- function(df) {
   keep <- MASTER_COL_ORDER[MASTER_COL_ORDER %in% names(df)]  # only cols that exist, skipping missing cols
   df[, keep]
-}
-
-
-# ── GLOBAL COLOUR THEME ──────────────────────────────────────────────────────
-
-# grouping color strategy
-# interleave light/dark within each group for maximum within-group contrast
-sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
-sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
-
-sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
-sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
-
-sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
-sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
-
-THEME_COLOURS <- c(
-  sensor1_cols,
-  sensor2_cols,
-  sensor3_cols,
-  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
-)
-
-# named designations (only pin variables that need a meaningful fixed colour)
-THEME_DESIGNATED <- c(
-  "Y" = "#C41E3A"   # target variable always red
-)
-
-# helper: give it any character vector of names -> get back a named colour vector
-#   designated names always get their fixed colour
-#   everything else samples from THEME_COLOURS automatically
-
-theme_colours_for <- function(vars) {
-  colours <- character(length(vars))
-  names(colours) <- vars
-  
-  for (v in vars) {
-    
-    # 1️⃣ designated colours
-    if (v %in% names(THEME_DESIGNATED)) {
-      colours[v] <- THEME_DESIGNATED[v]
-      next
-    }
-    
-    # 2️⃣ raw sensors 1–30 (true grouping logic)
-    if (grepl("^Sensor[0-9]+$", v)) {
-      num <- as.integer(sub("Sensor", "", v))
-      
-      if (num <= 10) {
-        colours[v] <- sensor1_cols[num]
-      } else if (num <= 20) {
-        colours[v] <- sensor2_cols[num - 10]
-      } else {
-        colours[v] <- sensor3_cols[num - 20]
-      }
-      
-      next
-    }
-    
-    # 3️⃣ everything else (fallback deterministic mapping)
-    idx <- abs(sum(utf8ToInt(v)))
-    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
-  }
-  
-  colours
-}
-
-
-# ── GENERAL HELPER ───────────────────────────────────────────────────────────
-
-# sidebar note
-sidebar_note <- function(text) {
-  div(
-    style = "
-      font-size: 13px;
-      font-weight: 500;
-      color: #343a40;
-      background-color: white;
-      padding: 10px;
-      border-left: 4px solid #0d6efd;
-      border-radius: 6px;
-      margin-bottom: 12px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    ",
-    icon("info-circle", style = "color:#0d6efd;"),
-    HTML(paste("&nbsp;", text))
-  )
-}
-
-# plot title
-plot_title <- function(type, context = NULL) {
-  if (is.null(context) || context == "") {
-    type
-  } else {
-    paste0(type, "\n", context)
-  }
 }
 
 
@@ -260,11 +181,10 @@ ds_typed <- ds_renamed %>%
   )
 
 
-# ·· ENRICHED DATASET ·····················································
+# ·· EDA DATASET ··························································
 
-enriched_dataset <- ds_typed %>%
+eda_dataset <- ds_typed %>%
   
-  # derive IdGroup (G and D)
   mutate(
     
     # derive IdGroup (G and D)
@@ -272,6 +192,31 @@ enriched_dataset <- ds_typed %>%
     
     # too few years prefer factor, purely categorical regimes
     Year   = factor(format(Date, "%Y")),
+    
+    # get weekdays potentially from Monday to Sunday
+    Weekday = factor(format(Date, "%A")),
+    
+    # NA flag specifically for Sensor6
+    NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
+    
+  ) %>% # end of enriching mutation
+  
+  # reordering dataset after enriching
+  reorder_cols()
+
+
+# ·· ENRICHED DATASET ·····················································
+
+enriched_dataset <- eda_dataset %>%
+  
+  # derive IdGroup (G and D)
+  mutate(
+    
+    # # derive IdGroup (G and D)
+    # IdGroup = as.factor(substr(as.character(ID), 1, 1)),
+    
+    # # too few years prefer factor, purely categorical regimes
+    # Year   = factor(format(Date, "%Y")),
     
     # temporary integer month for deriving season, weekday and cyclic encoding
     Month  = as.integer(format(Date, "%m")),
@@ -296,10 +241,10 @@ enriched_dataset <- ds_typed %>%
     # factorise the integer month
     Month      = factor(Month),
     
-    # get weekdays potentially from Monday to Sunday
-    Weekday = factor(format(Date, "%A")),
+    # # get weekdays potentially from Monday to Sunday
+    # Weekday = factor(format(Date, "%A")),
     
-    # ISO week number 1-53
+    # ISO week number 1-53 as factor
     WeekNum = as.integer(format(Date, "%V")),
     
     # # day-of-month is likely just noise (data weekly collected on Thursdays and Fridays)
@@ -332,6 +277,28 @@ enriched_dataset <- ds_typed %>%
     #   (max(SensorGroup2, na.rm = TRUE) - min(SensorGroup2, na.rm = TRUE)),
     # NormalisedSG3 = (SensorGroup3 - min(SensorGroup3, na.rm = TRUE)) /
     #   (max(SensorGroup3, na.rm = TRUE) - min(SensorGroup3, na.rm = TRUE))
+    
+    # split Sensor6 by IdGroup (numeric output guaranteed)
+    # split selected sensors by IdGroup
+    Sensor4D  = ifelse(IdGroup == "D", Sensor4,  NA_real_),
+    Sensor8D  = ifelse(IdGroup == "D", Sensor8,  NA_real_),
+    Sensor11D = ifelse(IdGroup == "D", Sensor11, NA_real_),
+    Sensor16D = ifelse(IdGroup == "D", Sensor16, NA_real_),
+    Sensor22D = ifelse(IdGroup == "D", Sensor22, NA_real_),
+    Sensor24D = ifelse(IdGroup == "D", Sensor24, NA_real_),
+    Sensor28D = ifelse(IdGroup == "D", Sensor28, NA_real_),
+    
+    Sensor4G  = ifelse(IdGroup == "G", Sensor4,  NA_real_),
+    Sensor8G  = ifelse(IdGroup == "G", Sensor8,  NA_real_),
+    Sensor11G = ifelse(IdGroup == "G", Sensor11, NA_real_),
+    Sensor16G = ifelse(IdGroup == "G", Sensor16, NA_real_),
+    Sensor22G = ifelse(IdGroup == "G", Sensor22, NA_real_),
+    Sensor24G = ifelse(IdGroup == "G", Sensor24, NA_real_),
+    Sensor28G = ifelse(IdGroup == "G", Sensor28, NA_real_),
+    
+    # # NA flag specifically for Sensor6
+    # NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
+    
   ) %>% # end of enriching mutation
   
   # reordering dataset after enriching
@@ -353,11 +320,197 @@ model_dataset <- enriched_dataset %>%
 # ·· DEBUGGING DATASET ····················································
 
 # add a flag column, for exploring
-debug_dataset <- enriched_dataset %>%
+debug_dataset <- eda_dataset %>%
   mutate(
-    # example: flag
-    Flag = NA_character_   # empty string column — fill in manually later
+    # synthetic pair for testing extreme negative correlation (~-1)
+    # DebugPos: standardised Y; DebugNeg: its near-perfect mirror
+    DebugPos = as.numeric(scale(Y)),
+    DebugNeg = -DebugPos + rnorm(n(), mean = 0, sd = 0.02)# example: flag
   )
+
+
+# ── APPEARANCE ───────────────────────────────────────────────────────────────
+
+# ·· VARIABLE PRESET ······················································
+
+# all conceptualised presets for this dataset
+VAR_PRESETS <- list(
+  "Sensor 1-10"  = paste0("Sensor", 1:10),
+  "Sensor 11-20" = paste0("Sensor", 11:20),
+  "Sensor 21-30" = paste0("Sensor", 21:30),
+  "All Sensors"  = paste0("Sensor", 1:30),
+  "All Sensors vs Y"  = c("Y", paste0("Sensor", 1:30)),
+  "Gapped Sensors"  = paste0("Sensor", c(4,6,8,11,16,22,24,28)),
+  "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
+  "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
+  "Gapped Sensors (excl. 6 &IG&OP)"  = c("IdGroup", "Operator", 
+                                          paste0("Sensor", c(4,8,11,16,22,24,28))),
+  "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))]),
+  "All Variables (raw)" = names(ds_typed),
+  "All Categorical (raw)"  = names(ds_typed)[sapply(ds_typed, is.factor)],
+  "All Numeric (raw)"      = names(ds_typed)[sapply(ds_typed, is.numeric)]
+)
+
+# which to display as preset choices (using this meta)
+VAR_PRESET_META <- tibble::tribble(
+  ~plot,        ~s1s, ~s10s, ~s20s, ~sl, ~sly, ~gp, ~gpy, ~gpe6, ~gpe6IO, ~s1se48, ~vr, ~cr, ~nr,
+  "rising",      1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       0,   0,   0,
+  "ggpairs",     1,    1,     1,     0,   0,    1,   1,    1,     0,       1,       0,   0,   0,
+  "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
+  "missing",     1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       1,   1,   1,
+  "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1,
+  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0
+)
+
+# default select box content per plot
+DEFAULT_PRESET <- list(
+  rising  = "Gapped Sensors vs Y",
+  ggpairs = "Sensor 1-10 (excl. 4,8)",
+  heatmap = "All Sensors vs Y", 
+  missing = "All Variables (raw)",
+  tabplot = "Gapped Sensors (excl. 6 &IG&OP)",
+  boxplot = "All Sensors"
+)
+
+# lookup helper: returns named VAR_PRESETS list valid for a given plot
+presets_for <- function(plot_name) {
+  row  <- VAR_PRESET_META[VAR_PRESET_META$plot == plot_name, -1]  # drop ~plot col
+  keep <- as.logical(row)
+  VAR_PRESETS[keep]
+}
+
+# logic helper: sets ONLY the selected values from preset, caller controls choices separately
+apply_preset_selection <- function(session, plot_name, input_id, available_vars) {
+  preset_name <- DEFAULT_PRESET[[plot_name]]
+  default_sel <- intersect(VAR_PRESETS[[preset_name]], available_vars)
+  updateSelectizeInput(session, input_id, selected = default_sel)
+}
+
+
+# ·· GROUPBY DEFAULT ······················································
+
+# groupby default and its levels (NULL = all levels)
+#   group_on, means this plot should have a groupby option
+GROUPBY_META <- tibble::tribble(
+  ~plot,      ~group_on, ~group_var,  ~group_levels,
+  "rising",    0,         NA,          NULL,
+  "ggpairs",   1,         "NaFlag_S6", NULL,
+  "heatmap",   0,         NA,          NULL,
+  "missing",   1,         "Temp",      NULL,  # could check with Speed, they give good info
+  "boxplot",   1,         "IdGroup",   NULL
+)
+
+# lookup helper: for groupby default
+groupby_for <- function(plot_name) {
+  GROUPBY_META[GROUPBY_META$plot == plot_name, ]
+}
+
+# logic helper: applies groupby defaults to checkbox, group var selector, and level selector
+apply_groupby_defaults <- function(session, plot_name, cat_vars, input_group_var) {
+  grp_meta <- groupby_for(plot_name)
+  grp_var  <- if (grp_meta$group_var %in% cat_vars) grp_meta$group_var else cat_vars[1]
+  updateSelectInput(session, input_group_var, choices = cat_vars, selected = grp_var)
+}
+
+# logic helper: resolves level preselection from groupby meta
+resolve_group_levels <- function(plot_name, all_lvls) {
+  grp_meta <- groupby_for(plot_name)
+  if (!is.null(grp_meta$group_levels[[1]])) {
+    intersect(grp_meta$group_levels[[1]], all_lvls)  # specific levels from meta
+  } else {
+    all_lvls                                          # NULL = all levels
+  }
+}
+
+# ·· GLOBAL COLOUR THEME ··················································
+
+# grouping color strategy
+# interleave light/dark within each group for maximum within-group contrast
+sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
+sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
+
+sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+THEME_COLOURS <- c(
+  sensor1_cols,
+  sensor2_cols,
+  sensor3_cols,
+  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
+)
+
+# named designations (only pin variables that need a meaningful fixed colour)
+THEME_DESIGNATED <- c(
+  "Y" = "#C41E3A"   # target variable always red
+)
+
+# helper: give it any character vector of names -> get back a named colour vector
+#   designated names always get their fixed colour
+#   everything else samples from THEME_COLOURS automatically
+
+theme_colours_for <- function(vars) {
+  colours <- character(length(vars))
+  names(colours) <- vars
+  
+  for (v in vars) {
+    
+    # 1️⃣ designated colours
+    if (v %in% names(THEME_DESIGNATED)) {
+      colours[v] <- THEME_DESIGNATED[v]
+      next
+    }
+    
+    # 2️⃣ raw sensors 1–30 (true grouping logic)
+    if (grepl("^Sensor[0-9]+$", v)) {
+      num <- as.integer(sub("Sensor", "", v))
+      
+      if (num <= 10) {
+        colours[v] <- sensor1_cols[num]
+      } else if (num <= 20) {
+        colours[v] <- sensor2_cols[num - 10]
+      } else {
+        colours[v] <- sensor3_cols[num - 20]
+      }
+      
+      next
+    }
+    
+    # 3️⃣ everything else (fallback deterministic mapping)
+    idx <- abs(sum(utf8ToInt(v)))
+    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
+  }
+  
+  colours
+}
+
+
+# ·· GENERAL HELPER ·······················································
+
+# sidebar note
+sidebar_note <- function(text) {
+  div(
+    style = "
+      font-size: 13px;
+      font-weight: 500;
+      color: #343a40;
+      background-color: white;
+      padding: 10px;
+      border-left: 4px solid #0d6efd;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    ",
+    icon("info-circle", style = "color:#0d6efd;"),
+    HTML(paste("&nbsp;", text))
+  )
+}
+
+
+
+
 
 
 
@@ -375,7 +528,7 @@ ui <- fluidPage(
   # dataset stage selector + privacy lock always visible at the top
   fluidRow(
     
-    # dataset stage selector (debug stage only injected when unlocked — see server)
+    # dataset stage selector (debug stage only injected when unlocked - see server)
     column(2,
            uiOutput("dataset_selector_ui")   # rendered server-side so debug is gated
     ),
@@ -389,8 +542,16 @@ ui <- fluidPage(
                                border:none; padding:0;")
     ),
     
-    # spacer
-    column(6),
+    # assignment info and student info
+    column(6,
+           div(
+             style = "margin-top:28px; text-align:center; font-size:24px; font-weight:600; color:#495057;",
+             
+             "DATA423-26S1 Assignment 1 (EDA with Shiny)",
+             br(),
+             "William Hui Chang (69051925)"
+             )
+    ),
     
     # passphrase + lock toggle
     column(3,
@@ -420,38 +581,215 @@ ui <- fluidPage(
     tabPanel("Summary",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Note: <br><br>Can select a style to inspect the dataset structure."),
+                            sidebar_note("Data Summary: <br><br>
+                                         Can select a style to inspect the dataset structure."),
                             hr(),
+                            
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
                                                      "dfSummary"   = "dfsummary"),
-                                         selected = "glimpse")
+                                         selected = "glimpse"),
+                            hr(),
+                            sidebar_note("My EDA Notes: Some Level of Seriousness in Data Integrity - 
+                                         <br><br>
+                                         1. missingness and potential reasons
+                                         <br>
+                                         2. collected, but obvious improper value
+                                         <br>
+                                         3. seemingly good existing values, but hidden gaps
+                                         <br>
+                                         4. proper values, but improper grouping logic
+                                         <br>
+                                         5. proper values, but redundant (justified by primary key)
+                                         "),
+                            hr(),
+                            sidebar_note("My Futher Inference Notes: Some Level of Seriousness in Inference — 
+                                         <br><br>
+                                         1. five crucial assumptions as independence in obs, linearity, 
+                                         normality, constant variance, and no influential outliers
+                                         <br>
+                                         2. potential multi-labelled y overlapping
+                                         <br>
+                                         3. independence in features
+                                         <br>
+                                         4. interactions of features on y response
+                                         <br>
+                                         5. multilinearity in features
+                                         "),
+                            hr(),
+                            sidebar_note("My Framework Notes: Conceptualised Dataset Stages — 
+                                         <br><br>
+                                         1. raw dataset
+                                         <br>
+                                         2. eda dataset (anything related to integrity and patterns)
+                                         <br>
+                                         3. enriched dataset (add derived cols)
+                                         <br>
+                                         3. model dataset (remove unnecessary cols)
+                                         <br>
+                                         4. debug dataset (testing with flag cols and flagging logic)
+                                         "),
                ),
                mainPanel(width = 9,
-                         verbatimTextOutput("summary_output")
+                         # verbatimTextOutput("summary_output")
+                         uiOutput("summary_output")
                )
              )
     ), # end of tab panel
     
     
-    # ── UI PLOT A EXAMPLE ─────────────────────────────────────────────────
+    # ── UI WORD CLOUD ─────────────────────────────────────────────────────
+    
+    tabPanel("Word Cloud",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Word Cloud: <br><br>
+                                         This word cloud helps identify inconsistencies in variable names 
+                                         or categorical values, depending on the selected mode.
+                                         Typical scenarios are like col name cleaning 
+                                         (should check raw_dataset stage instead), distinct variable values 
+                                         and y label overlapping"),
+                            hr(),
+                            
+                            checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
+                            hr(),
+                            
+                            conditionalPanel(
+                              condition = "input.wc_varnames_mode == false",
+                              selectInput("wc_var", "Categorical variable:", choices = NULL)
+                            ),
+                            hr(),
+                            
+                            checkboxInput("wc_case", "Case sensitive", value = TRUE),
+                            hr(),
+                            
+                            radioButtons("wc_split_mode", "Token split mode:",
+                                         choices = c(
+                                           "None (whole value)"   = "none",
+                                           "Individual characters" = "chars",
+                                           "Alpha / numeric runs"  = "alphanum"
+                                         ),
+                                         selected = "none"),
+                            hr(),
+                            
+                            sliderInput("wc_max_words", "Max words to show:",
+                                        min = 10, max = 500, value = 360, step = 10),
+                            sliderInput("wc_min_freq", "Min frequency:",
+                                        min = 1, max = 50, value = 1, step = 1),
+                            helpText("Font size is proportional to frequency."),
+                            hr(),
+                            
+                            sliderInput("wc_scale", "Plot scale:",
+                                        min = 0.3, max = 3.0, value = 1.0, step = 0.1),
+                            hr(),
+                            
+                            selectInput("wc_palette", "Colour palette:",
+                                        choices = c("Dark2", "Set1", "Set2", "Set3",
+                                                    "Paired", "Accent", "Spectral"),
+                                        selected = "Dark2")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("wc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI MISSINGNESS ────────────────────────────────────────────────────
+    tabPanel("Missingness",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Missingness: <br><br>
+                          Visualise missing data patterns across the dataset.
+                          Group by a categorical variable to reveal whether 
+                          missingness differs across subgroups."),
+                            hr(),
+                            selectizeInput("ms_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("ms_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("ms_mode", "View:",
+                                         choices = c("vis_dat (type + missingness)" = "visdat",
+                                                     "vis_miss (missingness only)"  = "vismiss"),
+                                         selected = "visdat"),
+                            hr(),
+                            checkboxInput("ms_group_on", "Group by categorical variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.ms_group_on == true",
+                              selectInput("ms_group_var", "Grouping variable (primary):", choices = NULL),
+                              selectizeInput("ms_group_levels", "Primary levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default")),
+                              hr(),
+                              selectInput("ms_group_var2", "Grouping variable (secondary):", choices = NULL),
+                              selectizeInput("ms_group_levels2", "Secondary levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
+                            ),
+                            hr(),
+                            checkboxInput("ms_mcar", "Test for MCAR (Little's test)", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.ms_mcar == true",
+                              sidebar_note("Little's MCAR test: <br><br>
+                            H0: data is Missing Completely At Random. 
+                            A significant p-value (< 0.05) suggests 
+                            missingness is NOT random — i.e. MAR or MNAR.")
+                            ),
+                            hr(),
+                            textInput("ms_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("ms_output", height = "70vh"),
+                         conditionalPanel(
+                           condition = "input.ms_mcar == true",
+                           hr(),
+                           h4("Little's MCAR Test Result"),
+                           verbatimTextOutput("ms_mcar_output")
+                         )
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI RISING VALUE ───────────────────────────────────────────────────
     
     tabPanel("Rising Value",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Comeplete but Improper Value: <br><br>
-                                         This rising value chart helps identify incorrectly collected or 
-                                         inconsistent numeric values.
+                            sidebar_note("Rising Value: <br><br>
+                                         This rising value chart is useful for examining continuity.
+                                         If a variable is truly continuous, the sorted values should increase smoothly; 
+                                         visible gaps or steps may therefore signal suspicious patterns in the data. 
+                                         Unlike histograms, rising value charts do not rely on binning (which may hide gaps) 
+                                         and can support comparison across multiple variables.
                                          "),
-                            selectizeInput("rising_var", "Select numeric variable:",
+                            hr(),
+                            selectizeInput("rv_vars", "Numeric variables to plot:",
                                            choices  = NULL,
                                            multiple = TRUE),
                             hr(),
-                            sliderInput("rising_lwd", "Line width:",
+                            selectInput("rv_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            checkboxInput("rv_omit_na", "Ignore NAs", value = FALSE),
+                            hr(),
+                            radioButtons("rv_transform", "Transform:",
+                                         choices = c("None"         = "none",
+                                                     "Centre"       = "center",
+                                                     "Standardise"  = "standardise",
+                                                     "Normalise"    = "normalise"),
+                                         selected = "normalise"),
+                            hr(),
+                            textInput("rv_title", "Custom plot title:", placeholder = "Auto-generated if empty"),
+                            hr(),
+                            sliderInput("rv_lwd", "Line width:",
                                         min = 0.2, max = 5, value = 1.6, step = 0.1, width = "100%"),
                             hr(),
-                            radioButtons("rising_lty", "Line type:",
+                            radioButtons("rv_lty", "Line type:",
                                          choices = c(
                                            "Solid"    = "solid",
                                            "Dashed"   = "dashed",
@@ -462,13 +800,290 @@ ui <- fluidPage(
                                          selected = "dotdash")
                ),
                mainPanel(width = 9,
-                         plotlyOutput("rising_output", height = "85vh")
+                         plotlyOutput("rv_output", height = "80vh")
                )
              )
     ), # end of tab panel
     
     
-    # ── COMING SOON ───────────────────────────────────────────────────────
+    # ── UI TABPLOT ────────────────────────────────────────────────────────
+    
+    tabPanel("Tabplot",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Tabplot: <br><br>
+      Visualises distributions and relationships of multiple 
+      variables simultaneously, sorted by a target variable. 
+      Useful for spotting patterns across many variables at once 
+      and identifying how they relate to the outcome Y."),
+                            hr(),
+                            selectizeInput("tp_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("tp_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            checkboxInput("tp_sort_on", "Sort by variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.tp_sort_on == true",
+                              selectInput("tp_sortvar", "Sort by variable:", choices = NULL),
+                              checkboxInput("tp_decreasing", "Sort descending", value = FALSE)
+                            ),
+                            hr(),
+                            radioButtons("tp_transform", "Transform numeric columns:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "normalise"),
+                            hr(),
+                            sliderInput("tp_nbin", "Number of bins:",
+                                        min = 10, max = 500, value = 60, step = 10, width = "100%"),
+                            hr(),
+                            textInput("tp_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("tp_output", height = "80vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI BOXPLOT 1 ──────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot 1",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Boxplot: <br><br>
+                        Visualise distributions and outliers across numeric variables.
+                        Uses car::Boxplot with automatic outlier labelling by row index.
+                        Group by a categorical variable to compare across levels."),
+                            hr(),
+                            selectizeInput("bx_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("bx_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("bx_transform", "Transform:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "none"),
+                            hr(),
+                            sliderInput("bx_coef", "IQR multiplier (outlier criterion):",
+                                        min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            hr(),
+                            checkboxInput("bx_group_on", "Group by categorical variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.bx_group_on == true",
+                              selectInput("bx_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("bx_group_levels", "Levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
+                            ),
+                            hr(),
+                            textInput("bx_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("bx_output", height = "80vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI BOXPLOT 2 ──────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot 2",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Boxplot 2 (Interactive): <br><br>
+                        Visualise distributions and outliers across numeric variables.
+                        Violin mode reveals distribution shape and density.
+                        Group by a categorical variable to compare across levels."),
+                            hr(),
+                            selectizeInput("box_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("box_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("box_transform", "Transform:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "none"),
+                            # hr(),
+                            # sliderInput("box_iqr", "IQR multiplier (outlier criterion):",
+                            #             min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            # helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            hr(),
+                            checkboxInput("box_violin", "Show as violin", value = TRUE),
+                            hr(),
+                            checkboxInput("box_group_on", "Group by categorical variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.box_group_on == true",
+                              selectInput("box_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("box_group_levels", "Levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
+                            ),
+                            hr(),
+                            textInput("box_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotlyOutput("box_plot", height = "85vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI MOSAIC ─────────────────────────────────────────────────────────
+    
+    tabPanel("Mosaic",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Mosaic: <br><br>
+                            Visualise dependency between categorical variables.
+                            Tile area reflects joint frequency; shading by residuals 
+                            reveals where observed counts deviate from independence.
+                            Use the Pair Advisor to rank variable combinations 
+                            by association strength (Cramér's V)."),
+                            hr(),
+                            sliderInput("mosaic_max_levels", "Max levels per variable (cardinality filter):",
+                                        min = 2, max = 10, value = 4, step = 1, width = "100%"),
+                            helpText("Variables with more unique levels than this are excluded from the dropdowns."),
+                            hr(),
+                            uiOutput("mosaic_x_ui"),
+                            uiOutput("mosaic_y_ui"),
+                            uiOutput("mosaic_z_ui"),
+                            hr(),
+                            checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
+                            hr(),
+                            sliderInput("mosaic_rot_labels", "Rotate Variable 1 labels (degrees):",
+                                        min = 0, max = 360, value = 0, step = 15, width = "100%"),
+                            checkboxInput("mosaic_abbreviate", "Abbreviate labels", value = TRUE),
+                            sliderInput("mosaic_fontsize", "Label font size:",
+                                        min = 6, max = 24, value = 10, step = 1, width = "100%"),
+                            hr(),
+                            textInput("mosaic_title", "Custom plot title:", 
+                                      placeholder = "Auto-generated if empty"),
+                            hr(),
+                            sidebar_note("Pair Advisor: <br><br>
+                            Ranks variable combinations by Cramér's V (effect size).
+                            Higher = stronger association.
+                            0.1 = weak, 0.3 = moderate, 0.5+ = strong.
+                            3-way score = average Cramér's V across all 3 pairs in the trio.
+                            <br><br>
+                            Click a row in the results table to load variables into the plot."),
+                            hr(),
+                            radioButtons("pairs_way", "Combinations:",
+                                         choices = c("2-way", "3-way"), selected = "2-way",
+                                         inline = TRUE),
+                            numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
+                            actionButton("pairs_search", "Find Pairs", 
+                                         icon = icon("search"), width = "100%")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("mosaic_plot", height = "70vh"),
+                         conditionalPanel(
+                           condition = "input.pairs_search > 0",
+                           hr(),
+                           h4("Pair Advisor Results — ranked by Cramér's V"),
+                           DTOutput("pairs_table")
+                         )
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI GGPAIRS ────────────────────────────────────────────────────────
+    
+    tabPanel("GGPairs",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("GGPairs: <br><br>
+                                         This GGPairs graph provides a quick overview of pairwise relationships, 
+                                         correlations, and marginal density distributions across multiple 
+                                         variables, allowing potential suspicious relationships, outliers, or 
+                                         structural irregularities in the data to be detected early."),
+                            hr(),
+                            selectizeInput("gg_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("gg_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            checkboxInput("gg_group_on", "Group by levels", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.gg_group_on == true",
+                              selectInput("gg_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("gg_group_levels", "Levels of Interest:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),   # conditionalPanel closed here
+                            hr(),
+                            textInput("gg_title", "Custom plot title:", placeholder = "Auto-generated if empty"),
+                            hr(),
+                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Plot. Large selections may be slow."),
+               ),
+               mainPanel(width = 9,
+                         plotOutput("gg_output", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI CORRELATION HEATMAP ────────────────────────────────────────────
+    
+    tabPanel("Heatmap",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Correlation Heatmap (Corrgram): <br><br>
+                                 Pairwise correlations visualised as a corrgram.
+                                 Pie panels show direction and magnitude above the diagonal,
+                                 shaded panels below. Collinearity threshold trims
+                                 highly correlated variables greedily before plotting."),
+                            hr(),
+                            selectizeInput("hm_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("hm_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            selectInput("hm_cor", "Correlation method:",
+                                        choices  = c("Pearson"  = "pearson",
+                                                     "Spearman" = "spearman",
+                                                     "Kendall"  = "kendall"),
+                                        selected = "spearman"),
+                            hr(),
+                            selectInput("hm_order", "Variable ordering:",
+                                        choices  = c("Original"               = "FALSE",
+                                                     "AOE (Eigenvector)"      = "TRUE",
+                                                     "HC (Hierarchical)"      = "HC",
+                                                     "OLO (Optimal Leaf)"     = "OLO"),
+                                        selected = "HC"),
+                            hr(),
+                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = TRUE),
+                            checkboxInput("hm_missing", "Missingness correlation (NAs)", value = FALSE),
+                            hr(),
+                            textInput("hm_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("hm_output", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
+    # ── UI COMING SOON ─────────────────────────────────────────────────────
     
     tabPanel("Coming Soon",
              sidebarLayout(
@@ -538,7 +1153,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # status badge next to the lock button
+  # status badge next to the lock button (bigger and nice looking, this is intended, not a bug)
   output$privacy_status_ui <- renderUI({
     if (is_unlocked()) {
       tagList(
@@ -557,14 +1172,14 @@ server <- function(input, output, session) {
   # ·· DATASET SELECTOR UI ············································
   
   output$dataset_selector_ui <- renderUI({
-    choices <- c("Raw Dataset", "Enriched Dataset", "Model Dataset")
+    choices <- c("Raw Dataset", "EDA Dataset", "Enriched Dataset", "Model Dataset")
     
     # (injects "Debug Dataset" when unlocked)
     if (is_unlocked()) choices <- c(choices, "Debug Dataset")
     
     # preserve current selection
     current <- isolate(input$dataset_choice)
-    if (is.null(current) || !current %in% choices) current <- "Enriched Dataset"
+    if (is.null(current) || !current %in% choices) current <- "EDA Dataset"
     
     selectInput("dataset_choice", "Dataset Stage:",
                 choices = choices, selected = current)
@@ -577,12 +1192,28 @@ server <- function(input, output, session) {
       tags$dl(
         tags$dt("Raw Dataset"),
         tags$dd("Original data as loaded from disk. No changes."),
+        tags$dt("EDA Dataset"),
+        tags$dd("Raw + derived EDA helper columns for Exploratory Data Analysis 
+                (e.g., grouping, pattern inspection, or data integrity checks) 
+                without any preprocessing for modeling. 
+                (fixed minor schema and naming inconsistencies so that 
+                the dataset is correctly interpreted when loaded)"),
         tags$dt("Enriched Dataset"),
-        tags$dd("Raw + derived columns (type fixes, date parts, computed features, etc.)."),
+        tags$dd("Dataset with additional derived or contextual columns added 
+                to enrich the information available for further modelling consideration."),
         tags$dt("Model Dataset"),
-        tags$dd("Enriched with identifiers and leaky columns removed. Ready for modelling."),
+        tags$dd("Reduced dataset containing only the variables required for modelling, 
+                with unnecessary or potentially leaky columns removed."),
         tags$dt("Debug Dataset", style = "color:#856404;"),
-        tags$dd("Enriched + diagnostic flags and intermediate values. Only visible when unlocked.")
+        tags$dd("Explore upon enriched dataset with diagnostic flags and intermediate values 
+                for debugging or testing. Only visible when unlocked."),
+        tags$dt("Note 1: ", style = "color:#856404;"),
+        tags$dd("The Enriched/Model dataset stages are shown here as placeholders within 
+                the overall framework. They are not meaningfully implemented at this stage."),
+        tags$dt("Note 2: ", style = "color:#856404;"),
+        tags$dd("The ID column is intentionally hidden across all dataset views 
+                to demonstrate how the framework can protect sensitive attributes. 
+                It becomes visible only when unlocked."),
       ),
       easyClose = TRUE,
       footer    = modalButton("Close")
@@ -599,6 +1230,7 @@ server <- function(input, output, session) {
     req(input$dataset_choice)
     switch(input$dataset_choice,
            "Raw Dataset"      = raw_dataset,
+           "EDA Dataset"      = eda_dataset,
            "Enriched Dataset" = enriched_dataset,
            "Model Dataset"    = model_dataset,
            "Debug Dataset"    = debug_dataset,   # only reachable when unlocked
@@ -628,37 +1260,361 @@ server <- function(input, output, session) {
   
   # ── SERVER SUMMARY ─────────────────────────────────────────────────────
   
-  output$summary_output <- renderPrint({
+  output$summary_output <- renderUI({
     df <- display_data()
-    switch(input$summary_style,
-           "base"    = summary(df),
-           "glimpse" = cat(capture.output(tibble::glimpse(df)), sep = "\n"),
-           "dfsummary" = summarytools::dfSummary(df))
+    if (input$summary_style == "base") {
+      tags$pre(paste(capture.output(summary(df)), collapse = "\n"))
+    } else if (input$summary_style == "glimpse") {
+      tags$pre(paste(capture.output(tibble::glimpse(df)), collapse = "\n"))
+    } else if (input$summary_style == "dfsummary") {
+      summarytools::dfSummary(
+        df
+      ) |> print(method = "render")
+    }
   })
   
   
-  # ── SERVER PLOT A EXAMPLE ──────────────────────────────────────────────
+  # ── SERVER WORD CLOUD ──────────────────────────────────────────────────
   
-  # user sidebar action collection layer (reactive auto-detect)
+  # 1st block: categorical variable selector initialisation
   observe({
     df       <- display_data()
-    num_vars <- names(df)[sapply(df, is.numeric)]
-    default_sel  <- num_vars[num_vars %in% 
-                                   c("Y", "Sensor4", "Sensor6", "Sensor8", "Sensor11", 
-                                     "Sensor16", "Sensor22", "Sensor24", "Sensor28")]
-    updateSelectizeInput(session, "rising_var", choices = num_vars, selected = default_sel)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "wc_var", choices = cat_vars, selected = cat_vars[1])
   })
   
-  # render layer — rising value lines, ggplotly
-  output$rising_output <- renderPlotly({
-    req(input$rising_var)
-    df       <- display_data()
-    num_vars <- input$rising_var
-    colours  <- theme_colours_for(num_vars)
+  # 2nd block: plot output
+  output$wc_plot <- renderPlot({
+    df <- display_data()
     
+    if (isTRUE(input$wc_varnames_mode)) {
+      val <- names(df)
+    } else {
+      req(input$wc_var)
+      val <- as.character(df[[input$wc_var]])
+    }
+    
+    val <- val[!is.na(val) & nchar(trimws(val)) > 0]
+    
+    if (!input$wc_case) val <- tolower(val)
+    
+    validate(need(length(val) > 0, "No non-missing values to display."))
+    
+    tokens <- switch(input$wc_split_mode,
+                     "none"     = val,
+                     "chars"    = {
+                       t <- unlist(strsplit(val, ""))
+                       t[!grepl("\\s", t)]
+                     },
+                     "alphanum" = {
+                       t <- unlist(lapply(val, function(tok) {
+                         m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+                         regmatches(tok, m)[[1]]
+                       }))
+                       t[nchar(t) > 0]
+                     }
+    )
+    
+    freq_table <- sort(table(tokens), decreasing = TRUE)
+    freq_table <- freq_table[freq_table >= input$wc_min_freq]
+    validate(need(length(freq_table) > 0,
+                  paste0("No tokens appear at least ", input$wc_min_freq, " times.")))
+    freq_table <- head(freq_table, input$wc_max_words)
+    
+    words <- names(freq_table)
+    freqs <- as.integer(freq_table)
+    n     <- length(words)
+    
+    pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
+    colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
+    
+    freq_ranks <- rank(-freqs, ties.method = "first")
+    freq_ratio <- max(freqs) / max(median(freqs), 1)
+    
+    if (freq_ratio >= 3) {
+      freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
+                                 max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
+    } else {
+      freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+    }
+    
+    n_eff      <- min(n, 30)
+    base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+    max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
+    min_scale  <- max(0.3, max_scale * 0.15)
+    max_scale  <- max_scale * input$wc_scale
+    min_scale  <- min_scale * input$wc_scale
+    
+    par(mar = c(0, 0, 0, 0), bg = "white")
+    
+    wordcloud::wordcloud(
+      words        = words,
+      freq         = freqs_norm,
+      max.words    = n,
+      min.freq     = 1,
+      random.order = FALSE,
+      rot.per      = 0.15,
+      colors       = colors,
+      scale        = c(max_scale, min_scale),
+      use.r.layout = FALSE
+    )
+  })
+  
+  
+  # ── SERVER MISSINGNESS ─────────────────────────────────────────────────
+  
+  # 1st block: variable + group selectors initialisation
+  observe({
+    df       <- display_data()
+    all_vars <- names(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    # variable selector — default by preset
+    updateSelectizeInput(session, "ms_vars", choices = all_vars)
+    apply_preset_selection(session, "missing", "ms_vars", all_vars)
+    
+    # preset dropdown
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("missing"))
+    choices_p    <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "ms_preset", choices = choices_p)
+    
+    apply_groupby_defaults(session, "missing", cat_vars, "ms_group_var")
+    
+    updateSelectInput(session, "ms_group_var2",
+                      choices  = c("None" = "none", cat_vars),
+                      selected = "none")
+  })
+  
+  # preset observer for missingness
+  observeEvent(input$ms_preset, {
+    req(input$ms_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$ms_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "ms_vars", selected = sel)
+  })
+  
+  # populate primary group levels when group var changes
+  observeEvent(input$ms_group_var, {
+    req(input$ms_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$ms_group_var]]))))
+    updateSelectizeInput(session, "ms_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  # populate secondary group levels when group var2 changes
+  observeEvent(input$ms_group_var2, {
+    req(input$ms_group_var2)
+    if (input$ms_group_var2 == "none") {
+      updateSelectizeInput(session, "ms_group_levels2", choices = character(0), selected = character(0))
+      return()
+    }
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$ms_group_var2]]))))
+    updateSelectizeInput(session, "ms_group_levels2", choices = lvls, selected = lvls)
+  })
+  
+  # 2nd block: vis_dat / vis_miss plot
+  output$ms_output <- renderPlot({
+    df <- display_data()
+    req(input$ms_vars)
+    
+    sel_vars <- intersect(input$ms_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 variable."))
+    
+    default_title <- paste0(
+      if (input$ms_mode == "visdat") "Type-Wise Missingness Overview" else "Missingness Overview",
+      if (input$ms_group_on && !is.null(input$ms_group_var) && input$ms_group_var %in% names(df)) {
+        grp_label <- input$ms_group_var
+        if (!is.null(input$ms_group_var2) && input$ms_group_var2 != "none" &&
+            input$ms_group_var2 %in% names(df) && input$ms_group_var2 != input$ms_group_var)
+          paste0(" | Grouped by ", grp_label, " & ", input$ms_group_var2)
+        else
+          paste0(" | Grouped by ", grp_label)
+      } else ""
+    )
+    plot_title    <- if (nzchar(input$ms_title)) input$ms_title else default_title
+    
+    make_panel <- function(sub_df, subtitle = NULL) {
+      sub_df <- sub_df[, sel_vars, drop = FALSE]
+      
+      # guard: empty subgroup, return a blank placeholder panel
+      if (nrow(sub_df) == 0) {
+        p <- ggplot2::ggplot() +
+          ggplot2::annotate("text", x = 0.5, y = 0.5,
+                            label = "No data", size = 5, colour = "grey50") +
+          ggplot2::theme_void()
+        if (!is.null(subtitle))
+          p <- p + ggplot2::labs(title = subtitle) +
+            ggplot2::theme(plot.title = element_text(size = 13, face = "bold", hjust = 0.5))
+        return(p)
+      }
+      
+      p <- if (input$ms_mode == "visdat") visdat::vis_dat(sub_df) else visdat::vis_miss(sub_df)
+      p <- p + ggplot2::theme(
+        axis.text.x     = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12), # size for labels
+        axis.text.y     = element_text(size = 11),
+        axis.title      = element_text(size = 13),
+        legend.text     = element_text(size = 11),
+        legend.title    = element_text(size = 12),
+        legend.position = "none"
+      )
+      if (!is.null(subtitle))
+        p <- p + ggplot2::labs(title = subtitle) +
+        ggplot2::theme(plot.title = element_text(size = 13, face = "bold", hjust = 0.5))  # or face = "plain"
+      p
+    }
+    
+    if (input$ms_group_on && !is.null(input$ms_group_var) && input$ms_group_var %in% names(df)) {
+      
+      grp1  <- input$ms_group_var
+      lvls1 <- if (!is.null(input$ms_group_levels) && length(input$ms_group_levels) > 0)
+        input$ms_group_levels else sort(unique(na.omit(as.character(df[[grp1]]))))
+      
+      grp2  <- if (!is.null(input$ms_group_var2) && input$ms_group_var2 != "none" &&
+                   input$ms_group_var2 %in% names(df) && input$ms_group_var2 != grp1)
+        input$ms_group_var2 else NULL
+      lvls2 <- if (!is.null(grp2) && !is.null(input$ms_group_levels2) && length(input$ms_group_levels2) > 0)
+        input$ms_group_levels2 else if (!is.null(grp2))
+          sort(unique(na.omit(as.character(df[[grp2]])))) else NULL
+      
+      # filter df to selected levels
+      df_filtered <- df[as.character(df[[grp1]]) %in% lvls1, , drop = FALSE]
+      if (!is.null(grp2))
+        df_filtered <- df_filtered[as.character(df_filtered[[grp2]]) %in% lvls2, , drop = FALSE]
+      
+      if (!is.null(grp2)) {
+        plots <- list()
+        for (l1 in lvls1) {
+          for (l2 in lvls2) {
+            sub <- df_filtered[as.character(df_filtered[[grp1]]) == l1 &
+                                 as.character(df_filtered[[grp2]]) == l2, , drop = FALSE]
+            plots[[length(plots) + 1]] <- make_panel(sub, paste0(grp1, "=", l1, " & ", grp2, "=", l2))
+          }
+        }
+        ncols <- length(lvls2)
+      } else {
+        plots <- lapply(lvls1, function(l1) {
+          sub <- df_filtered[as.character(df_filtered[[grp1]]) == l1, , drop = FALSE]
+          make_panel(sub, paste0(grp1, " = ", l1))
+        })
+        ncols <- length(lvls1)
+      }
+      
+      combined <- patchwork::wrap_plots(plots, ncol = ncols) +
+        patchwork::plot_layout(guides = "collect")
+      print(combined + patchwork::plot_annotation(
+        title = plot_title,
+        theme = ggplot2::theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5))
+      ))
+      
+    } else {
+      print(make_panel(df) +
+              ggplot2::labs(title = plot_title) +
+              ggplot2::theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)))
+    }
+  })
+  
+  # 3rd block: Little's MCAR test — on selected variables only
+  output$ms_mcar_output <- renderPrint({
+    req(input$ms_mcar)
+    df       <- display_data()
+    sel_vars <- intersect(input$ms_vars, names(df))
+    
+    # apply same level filtering as the plot
+    if (input$ms_group_on && !is.null(input$ms_group_var) && input$ms_group_var %in% names(df)) {
+      lvls1 <- if (!is.null(input$ms_group_levels) && length(input$ms_group_levels) > 0)
+        input$ms_group_levels else sort(unique(na.omit(as.character(df[[input$ms_group_var]]))))
+      df <- df[as.character(df[[input$ms_group_var]]) %in% lvls1, , drop = FALSE]
+      
+      if (!is.null(input$ms_group_var2) && input$ms_group_var2 != "none" &&
+          input$ms_group_var2 %in% names(df) && input$ms_group_var2 != input$ms_group_var) {
+        lvls2 <- if (!is.null(input$ms_group_levels2) && length(input$ms_group_levels2) > 0)
+          input$ms_group_levels2 else sort(unique(na.omit(as.character(df[[input$ms_group_var2]]))))
+        df <- df[as.character(df[[input$ms_group_var2]]) %in% lvls2, , drop = FALSE]
+      }
+    }
+    
+    num_df <- df[, sel_vars, drop = FALSE]
+    num_df <- num_df[, sapply(num_df, is.numeric), drop = FALSE]
+    
+    validate(need(ncol(num_df) >= 2, "Select at least 2 numeric variables for the MCAR test."))
+    
+    has_na <- sapply(num_df, anyNA)
+    validate(need(any(has_na), "No missing values in the selected numeric variables — MCAR test not applicable."))
+    
+    result <- tryCatch(
+      naniar::mcar_test(num_df),
+      error = function(e) paste("Test failed:", conditionMessage(e))
+    )
+    
+    if (is.character(result)) {
+      cat(result, "\n")
+    } else {
+      cat("Little's MCAR Test\n")
+      cat(sprintf("Variables tested     : %d numeric columns\n", ncol(num_df)))
+      cat(sprintf("Observation included : %d rows\n", nrow(num_df)))
+      cat("──────────────────────────────\n")
+      cat(sprintf("Chi-square statistic : %.4f\n", result$statistic))
+      cat(sprintf("Degrees of freedom   : %d\n",   result$df))
+      cat(sprintf("p-value              : %.4f\n",  result$p.value))
+      cat("──────────────────────────────\n")
+      if (result$p.value < 0.05) {
+        cat("Conclusion: Reject H0 — missingness is NOT MCAR (likely MAR or MNAR).\n")
+      } else {
+        cat("Conclusion: Fail to reject H0 — data is consistent with MCAR.\n")
+      }
+    }
+  })
+  
+  
+  # ── SERVER RISING VALUE ────────────────────────────────────────────────
+  
+  # 1st block: variable selector and preset dropdown initialisation
+  observe({
+    df <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "rv_vars", choices = num_vars)
+    apply_preset_selection(session, "rising", "rv_vars", num_vars)
+    # dropdown only shows presets valid for this tab
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("rising"))
+    choices <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "rv_preset", choices = choices)
+  })
+  
+  # 2nd block: preset observer — apply selected preset to variable selector
+  observeEvent(input$rv_preset, {
+    # do nothing if "None" is selected
+    req(input$rv_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    # look up preset vars by name, keep only those that exist in current dataset
+    sel <- intersect(VAR_PRESETS[[input$rv_preset]], num_vars)
+    # guard: skip update if no matching vars found
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "rv_vars", selected = sel)
+  })
+  
+  # 3rd block: plot output
+  output$rv_output <- renderPlotly({
+    req(input$rv_vars)
+    df       <- display_data()
+    num_vars <- input$rv_vars
+    colours  <- theme_colours_for(num_vars)
     # build long-format df
     plot_df <- do.call(rbind, lapply(num_vars, function(v) {
-      y   <- sort(na.omit(df[[v]]))
+      y <- df[[v]]
+      if (input$rv_omit_na) y <- na.omit(y)
+      
+      y <- switch(input$rv_transform,
+                  "center"      = y - mean(y, na.rm = TRUE),
+                  "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+                  "normalise"   = (y - min(y, na.rm = TRUE)) / (max(y, na.rm = TRUE) - min(y, na.rm = TRUE)),
+                  y
+      )
+      
+      y   <- sort(y, na.last = TRUE)
       pct <- seq_along(y) / length(y) * 100
       data.frame(Percentile = pct, Value = y, Variable = v)
     }))
@@ -669,13 +1625,770 @@ server <- function(input, output, session) {
                              text   = paste0(Variable,
                                              "<br>Percentile: ", round(Percentile, 1),
                                              "<br>Value: ",      round(Value, 3)))) +
-      geom_line(linewidth = input$rising_lwd / 3, linetype = input$rising_lty) +
+      geom_line(linewidth = input$rv_lwd / 3, linetype = input$rv_lty) +
       scale_colour_manual(values = colours) +
-      labs(title = plot_title("Rising Value", "Sorted Distribution by Percentile")) +
       theme_minimal(base_size = 11) +
       theme(legend.position = "right")
     
-    ggplotly(p, tooltip = "text")
+    default_title <- paste0(
+      "Rising Value Graph for Continuity",
+      if (input$rv_omit_na) " | NAs Omitted" else "",
+      if (input$rv_transform != "none") paste0(" | ", tools::toTitleCase(input$rv_transform)) else ""
+    )
+    
+    ggplotly(p, tooltip = "text") %>%
+      layout(title = list(
+        text = if (nzchar(input$rv_title)) paste0("<b>", input$rv_title, "</b>") else 
+          paste0("<b>", default_title, "</b>"),
+        font = list(size = 28, color = "black"), x = 0.5, y = 0.95),
+        margin = list(t = 90),
+        legend = list(y = 0.8, yanchor = "middle", font  = list(size = 16),
+                      title = list(font = list(size = 16, color = "black"), text = "<b>Variable</b>")),
+        xaxis  = list(title    = list(text = "<b>Percentile</b>", font = list(size = 20)), 
+                      tickfont = list(size = 18)),
+        yaxis  = list(title    = list(text = "<b>Value</b>", font = list(size = 20)),
+                      tickfont = list(size = 18))
+        )
+  })
+  
+  
+  # ── SERVER TABPLOT ─────────────────────────────────────────────────────
+  
+  # 1st block: variable selector and preset dropdown initialisation
+  observe({
+    df       <- display_data()
+    all_vars <- names(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    updateSelectizeInput(session, "tp_vars", choices = all_vars)
+    apply_preset_selection(session, "tabplot", "tp_vars", all_vars)
+    
+    # preset dropdown — only presets valid for this tab
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("tabplot"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "tp_preset", choices = choices)
+    
+    # sort-by selector — numeric vars + any Date cols, default to Y if present
+    date_vars    <- names(df)[sapply(df, inherits, what = "Date")]
+    sortable_vars <- c(date_vars, num_vars)
+    sort_default  <- if (length(date_vars) > 0) date_vars[1] else sortable_vars[1]
+    updateSelectInput(session, "tp_sortvar", choices = sortable_vars, selected = sort_default)
+  })
+  
+  # 2nd block: preset observer
+  observeEvent(input$tp_preset, {
+    req(input$tp_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$tp_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "tp_vars", selected = sel)
+  })
+  
+  # 3rd block: plot output
+  output$tp_output <- renderPlot({
+    req(input$tp_vars)
+    df <- display_data()
+    
+    sel_vars <- intersect(input$tp_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 variable."))
+    
+    # apply transform to numeric columns in the plot subset
+    df_plot <- df[, sel_vars, drop = FALSE]
+    if (input$tp_transform != "none") {
+      num_cols <- names(df_plot)[sapply(df_plot, is.numeric)]
+      df_plot[num_cols] <- lapply(df_plot[num_cols], function(y) {
+        switch(input$tp_transform,
+               "center"      = y - mean(y, na.rm = TRUE),
+               "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+               "normalise"   = (y - min(y, na.rm = TRUE)) /
+                 (max(y, na.rm = TRUE) - min(y, na.rm = TRUE))
+        )
+      })
+    }
+    
+    # sorting logic
+    #   sort_on = FALSE → inject a natural row-index col and sort by it (preserves original order visually)
+    #   sort_on = TRUE  → sort by the chosen numeric variable
+    using_index <- !isTRUE(input$tp_sort_on)
+    
+    if (using_index) {
+      df_plot$.row_index <- seq_len(nrow(df_plot))
+      sort_col           <- ".row_index"
+      df_plot <- df_plot[, c(".row_index", setdiff(names(df_plot), ".row_index")), drop = FALSE]
+    } else {
+      req(input$tp_sortvar)
+      validate(need(input$tp_sortvar %in% names(df), "Sort variable not found in dataset."))
+      sort_col <- input$tp_sortvar
+      
+      if (!sort_col %in% names(df_plot))
+        df_plot[[sort_col]] <- df[[sort_col]]
+      
+      # if sorting by a Date col, coerce it to numeric for tableplot's sort key
+      # (the display version was already converted to factor above — this only
+      #  affects the sort col copy that tableplot reads internally)
+      if (inherits(df_plot[[sort_col]], "Date"))
+        df_plot[[sort_col]] <- as.numeric(df_plot[[sort_col]])
+      
+      df_plot <- df_plot[, c(sort_col, setdiff(names(df_plot), sort_col)), drop = FALSE]
+    }
+    
+    sort_label <- if (using_index) "Original Row Order" else input$tp_sortvar
+    transform_label <- if (input$tp_transform != "none")
+      paste0(" | ", tools::toTitleCase(input$tp_transform)) else ""
+    
+    default_title <- paste0("Tabplot | Sorted by ", sort_label, transform_label)
+    plot_title    <- if (nzchar(input$tp_title)) input$tp_title else default_title
+    
+    tabplot::tableplot(
+      df_plot,
+      sortCol    = sort_col,
+      decreasing = if (using_index) FALSE else isTRUE(input$tp_decreasing),
+      nBins      = input$tp_nbin,
+      title      = plot_title,
+      fontsize   = 14,
+      fontsize.title  = 22
+    )
+  })
+  
+  
+  # ── SERVER BOXPLOT 1 ───────────────────────────────────────────────────
+  
+  # 1st block: variable selector, preset dropdown, group var initialisation
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    updateSelectizeInput(session, "bx_vars", choices = num_vars)
+    apply_preset_selection(session, "boxplot", "bx_vars", num_vars)
+    
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("boxplot"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "bx_preset", choices = choices)
+    
+    apply_groupby_defaults(session, "boxplot", cat_vars, "bx_group_var")
+  })
+  
+  # 2nd block: preset observer
+  observeEvent(input$bx_preset, {
+    req(input$bx_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel      <- intersect(VAR_PRESETS[[input$bx_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "bx_vars", selected = sel)
+  })
+  
+  # 3rd block: group level selector
+  observeEvent(input$bx_group_var, {
+    req(input$bx_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$bx_group_var]]))))
+    updateSelectizeInput(session, "bx_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  # 4th block: plot output
+  output$bx_output <- renderPlot({
+    req(input$bx_vars)
+    df       <- display_data()
+    sel_vars <- intersect(input$bx_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 numeric variable."))
+    
+    # apply transform to a local copy only
+    df_plot <- df[, sel_vars, drop = FALSE]
+    if (input$bx_transform != "none") {
+      df_plot[] <- lapply(df_plot, function(y) {
+        switch(input$bx_transform,
+               "center"      = y - mean(y, na.rm = TRUE),
+               "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+               "normalise"   = (y - min(y, na.rm = TRUE)) /
+                 (max(y, na.rm = TRUE) - min(y, na.rm = TRUE))
+        )
+      })
+    }
+    
+    # resolve grouping
+    using_group <- isTRUE(input$bx_group_on) &&
+      !is.null(input$bx_group_var) &&
+      input$bx_group_var %in% names(df)
+    
+    if (using_group) {
+      grp  <- input$bx_group_var
+      lvls <- if (!is.null(input$bx_group_levels) && length(input$bx_group_levels) > 0)
+        input$bx_group_levels else sort(unique(na.omit(as.character(df[[grp]]))))
+      df_plot[[grp]] <- df[[grp]]
+      df_plot <- df_plot[as.character(df_plot[[grp]]) %in% lvls, , drop = FALSE]
+      df_plot[[grp]] <- droplevels(as.factor(df_plot[[grp]]))
+    }
+    
+    # build auto title
+    transform_label <- if (input$bx_transform != "none")
+      paste0(" | ", tools::toTitleCase(input$bx_transform)) else ""
+    group_label   <- if (using_group) paste0(" | Grouped by ", input$bx_group_var) else ""
+    default_title <- paste0("Boxplot | IQR ×", input$bx_coef, transform_label, group_label)
+    plot_title    <- if (nzchar(input$bx_title)) input$bx_title else default_title
+    
+    colours <- theme_colours_for(sel_vars)
+    
+    # pivot to long format
+    df_long <- tidyr::pivot_longer(df_plot,
+                                   cols      = all_of(sel_vars),
+                                   names_to  = "Variable",
+                                   values_to = "Value")
+    df_long$Variable <- factor(df_long$Variable, levels = sel_vars)
+    
+    n_vars    <- length(sel_vars)
+    angle_val <- if (n_vars > 8) 45 else 0
+    hjust_val <- if (n_vars > 8) 1  else 0.5
+    
+    p <- if (using_group) {
+      ggplot2::ggplot(df_long,
+                      aes(x = Variable, y = Value, fill = Variable)) +
+        ggplot2::geom_boxplot(
+          coef          = input$bx_coef,
+          outlier.shape = 21,
+          outlier.size  = 1.5,
+          outlier.alpha = 0.5,
+          alpha         = 0.75,
+          colour        = "grey25"
+        ) +
+        ggplot2::facet_wrap(as.formula(paste("~", grp)), scales = "free_y") +
+        ggplot2::scale_fill_manual(values = colours, guide = "none")
+    } else {
+      ggplot2::ggplot(df_long,
+                      aes(x = Variable, y = Value, fill = Variable)) +
+        ggplot2::geom_boxplot(
+          coef          = input$bx_coef,
+          outlier.shape = 21,
+          outlier.size  = 1.5,
+          outlier.alpha = 0.5,
+          alpha         = 0.75,
+          colour        = "grey25"
+        ) +
+        ggplot2::scale_fill_manual(values = colours, guide = "none")
+    }
+    
+    print(
+      p +
+        ggplot2::theme_minimal(base_size = 13) +
+        ggplot2::theme(
+          plot.title         = element_text(size = 24, face = "bold", hjust = 0.5),
+          strip.text         = element_text(size = 18, face = "bold"),
+          panel.grid.major.x = element_blank(),
+          axis.text.x        = element_text(angle = angle_val, hjust = hjust_val,
+                                            size  = if (n_vars > 20) 14 else 18),
+          axis.text.y        = element_text(size = 16),
+          plot.margin        = margin(t = 15)
+        ) +
+        ggplot2::labs(title = plot_title, x = NULL, y = "Value") +
+        ggplot2::theme(
+          axis.title.y = element_text(size = 16, face = "bold")
+        )
+    )
+  })
+  
+  
+  # ── SERVER BOXPLOT 2 ───────────────────────────────────────────────────
+  
+  # 1st block: variable selector, preset dropdown, group var initialisation
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    updateSelectizeInput(session, "box_vars", choices = num_vars)
+    apply_preset_selection(session, "boxplot", "box_vars", num_vars)
+    
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("boxplot"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "box_preset", choices = choices)
+    
+    apply_groupby_defaults(session, "boxplot", cat_vars, "box_group_var")
+  })
+  
+  # 2nd block: preset observer
+  observeEvent(input$box_preset, {
+    req(input$box_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel      <- intersect(VAR_PRESETS[[input$box_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "box_vars", selected = sel)
+  })
+  
+  # 3rd block: group level selector
+  observeEvent(input$box_group_var, {
+    req(input$box_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$box_group_var]]))))
+    updateSelectizeInput(session, "box_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  # 4th block: plot output
+  output$box_plot <- renderPlotly({
+    req(input$box_vars)
+    df       <- display_data()
+    sel_vars <- intersect(input$box_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 numeric variable."))
+    
+    # apply transform to a local copy only
+    df_plot <- df[, sel_vars, drop = FALSE]
+    if (input$box_transform != "none") {
+      df_plot[] <- lapply(df_plot, function(y) {
+        switch(input$box_transform,
+               "center"      = y - mean(y, na.rm = TRUE),
+               "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+               "normalise"   = (y - min(y, na.rm = TRUE)) /
+                 (max(y, na.rm = TRUE) - min(y, na.rm = TRUE))
+        )
+      })
+    }
+    
+    # resolve grouping
+    using_group <- isTRUE(input$box_group_on) &&
+      !is.null(input$box_group_var) &&
+      input$box_group_var %in% names(df)
+    
+    if (using_group) {
+      grp  <- input$box_group_var
+      lvls <- if (!is.null(input$box_group_levels) && length(input$box_group_levels) > 0)
+        input$box_group_levels else sort(unique(na.omit(as.character(df[[grp]]))))
+      df_plot[[grp]] <- df[[grp]]
+      df_plot <- df_plot[as.character(df_plot[[grp]]) %in% lvls, , drop = FALSE]
+      df_plot[[grp]] <- droplevels(as.factor(df_plot[[grp]]))
+    }
+    
+    # pivot to long format
+    df_long <- tidyr::pivot_longer(df_plot,
+                                   cols      = all_of(sel_vars),
+                                   names_to  = "Variable",
+                                   values_to = "Value")
+    df_long$Variable <- factor(df_long$Variable, levels = sel_vars)
+    
+    # build auto title
+    mode_label      <- if (isTRUE(input$box_violin)) "Violin" else "Boxplot"
+    transform_label <- if (input$box_transform != "none")
+      paste0(" | ", tools::toTitleCase(input$box_transform)) else ""
+    group_label     <- if (using_group) paste0(" | Grouped by ", input$box_group_var) else ""
+    # iqr_label       <- if (!isTRUE(input$box_violin)) paste0(" | IQR ×", input$box_iqr) else ""
+    default_title   <- paste0(mode_label, transform_label, group_label) # iqr_label, 
+    plot_title      <- if (nzchar(input$box_title)) input$box_title else default_title
+    
+    # x aesthetic: Variable alone, or Variable × group level
+    if (using_group) {
+      p <- ggplot(df_long, aes(x = Variable, y = Value, fill = Variable)) +
+        facet_wrap(as.formula(paste("~", grp)), scales = "free_y")
+    } else {
+      p <- ggplot(df_long, aes(x = Variable, y = Value, fill = Variable))
+    }
+    
+    if (isTRUE(input$box_violin)) {
+      p <- p +
+        ggplot2::geom_violin(
+          alpha    = 0.7,
+          trim     = FALSE
+        )
+    } else {
+      p <- p +
+        geom_boxplot(
+          coef = 1.5,  # input$box_iqr
+          alpha = 0.7,
+          outlier.size = 0.8
+        )
+    }
+    
+    p <- p +
+      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 13),
+        axis.text.y     = element_text(size = 13),
+        legend.position = "none",
+        axis.title.y    = element_blank(),
+        strip.text      = element_text(size = 16, face = "bold")
+      ) +
+      ggplot2::labs(title = plot_title, x = NULL, y = NULL)
+    
+    ggplotly(p, tooltip = c("x", "y", "fill")) %>%
+      layout(
+        title  = list(
+          text = paste0("<b>", plot_title, "</b>"),
+          font = list(size = 22, color = "black"),
+          x = 0.5, y = 0.97
+        ),
+        margin = list(t = 78),
+        legend = list(
+          font  = list(size = 16),
+          title = list(
+            text = if (using_group) paste0("<b>", input$box_group_var, "</b>") else "<b>Variable</b>",
+            font = list(size = 16)
+          )
+        ),
+        xaxis  = list(title = list(text = "", font = list(size = 16)), tickfont = list(size = 16)),
+        xaxis2 = list(title = list(text = "", font = list(size = 16)), tickfont = list(size = 16)),
+        yaxis  = list(title = list(text = "<b>Value</b>", font = list(size = 16)), tickfont = list(size = 16)),
+        yaxis2 = list(tickfont = list(size = 16))
+      )
+  })
+  
+  
+  # ── SERVER MOSAIC ──────────────────────────────────────────────────────
+  
+  # 1st block: dynamic variable selectors (categorical only)
+  cat_cols <- reactive({
+    df   <- display_data()
+    cols <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    max_lvls <- input$mosaic_max_levels
+    req(max_lvls)
+    # keep only cols whose cardinality is within the limit
+    cols[sapply(cols, function(v) length(unique(na.omit(df[[v]]))) <= max_lvls)]
+  })
+  
+  output$mosaic_x_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_x", "Variable 1 (columns):", choices = cols, selected = cols[1])
+  })
+  
+  output$mosaic_y_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_y", "Variable 2 (rows):", choices = cols,
+                selected = if (length(cols) >= 2) cols[2] else cols[1])
+  })
+  
+  output$mosaic_z_ui <- renderUI({
+    cols <- cat_cols()
+    selectInput("mosaic_z", "Variable 3 — optional (sub-rows):",
+                choices = c("None", cols), selected = "None")
+  })
+  
+  # 2nd block: mosaic plot output
+  output$mosaic_plot <- renderPlot({
+    req(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    df <- display_data()
+    
+    # build contingency table
+    if (input$mosaic_z == "None") {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y)
+    } else {
+      tbl <- table(df[[input$mosaic_x]], df[[input$mosaic_y]], df[[input$mosaic_z]])
+      names(dimnames(tbl)) <- c(input$mosaic_x, input$mosaic_y, input$mosaic_z)
+    }
+    
+    vars_used     <- c(input$mosaic_x, input$mosaic_y,
+                       if (input$mosaic_z != "None") input$mosaic_z)
+    default_title <- paste0("Mosaic | ", paste(vars_used, collapse = " × "))
+    plot_title    <- if (nzchar(input$mosaic_title)) input$mosaic_title else default_title
+    
+    vcd::mosaic(tbl,
+                shade    = input$mosaic_shade,
+                legend   = input$mosaic_shade,
+                main     = plot_title,
+                labeling = vcd::labeling_border(
+                  rot_labels = c(input$mosaic_rot_labels, 0, 0, 0),
+                  gp_labels  = grid::gpar(fontsize = input$mosaic_fontsize),
+                  abbreviate = input$mosaic_abbreviate
+                ))
+  })
+  
+  # 3rd block: pair advisor — compute Cramér's V for all variable combos
+  get_cramer <- function(df, v1, v2) {
+    tbl   <- table(df[[v1]], df[[v2]])
+    stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
+    if (is.null(stats)) return(NA)
+    stats$cramer
+  }
+  
+  pairs_result <- eventReactive(input$pairs_search, {
+    df   <- display_data()
+    cats <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    if (input$pairs_way == "2-way") {
+      
+      combos  <- combn(cats, 2, simplify = FALSE)
+      results <- lapply(combos, function(pair) {
+        tbl   <- table(df[[pair[1]]], df[[pair[2]]])
+        stats <- tryCatch(vcd::assocstats(tbl), error = function(e) NULL)
+        if (is.null(stats)) return(NULL)
+        data.frame(
+          Var1    = pair[1],
+          Var2    = pair[2],
+          Var3    = NA_character_,
+          CramerV = round(stats$cramer, 4),
+          Chi_sq  = round(stats$chisq_tests["Pearson", "X^2"], 2),
+          p_value = round(stats$chisq_tests["Pearson", "P(> X^2)"], 6)
+        )
+      })
+      
+    } else {
+      
+      combos  <- combn(cats, 3, simplify = FALSE)
+      results <- lapply(combos, function(trio) {
+        v12 <- get_cramer(df, trio[1], trio[2])
+        v13 <- get_cramer(df, trio[1], trio[3])
+        v23 <- get_cramer(df, trio[2], trio[3])
+        data.frame(
+          Var1    = trio[1],
+          Var2    = trio[2],
+          Var3    = trio[3],
+          CramerV = round(mean(c(v12, v13, v23), na.rm = TRUE), 4),
+          V_1_2   = round(v12, 4),
+          V_1_3   = round(v13, 4),
+          V_2_3   = round(v23, 4),
+          Chi_sq  = NA,
+          p_value = NA
+        )
+      })
+    }
+    
+    out <- do.call(rbind, Filter(Negate(is.null), results))
+    out <- out[order(-out$CramerV), ]
+    out$Strength <- ifelse(out$CramerV >= 0.5, "Strong",
+                           ifelse(out$CramerV >= 0.3, "Moderate",
+                                  ifelse(out$CramerV >= 0.1, "Weak", "Negligible")))
+    head(out, input$pairs_top)
+  })
+  
+  # 4th block: pair advisor table output
+  output$pairs_table <- renderDT({
+    datatable(pairs_result(),
+              rownames  = FALSE,
+              selection = "single",
+              options   = list(pageLength = 15, dom = "tip")) %>%
+      formatStyle("CramerV",
+                  background         = styleColorBar(c(0, 1), "#a8d5a2"),
+                  backgroundSize     = "100% 80%",
+                  backgroundRepeat   = "no-repeat",
+                  backgroundPosition = "center") %>%
+      formatStyle("Strength",
+                  color = styleEqual(
+                    c("Strong", "Moderate", "Weak", "Negligible"),
+                    c("#155724", "#856404", "#856404", "#6c757d")
+                  ),
+                  fontWeight = "bold")
+  })
+  
+  # 5th block: clicking a row loads variables into mosaic dropdowns
+  observeEvent(input$pairs_table_rows_selected, {
+    res <- pairs_result()
+    sel <- input$pairs_table_rows_selected
+    updateSelectInput(session, "mosaic_x", selected = res$Var1[sel])
+    updateSelectInput(session, "mosaic_y", selected = res$Var2[sel])
+    updateSelectInput(session, "mosaic_z",
+                      selected = if (!is.na(res$Var3[sel])) res$Var3[sel] else "None")
+  })
+  
+  
+  # ── SERVER GGPAIRS ─────────────────────────────────────────────────────
+  
+  # 1st block: variable selector (initialise selectors when data changes)
+  observe({
+    # detect variable types
+    df       <- display_data()
+    all_vars <- names(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    # updates the variable selection widget in the UI
+    updateSelectizeInput(session, "gg_vars", choices = all_vars)
+    # selection driven by preset (from custom helper function)
+    apply_preset_selection(session, "ggpairs", "gg_vars", all_vars)
+    # applly group-by defaults (from custom helper function)
+    apply_groupby_defaults(session, "ggpairs", cat_vars, "gg_group_var")
+    # build the preset dropdown, construct dropdown choices, then update preset dropdown
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("ggpairs"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "gg_preset", choices = choices)
+  })
+  
+  # 2nd block: apply preset selection, triggered when user chooses a preset
+  observeEvent(input$gg_preset, {
+    req(input$gg_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$gg_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "gg_vars", selected = sel)
+  })
+  
+  # 3rd block: groupby level selector
+  observeEvent(input$gg_group_var, {
+    req(input$gg_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(as.character(df[[input$gg_group_var]])))
+    lvls <- lvls[!is.na(lvls)]
+    updateSelectizeInput(session, "gg_group_levels",
+                         choices  = lvls,
+                         selected = resolve_group_levels("ggpairs", lvls))
+  })
+  
+  # 4th block: output plot
+  output$gg_output <- renderPlot({
+    input$gg_run
+    isolate({
+      req(input$gg_vars)
+      df <- display_data()
+      validate(need(length(input$gg_vars) >= 2, "Please select at least 2 variables."))
+      
+      default_title <- paste0(
+        "GGPairs",
+        if (input$gg_group_on && !is.null(input$gg_group_var)) paste0(" | Grouped by ", input$gg_group_var) else ""
+      )
+      plot_title <- if (nzchar(input$gg_title)) input$gg_title else default_title
+      
+      if (input$gg_group_on && !is.null(input$gg_group_var)) {
+        
+        grp <- input$gg_group_var
+        
+        # build df with selected vars + group col, drop NAs in group
+        plot_df <- df[, c(input$gg_vars, grp), drop = FALSE]
+        plot_df <- plot_df[!is.na(plot_df[[grp]]), ]
+        
+        # filter to selected levels only
+        if (!is.null(input$gg_group_levels) && length(input$gg_group_levels) > 0) {
+          plot_df <- plot_df[as.character(plot_df[[grp]]) %in% input$gg_group_levels, ]
+          plot_df[[grp]] <- droplevels(as.factor(plot_df[[grp]]))  # drop unused levels from legend
+        }
+        
+        # columns to plot = only the selected vars
+        col_idx <- seq_along(input$gg_vars)
+        
+        GGally::ggpairs(
+          plot_df,
+          progress = FALSE,
+          columns  = col_idx,
+          mapping  = aes(colour = .data[[grp]], alpha = 0.6),
+          # displaying logic above the diagonal
+          upper    = list(
+            continuous = GGally::wrap("cor", size = 4),                      # corr
+            combo      = GGally::wrap("box_no_facet", alpha = 0.5),          # box plot
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)               # bar chart
+          ),
+          # logic below the diagonal
+          lower    = list(
+            continuous = GGally::wrap("points", alpha = 0.3, size = 0.8),    # scatter plot
+            combo      = GGally::wrap("facethist", bins = 20, alpha = 0.5),  # histogram
+            discrete   = GGally::wrap("facetbar", alpha = 0.5)               # bar chart
+          ),
+          # the diagonal (each variable against itself)
+          diag     = list(
+            continuous = GGally::wrap("densityDiag", alpha = 0.5),           # density curve
+            discrete   = GGally::wrap("barDiag", alpha = 0.5)                # bar chart
+          ),
+          # takes the legend from panel 1 and displays it for the whole plot
+          legend   = 1
+        ) +
+          ggplot2::theme_minimal(base_size = 13) +
+          ggplot2::theme(
+            plot.title  = element_text(size = 20, face = "bold", hjust = 0.5),
+            strip.text  = element_text(size = 14, face = "bold"),
+            axis.text   = element_text(size = 14),
+            legend.title  = element_text(face = "bold"),
+            legend.text   = element_text(size = 12),
+            plot.margin = margin(t = 20)
+          ) +
+          ggplot2::labs(title = plot_title)
+        
+      } else {
+        
+        plot_df <- df[, input$gg_vars, drop = FALSE]
+        
+        GGally::ggpairs(
+          plot_df,
+          progress = FALSE,
+          upper = list(continuous = GGally::wrap("cor", size = 4)),
+          lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
+          diag  = list(continuous = GGally::wrap("densityDiag"))
+        ) +
+          ggplot2::theme_minimal(base_size = 13) +
+          ggplot2::theme(
+            plot.title  = element_text(size = 20, face = "bold", hjust = 0.5),
+            strip.text  = element_text(size = 14, face = "bold"),
+            axis.text   = element_text(size = 14),
+            plot.margin = margin(t = 20)
+          ) +
+          ggplot2::labs(title = plot_title)
+      }
+    })
+  })
+  
+  
+  # ── SERVER HEATMAP ─────────────────────────────────────────────────────
+  
+  # 1st block: variable selector and preset dropdown initialisation
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "hm_vars", choices = num_vars)
+    apply_preset_selection(session, "heatmap", "hm_vars", num_vars)
+    # dropdown only shows presets valid for this tab
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("heatmap"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "hm_preset", choices = choices)
+  })
+  
+  # 2nd block: preset observer, apply selected preset to variable selector
+  observeEvent(input$hm_preset, {
+    req(input$hm_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel      <- intersect(VAR_PRESETS[[input$hm_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "hm_vars", selected = sel)
+  })
+  
+  # 3rd block: corrgram plot output
+  output$hm_output <- renderPlot({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    selected <- if (!is.null(input$hm_vars) && length(input$hm_vars) >= 2)
+      input$hm_vars else num_vars
+    selected <- intersect(selected, num_vars)
+    validate(need(length(selected) >= 2, "Select at least 2 numeric variables."))
+    
+    df_num <- df[, selected, drop = FALSE]
+    
+    # compute correlation matrix first (values/NA), then apply abs manually if checked
+    if (isTRUE(input$hm_missing)) {
+      na_mat  <- is.na(df_num) * 1L                  # 1 = missing, 0 = observed
+      keep    <- apply(na_mat, 2, var) > 0            # drop zero-variance cols (never/always missing)
+      na_mat  <- na_mat[, keep, drop = FALSE]
+      validate(need(ncol(na_mat) >= 2, "Not enough variables with missingness to correlate."))
+      cor_mat <- cor(na_mat, use = "pairwise.complete.obs", method = input$hm_cor)
+    } else {
+      cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = input$hm_cor)
+    }
+    if (isTRUE(input$hm_abs)) cor_mat <- abs(cor_mat)
+    
+    # build order label
+    order_label <- switch(input$hm_order,
+                          "FALSE" = "Original Order",
+                          "TRUE"  = "AOE (Eigenvector)",
+                          "HC"    = "HC (Hierarchical)",
+                          "OLO"   = "OLO (Optimal Leaf)"
+    )
+    
+    default_title <- paste0(
+      if (isTRUE(input$hm_missing)) "Missingness Correlation Heatmap" else "Correlation Heatmap",
+      " | ", tools::toTitleCase(input$hm_cor),
+      " | ", order_label,
+      if (isTRUE(input$hm_abs)) " | Absolute" else ""
+    )
+    
+    # outer top margin, pushes title up, 3 lines of space
+    par(oma = c(0, 0, 3, 0))
+    
+    corrgram::corrgram(
+      cor_mat,
+      order      = if (input$hm_order == "FALSE") FALSE else input$hm_order,
+      abs        = FALSE, # already handled above
+      cor.method = input$hm_cor,
+      cex.var    = 1.2
+    )
+    
+    # overlay larger title (base graphics workaround — corrgram uses base plot)
+    plot_title <- if (nzchar(input$hm_title)) input$hm_title else default_title
+    title(main = plot_title, cex.main = 2, font.main = 2, outer = TRUE, line = 1)
   })
   
   
@@ -699,7 +2412,11 @@ server <- function(input, output, session) {
       # ~~ unlocked state: render full console ~~
       sidebarLayout(
         sidebarPanel(width = 3,
-                     sidebar_note("Note: <br><br>Run R expressions against the current dataset. <br><br>The dataset is available as df."),
+                     sidebar_note("Note: 
+                                  <br><br>R console occupied when running shiny app, 
+                                  thus build the console in app as a debugging helper. 
+                                  <br><br>Run R expressions against the current dataset. 
+                                  <br><br>The dataset is available as df."),
                      hr(),
                      actionButton("rconsole_run",   "Run",   icon = icon("play"),  width = "100%"),
                      br(), br(),

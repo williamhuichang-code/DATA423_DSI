@@ -7,22 +7,15 @@
 
 library(shiny)
 library(shinyAce)  # R console ace editor
-library(tidyverse)
 library(dplyr)
-library(plotly)
-library(seriation)
-library(tabplot)
-library(visdat)
 library(DT)
-library(grid)
-
+library(plotly)
+library(ggplot2)
 library(vcd)
+library(dbscan)
 library(paletteer) # global colour theme
 library(colorspace)
-library(shinyjs)
-library(tidytext)
-library(wordcloud2)
-library(pls)
+library(visdat)
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
@@ -87,6 +80,102 @@ MASTER_COL_ORDER <- c(
 reorder_cols <- function(df) {
   keep <- MASTER_COL_ORDER[MASTER_COL_ORDER %in% names(df)]  # only cols that exist, skipping missing cols
   df[, keep]
+}
+
+
+# ── GLOBAL COLOUR THEME ──────────────────────────────────────────────────────
+
+# grouping color strategy
+# interleave light/dark within each group for maximum within-group contrast
+sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
+sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
+
+sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+THEME_COLOURS <- c(
+  sensor1_cols,
+  sensor2_cols,
+  sensor3_cols,
+  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
+)
+
+# named designations (only pin variables that need a meaningful fixed colour)
+THEME_DESIGNATED <- c(
+  "Y" = "#C41E3A"   # target variable always red
+)
+
+# helper: give it any character vector of names -> get back a named colour vector
+#   designated names always get their fixed colour
+#   everything else samples from THEME_COLOURS automatically
+
+theme_colours_for <- function(vars) {
+  colours <- character(length(vars))
+  names(colours) <- vars
+  
+  for (v in vars) {
+    
+    # 1️⃣ designated colours
+    if (v %in% names(THEME_DESIGNATED)) {
+      colours[v] <- THEME_DESIGNATED[v]
+      next
+    }
+    
+    # 2️⃣ raw sensors 1–30 (true grouping logic)
+    if (grepl("^Sensor[0-9]+$", v)) {
+      num <- as.integer(sub("Sensor", "", v))
+      
+      if (num <= 10) {
+        colours[v] <- sensor1_cols[num]
+      } else if (num <= 20) {
+        colours[v] <- sensor2_cols[num - 10]
+      } else {
+        colours[v] <- sensor3_cols[num - 20]
+      }
+      
+      next
+    }
+    
+    # 3️⃣ everything else (fallback deterministic mapping)
+    idx <- abs(sum(utf8ToInt(v)))
+    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
+  }
+  
+  colours
+}
+
+
+# ── GENERAL HELPER ───────────────────────────────────────────────────────────
+
+# sidebar note
+sidebar_note <- function(text) {
+  div(
+    style = "
+      font-size: 13px;
+      font-weight: 500;
+      color: #343a40;
+      background-color: white;
+      padding: 10px;
+      border-left: 4px solid #0d6efd;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    ",
+    icon("info-circle", style = "color:#0d6efd;"),
+    HTML(paste("&nbsp;", text))
+  )
+}
+
+# plot title
+plot_title <- function(type, context = NULL) {
+  if (is.null(context) || context == "") {
+    type
+  } else {
+    paste(type, "—", context)
+  }
 }
 
 
@@ -179,10 +268,11 @@ ds_typed <- ds_renamed %>%
   )
 
 
-# ·· EDA DATASET ··························································
+# ·· ENRICHED DATASET ·····················································
 
-eda_dataset <- ds_typed %>%
+enriched_dataset <- ds_typed %>%
   
+  # derive IdGroup (G and D)
   mutate(
     
     # derive IdGroup (G and D)
@@ -190,31 +280,6 @@ eda_dataset <- ds_typed %>%
     
     # too few years prefer factor, purely categorical regimes
     Year   = factor(format(Date, "%Y")),
-    
-    # get weekdays potentially from Monday to Sunday
-    Weekday = factor(format(Date, "%A")),
-    
-    # NA flag specifically for Sensor6
-    NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
-    
-  ) %>% # end of enriching mutation
-  
-  # reordering dataset after enriching
-  reorder_cols()
-
-
-# ·· ENRICHED DATASET ·····················································
-
-enriched_dataset <- eda_dataset %>%
-  
-  # derive IdGroup (G and D)
-  mutate(
-    
-    # # derive IdGroup (G and D)
-    # IdGroup = as.factor(substr(as.character(ID), 1, 1)),
-    
-    # # too few years prefer factor, purely categorical regimes
-    # Year   = factor(format(Date, "%Y")),
     
     # temporary integer month for deriving season, weekday and cyclic encoding
     Month  = as.integer(format(Date, "%m")),
@@ -239,8 +304,8 @@ enriched_dataset <- eda_dataset %>%
     # factorise the integer month
     Month      = factor(Month),
     
-    # # get weekdays potentially from Monday to Sunday
-    # Weekday = factor(format(Date, "%A")),
+    # get weekdays potentially from Monday to Sunday
+    Weekday = factor(format(Date, "%A")),
     
     # ISO week number 1-53 as factor
     WeekNum = as.integer(format(Date, "%V")),
@@ -294,8 +359,8 @@ enriched_dataset <- eda_dataset %>%
     Sensor24G = ifelse(IdGroup == "G", Sensor24, NA_real_),
     Sensor28G = ifelse(IdGroup == "G", Sensor28, NA_real_),
     
-    # # NA flag specifically for Sensor6
-    # NaFlag_S6 = as.factor(ifelse(is.na(Sensor6), "Yes", "No"))
+    # NA flag specifically for Sensor6
+    NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
     
   ) %>% # end of enriching mutation
   
@@ -308,8 +373,8 @@ enriched_dataset <- eda_dataset %>%
 # trim down to only the columns a model needs
 model_dataset <- enriched_dataset %>%
   
-  dplyr::select(
-    -any_of(c("ID", "Date"))        # example drops
+  select(
+    -any_of(c("ID", "Date")),       # example drops
     # -matches("^RawSensor\\d+$"),  # drop Sensor1, Sensor2, ... Sensor30
     # -matches("^Normalised"),      # drop NormalisedSG1, NormalisedSG2, NormalisedSG3
   )
@@ -318,193 +383,11 @@ model_dataset <- enriched_dataset %>%
 # ·· DEBUGGING DATASET ····················································
 
 # add a flag column, for exploring
-debug_dataset <- eda_dataset %>%
+debug_dataset <- enriched_dataset %>%
   mutate(
-    # synthetic pair for testing extreme negative correlation (~-1)
-    # DebugPos: standardised Y; DebugNeg: its near-perfect mirror
-    DebugPos = as.numeric(scale(Y)),
-    DebugNeg = -DebugPos + rnorm(n(), mean = 0, sd = 0.02)# example: flag
+    # example: flag
+    # Flag = NA_character_   # empty string column — fill in manually later
+    NaFlag_S6 = ifelse(is.na(Sensor6), "Yes", "No")
   )
-
-
-# ── APPEARANCE ───────────────────────────────────────────────────────────────
-
-# ·· VARIABLE PRESET ······················································
-
-# all conceptualised presets for this dataset
-VAR_PRESETS <- list(
-  "Sensor 1-10"  = paste0("Sensor", 1:10),
-  "Sensor 11-20" = paste0("Sensor", 11:20),
-  "Sensor 21-30" = paste0("Sensor", 21:30),
-  "All Sensors"  = paste0("Sensor", 1:30),
-  "All Sensors vs Y"  = c("Y", paste0("Sensor", 1:30)),
-  "Gapped Sensors"  = paste0("Sensor", c(4,6,8,11,16,22,24,28)),
-  "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
-  "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
-  "Gapped Sensors (excl. 6 &IG&OP)"  = c("IdGroup", "Operator", 
-                                          paste0("Sensor", c(4,8,11,16,22,24,28))),
-  "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))]),
-  "All Variables (raw)" = names(ds_typed),
-  "All Categorical (raw)"  = names(ds_typed)[sapply(ds_typed, is.factor)],
-  "All Numeric (raw)"      = names(ds_typed)[sapply(ds_typed, is.numeric)]
-)
-
-# which to display as preset choices (using this meta)
-VAR_PRESET_META <- tibble::tribble(
-  ~plot,        ~s1s, ~s10s, ~s20s, ~sl, ~sly, ~gp, ~gpy, ~gpe6, ~gpe6IO, ~s1se48, ~vr, ~cr, ~nr,
-  "rising",      1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       0,   0,   0,
-  "ggpairs",     1,    1,     1,     0,   0,    1,   1,    1,     0,       1,       0,   0,   0,
-  "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
-  "missing",     1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       1,   1,   1,
-  "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1,
-  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0
-)
-
-# default select box content per plot
-DEFAULT_PRESET <- list(
-  rising  = "Gapped Sensors vs Y",
-  ggpairs = "Sensor 1-10 (excl. 4,8)",
-  heatmap = "All Sensors vs Y", 
-  missing = "All Variables (raw)",
-  tabplot = "Gapped Sensors (excl. 6 &IG&OP)",
-  boxplot = "All Sensors"
-)
-
-# lookup helper: returns named VAR_PRESETS list valid for a given plot
-presets_for <- function(plot_name) {
-  row  <- VAR_PRESET_META[VAR_PRESET_META$plot == plot_name, -1]  # drop ~plot col
-  keep <- as.logical(row)
-  VAR_PRESETS[keep]
-}
-
-# logic helper: sets ONLY the selected values from preset, caller controls choices separately
-apply_preset_selection <- function(session, plot_name, input_id, available_vars) {
-  preset_name <- DEFAULT_PRESET[[plot_name]]
-  default_sel <- intersect(VAR_PRESETS[[preset_name]], available_vars)
-  updateSelectizeInput(session, input_id, selected = default_sel)
-}
-
-
-# ·· GROUPBY DEFAULT ······················································
-
-# groupby default and its levels (NULL = all levels)
-#   group_on, means this plot should have a groupby option
-GROUPBY_META <- tibble::tribble(
-  ~plot,      ~group_on, ~group_var,  ~group_levels,
-  "rising",    0,         NA,          NULL,
-  "ggpairs",   1,         "NaFlag_S6", NULL,
-  "heatmap",   0,         NA,          NULL,
-  "missing",   1,         "Temp",      NULL,  # could check with Speed, they give good info
-  "boxplot",   1,         "IdGroup",   NULL
-)
-
-# lookup helper: for groupby default
-groupby_for <- function(plot_name) {
-  GROUPBY_META[GROUPBY_META$plot == plot_name, ]
-}
-
-# logic helper: applies groupby defaults to checkbox, group var selector, and level selector
-apply_groupby_defaults <- function(session, plot_name, cat_vars, input_group_var) {
-  grp_meta <- groupby_for(plot_name)
-  grp_var  <- if (grp_meta$group_var %in% cat_vars) grp_meta$group_var else cat_vars[1]
-  updateSelectInput(session, input_group_var, choices = cat_vars, selected = grp_var)
-}
-
-# logic helper: resolves level preselection from groupby meta
-resolve_group_levels <- function(plot_name, all_lvls) {
-  grp_meta <- groupby_for(plot_name)
-  if (!is.null(grp_meta$group_levels[[1]])) {
-    intersect(grp_meta$group_levels[[1]], all_lvls)  # specific levels from meta
-  } else {
-    all_lvls                                          # NULL = all levels
-  }
-}
-
-# ·· GLOBAL COLOUR THEME ··················································
-
-# grouping color strategy
-# interleave light/dark within each group for maximum within-group contrast
-sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
-sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
-
-sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
-sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
-
-sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
-sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
-
-THEME_COLOURS <- c(
-  sensor1_cols,
-  sensor2_cols,
-  sensor3_cols,
-  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
-)
-
-# named designations (only pin variables that need a meaningful fixed colour)
-THEME_DESIGNATED <- c(
-  "Y" = "#C41E3A"   # target variable always red
-)
-
-# helper: give it any character vector of names -> get back a named colour vector
-#   designated names always get their fixed colour
-#   everything else samples from THEME_COLOURS automatically
-
-theme_colours_for <- function(vars) {
-  colours <- character(length(vars))
-  names(colours) <- vars
-  
-  for (v in vars) {
-    
-    # 1️⃣ designated colours
-    if (v %in% names(THEME_DESIGNATED)) {
-      colours[v] <- THEME_DESIGNATED[v]
-      next
-    }
-    
-    # 2️⃣ raw sensors 1–30 (true grouping logic)
-    if (grepl("^Sensor[0-9]+$", v)) {
-      num <- as.integer(sub("Sensor", "", v))
-      
-      if (num <= 10) {
-        colours[v] <- sensor1_cols[num]
-      } else if (num <= 20) {
-        colours[v] <- sensor2_cols[num - 10]
-      } else {
-        colours[v] <- sensor3_cols[num - 20]
-      }
-      
-      next
-    }
-    
-    # 3️⃣ everything else (fallback deterministic mapping)
-    idx <- abs(sum(utf8ToInt(v)))
-    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
-  }
-  
-  colours
-}
-
-
-# ·· GENERAL HELPER ·······················································
-
-# sidebar note
-sidebar_note <- function(text) {
-  div(
-    style = "
-      font-size: 13px;
-      font-weight: 500;
-      color: #343a40;
-      background-color: white;
-      padding: 10px;
-      border-left: 4px solid #0d6efd;
-      border-radius: 6px;
-      margin-bottom: 12px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    ",
-    icon("info-circle", style = "color:#0d6efd;"),
-    HTML(paste("&nbsp;", text))
-  )
-}
-
 
 

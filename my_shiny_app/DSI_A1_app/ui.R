@@ -10,7 +10,7 @@ ui <- fluidPage(
   # dataset stage selector + privacy lock always visible at the top
   fluidRow(
     
-    # dataset stage selector (debug stage only injected when unlocked — see server)
+    # dataset stage selector (debug stage only injected when unlocked - see server)
     column(2,
            uiOutput("dataset_selector_ui")   # rendered server-side so debug is gated
     ),
@@ -73,7 +73,7 @@ ui <- fluidPage(
                                                      "dfSummary"   = "dfsummary"),
                                          selected = "glimpse"),
                             hr(),
-                            sidebar_note("My EDA Notes 1: Some Level of Seriousness in Data Integrity — 
+                            sidebar_note("My EDA Notes: Some Level of Seriousness in Data Integrity - 
                                          <br><br>
                                          1. missingness and potential reasons
                                          <br>
@@ -86,30 +86,36 @@ ui <- fluidPage(
                                          5. proper values, but redundant (justified by primary key)
                                          "),
                             hr(),
-                            sidebar_note("My EDA Notes 2: Some Level of Seriousness in Inference — 
+                            sidebar_note("My Futher Inference Notes: Some Level of Seriousness in Inference — 
                                          <br><br>
-                                         a. potential multi-labelled y overlapping
+                                         1. five crucial assumptions as independence in obs, linearity, 
+                                         normality, constant variance, and no influential outliers
                                          <br>
-                                         b. the assumed distribution of y response
+                                         2. potential multi-labelled y overlapping
                                          <br>
-                                         c. interactions of features on y response
+                                         3. independence in features
                                          <br>
-                                         d. dependent features (multilinearity)
+                                         4. interactions of features on y response
+                                         <br>
+                                         5. multilinearity in features
                                          "),
                             hr(),
-                            sidebar_note("My EDA Notes 3: Conceptualised Dataset Stages — 
+                            sidebar_note("My Framework Notes: Conceptualised Dataset Stages — 
                                          <br><br>
                                          1. raw dataset
                                          <br>
-                                         2. enriched dataset (add derived cols)
+                                         2. eda dataset (anything related to integrity and patterns)
+                                         <br>
+                                         3. enriched dataset (add derived cols)
                                          <br>
                                          3. model dataset (remove unnecessary cols)
                                          <br>
-                                         4. debug dataset (with flag cols and flagging logic)
+                                         4. debug dataset (testing with flag cols and flagging logic)
                                          "),
                ),
                mainPanel(width = 9,
-                         verbatimTextOutput("summary_output")
+                         # verbatimTextOutput("summary_output")
+                         uiOutput("summary_output")
                )
              )
     ), # end of tab panel
@@ -120,10 +126,11 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Col Names & Missingness Cooccurrence & Improper Collecting: <br><br>
+                            sidebar_note("Word Cloud: <br><br>
                                          This word cloud helps identify inconsistencies in variable names 
                                          or categorical values, depending on the selected mode.
-                                         Typical scenarios are like col name cleaning, distinct variable values 
+                                         Typical scenarios are like col name cleaning 
+                                         (should check raw_dataset stage instead), distinct variable values 
                                          and y label overlapping"),
                             hr(),
                             
@@ -171,158 +178,64 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── UI VIS MISS ───────────────────────────────────────────────────────
-    
-    tabPanel("Vis Miss",
+    # ── UI MISSINGNESS ────────────────────────────────────────────────────
+    tabPanel("Missingness",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Missingness Overview: <br><br>
-                     vis_miss gives a full-dataset pixel view of where 
-                     NAs occur. Each column is a variable, each row is 
-                     an observation. Black = missing, grey = present."),
+                            sidebar_note("Missingness: <br><br>
+                          Visualise missing data patterns across the dataset.
+                          Group by a categorical variable to reveal whether 
+                          missingness differs across subgroups."),
                             hr(),
-                            selectizeInput("vmiss_cols", "Columns to include:",
+                            selectizeInput("ms_vars", "Variables to plot:",
                                            choices  = NULL,
-                                           multiple = TRUE,
-                                           options  = list(placeholder = "Default: all columns")),
+                                           multiple = TRUE),
                             hr(),
-                            checkboxInput("vmiss_cluster", "Cluster rows by missingness pattern", value = FALSE),
-                            checkboxInput("vmiss_sort",    "Sort columns by missingness %",        value = FALSE),
+                            selectInput("ms_preset", "Quick variable preset:", choices = NULL),
                             hr(),
-                            sliderInput("vmiss_text_size", "Axis text size:",
-                                        min = 4, max = 24, value = 12, step = 1),
+                            radioButtons("ms_mode", "View:",
+                                         choices = c("vis_dat (type + missingness)" = "visdat",
+                                                     "vis_miss (missingness only)"  = "vismiss"),
+                                         selected = "visdat"),
                             hr(),
-                            checkboxInput("vmiss_group_on", "Facet by categorical variable", value = FALSE),
+                            checkboxInput("ms_group_on", "Group by categorical variable", value = TRUE),
                             conditionalPanel(
-                              condition = "input.vmiss_group_on == true",
-                              selectInput("vmiss_group_var", "Group by:", choices = NULL),
-                              selectizeInput("vmiss_group_levels", "Show levels:",
+                              condition = "input.ms_group_on == true",
+                              selectInput("ms_group_var", "Grouping variable (primary):", choices = NULL),
+                              selectizeInput("ms_group_levels", "Primary levels to include:",
                                              choices  = NULL,
                                              multiple = TRUE,
-                                             options  = list(placeholder = "All levels shown by default"))
-                              )
+                                             options  = list(placeholder = "All levels included by default")),
+                              hr(),
+                              selectInput("ms_group_var2", "Grouping variable (secondary):", choices = NULL),
+                              selectizeInput("ms_group_levels2", "Secondary levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
                             ),
+                            hr(),
+                            checkboxInput("ms_mcar", "Test for MCAR (Little's test)", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.ms_mcar == true",
+                              sidebar_note("Little's MCAR test: <br><br>
+                            H0: data is Missing Completely At Random. 
+                            A significant p-value (< 0.05) suggests 
+                            missingness is NOT random — i.e. MAR or MNAR.")
+                            ),
+                            hr(),
+                            textInput("ms_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
                mainPanel(width = 9,
-                         plotOutput("vmiss_plot", height = "85vh")
+                         plotOutput("ms_output", height = "70vh"),
+                         conditionalPanel(
+                           condition = "input.ms_mcar == true",
+                           hr(),
+                           h4("Little's MCAR Test Result"),
+                           verbatimTextOutput("ms_mcar_output")
                          )
                )
-    ),  # end of tab panel
-    
-    
-    # ── UI UPSET ──────────────────────────────────────────────────────────
-    
-    tabPanel("UpSet",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("Missingness and General Content Exploring: <br><br>The UpSet plot 
-                                     helps identify the number of missing values across variables, 
-                                     as well as patterns of missingness that occur together."),
-                            hr(),
-                            
-                            # ~~ column selector ~~
-                            selectizeInput("upset_cols", "Columns to include:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            hr(),
-                            
-                            # ~~ anomaly detectors ~~
-                            tags$label("Detect as missing:"),
-                            checkboxInput("upset_det_na",    "True NA in R (is.na)",     value = TRUE),
-                            checkboxInput("upset_det_empty", "Whitespace / Empty string",  value = TRUE),
-                            
-                            # preset pseudo-NA strings
-                            checkboxGroupInput("upset_det_text", "Text pseudo-NAs:",
-                                               choices  = c("na", "n/a", "null", "none", "nan", "nil", "-", "?"),
-                                               selected = NULL,
-                                               inline   = TRUE),
-                            
-                            # preset sentinel numbers
-                            checkboxGroupInput("upset_det_sentinel", "Sentinel numbers:",
-                                               choices  = c("9999", "-9999", "999", "-999", "0"),
-                                               selected = NULL,
-                                               inline   = TRUE),
-                            hr(),
-                            
-                            # custom numbers
-                            textInput("upset_custom_num", "Custom numeric sentinels:",
-                                      placeholder = "e.g.  99, -1, 9999999"),
-                            
-                            # negative numbers (numeric columns only)
-                            checkboxInput("upset_det_negative", "Flag all negative numbers", value = FALSE),
-                            
-                            # custom text
-                            textInput("upset_custom_text", "Custom text values:",
-                                      placeholder = "e.g.  unknown, missing, tbd"),
-                            
-                            # case sensitivity toggle
-                            checkboxInput("upset_case", "Case sensitive (text matching)", value = FALSE),
-                            hr(),
-                            
-                            # ~~ display options ~~
-                            numericInput("upset_top", "Show top N combinations:", value = 20, min = 1),
-                            radioButtons("upset_sort", "Sort bars by:",
-                                         choices  = c("Descending" = "desc", "Ascending" = "asc"),
-                                         selected = "desc")
-               ),
-               mainPanel(width = 9,
-                         plotlyOutput("upset_plot", height = "80vh")
-               )
              )
-    ),  # end of tab panel
-    
-    
-    # ── UI LOLLIPOP ───────────────────────────────────────────────────────
-    
-    tabPanel("Lollipop",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            
-                            sidebar_note("Missingness and Reasoning: <br><br>This lollipop chart helps 
-                                         explore potential reasons for missingness in the selected 
-                                         variable by examining it across different contextual groups."),
-                            hr(),
-                            
-                            textInput("vc_value", "Value to count:",
-                                      value = "NA",
-                                      placeholder = "e.g. Yes, High, NA"),
-                            
-                            checkboxInput("vc_case", "Case sensitive", value = FALSE),
-                            hr(),
-                            
-                            selectizeInput("vc_cols", "Search in columns:",
-                                           choices  = NULL,
-                                           multiple = TRUE),
-                            
-                            hr(),
-                            checkboxInput("vc_group_on", "Group by variable", value = FALSE),
-                            conditionalPanel(
-                              condition = "input.vc_group_on == true",
-                              selectInput("vc_group_var", "Group by:", choices = NULL),
-                              selectizeInput("vc_group_levels", "Show levels:",
-                                             choices  = NULL,
-                                             multiple = TRUE,
-                                             options  = list(placeholder = "All levels shown by default"))
-                            ),
-                            hr(),
-                            
-                            selectInput("vc_metric", "Show as:",
-                                        choices = c("Raw Count" = "count", "Percentage (%)" = "pct")),
-                            
-                            sliderInput("vc_min_count", "Min count to display:",
-                                        min = 0, max = 50, value = 0, step = 1),
-                            hr(),
-                            
-                            radioButtons("vc_sort", "Sort by:",
-                                         choices  = c("Column order"     = "col",
-                                                      "Ascending value"  = "asc",
-                                                      "Descending value" = "desc"),
-                                         selected = "desc"),
-               ),
-               mainPanel(width = 9,
-                         plotlyOutput("vc_plot", height = "80vh")
-               )
-             )
-    ),  # end of tab panel
+    ), # end of tab panel
     
     
     # ── UI RISING VALUE ───────────────────────────────────────────────────
@@ -330,18 +243,35 @@ ui <- fluidPage(
     tabPanel("Rising Value",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Complete but Improper Value: <br><br>
-                                         This rising value chart helps identify incorrectly collected or 
-                                         inconsistent numeric values.
+                            sidebar_note("Rising Value: <br><br>
+                                         This rising value chart is useful for examining continuity.
+                                         If a variable is truly continuous, the sorted values should increase smoothly; 
+                                         visible gaps or steps may therefore signal suspicious patterns in the data. 
+                                         Unlike histograms, rising value charts do not rely on binning (which may hide gaps) 
+                                         and can support comparison across multiple variables.
                                          "),
-                            selectizeInput("rising_var", "Select numeric variable:",
+                            hr(),
+                            selectizeInput("rv_vars", "Numeric variables to plot:",
                                            choices  = NULL,
                                            multiple = TRUE),
                             hr(),
-                            sliderInput("rising_lwd", "Line width:",
+                            selectInput("rv_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            checkboxInput("rv_omit_na", "Ignore NAs", value = FALSE),
+                            hr(),
+                            radioButtons("rv_transform", "Transform:",
+                                         choices = c("None"         = "none",
+                                                     "Centre"       = "center",
+                                                     "Standardise"  = "standardise",
+                                                     "Normalise"    = "normalise"),
+                                         selected = "normalise"),
+                            hr(),
+                            textInput("rv_title", "Custom plot title:", placeholder = "Auto-generated if empty"),
+                            hr(),
+                            sliderInput("rv_lwd", "Line width:",
                                         min = 0.2, max = 5, value = 1.6, step = 0.1, width = "100%"),
                             hr(),
-                            radioButtons("rising_lty", "Line type:",
+                            radioButtons("rv_lty", "Line type:",
                                          choices = c(
                                            "Solid"    = "solid",
                                            "Dashed"   = "dashed",
@@ -352,44 +282,53 @@ ui <- fluidPage(
                                          selected = "dotdash")
                ),
                mainPanel(width = 9,
-                         plotlyOutput("rising_output", height = "85vh")
+                         plotlyOutput("rv_output", height = "80vh")
                )
              )
     ), # end of tab panel
     
     
-    # ── UI GGPAIRS ────────────────────────────────────────────────────────
+    # ── UI TABPLOT ────────────────────────────────────────────────────────
     
-    tabPanel("GGPairs",
+    tabPanel("Tabplot",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Suspicious Relationship and Density: <br><br>
-                                         This GGPairs graph is useful for quickly inspecting 
-                                         pairwise relationships, correlations, and marginal 
-                                         density distributions across multiple variables."),
+                            sidebar_note("Tabplot: <br><br>
+      Visualises distributions and relationships of multiple 
+      variables simultaneously, sorted by a target variable. 
+      Useful for spotting patterns across many variables at once 
+      and identifying how they relate to the outcome Y."),
                             hr(),
-                            selectizeInput("gg_vars", "Variables to plot:",
+                            selectizeInput("tp_vars", "Variables to plot:",
                                            choices  = NULL,
                                            multiple = TRUE),
                             hr(),
-                            checkboxInput("gg_group_on", "Group by variable", value = FALSE),
-                            conditionalPanel(
-                              condition = "input.gg_group_on == true",
-                              selectInput("gg_group_var", "Group by:", choices = NULL),
-                              selectizeInput("gg_group_levels", "Show levels:",
-                                             choices  = NULL,
-                                             multiple = TRUE,
-                                             options  = list(placeholder = "All levels shown by default"))
-                            ),   # conditionalPanel closed here
+                            selectInput("tp_preset", "Quick variable preset:", choices = NULL),
                             hr(),
-                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
-                            helpText("Select variables then click Plot. Large selections may be slow.")
+                            checkboxInput("tp_sort_on", "Sort by variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.tp_sort_on == true",
+                              selectInput("tp_sortvar", "Sort by variable:", choices = NULL),
+                              checkboxInput("tp_decreasing", "Sort descending", value = FALSE)
+                            ),
+                            hr(),
+                            radioButtons("tp_transform", "Transform numeric columns:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "normalise"),
+                            hr(),
+                            sliderInput("tp_nbin", "Number of bins:",
+                                        min = 10, max = 500, value = 60, step = 10, width = "100%"),
+                            hr(),
+                            textInput("tp_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
                mainPanel(width = 9,
-                         plotOutput("gg_plot", height = "80vh")
+                         plotOutput("tp_output", height = "80vh")
                )
              )
-    ),  # end of tab panel
+    ), # end of tab panel
     
     
     # ── UI BOXPLOT 1 ──────────────────────────────────────────────────────
@@ -397,43 +336,87 @@ ui <- fluidPage(
     tabPanel("Boxplot 1",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Distribution and Improper Value: <br><br>
-                                         Boxplots detect outliers and compare medians. 
-                                         Violin plots reveal distribution shape and density. 
-                                         Grouping by categorical variables shows how distributions 
-                                         vary across categories."),
+                            sidebar_note("Boxplot: <br><br>
+                        Visualise distributions and outliers across numeric variables.
+                        Uses car::Boxplot with automatic outlier labelling by row index.
+                        Group by a categorical variable to compare across levels."),
                             hr(),
-                            selectizeInput("box_vars", "Numeric variables:",
+                            selectizeInput("bx_vars", "Numeric variables to plot:",
                                            choices  = NULL,
                                            multiple = TRUE),
                             hr(),
-                            checkboxInput("box_group_on", "Group by variable", value = FALSE),
+                            selectInput("bx_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("bx_transform", "Transform:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "none"),
+                            hr(),
+                            sliderInput("bx_coef", "IQR multiplier (outlier criterion):",
+                                        min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            hr(),
+                            checkboxInput("bx_group_on", "Group by categorical variable", value = TRUE),
                             conditionalPanel(
-                              condition = "input.box_group_on == true",
-                              selectInput("box_group_var", "Group by:", choices = NULL),
-                              selectizeInput("box_group_levels", "Show levels:",
+                              condition = "input.bx_group_on == true",
+                              selectInput("bx_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("bx_group_levels", "Levels to include:",
                                              choices  = NULL,
                                              multiple = TRUE,
-                                             options  = list(placeholder = "All levels shown by default"))
+                                             options  = list(placeholder = "All levels included by default"))
                             ),
                             hr(),
-                            sliderInput("box_iqr",
-                                        HTML("Outlier threshold &nbsp;<small>(IQR multiplier)</small>"),
-                                        min   = 0,
-                                        max   = 5,
-                                        value = 1.5,
-                                        step  = 0.1),
-                            helpText("Whiskers extend to the furthest point within",
-                                     "± multiplier × IQR from the box edges.",
-                                     "Points beyond are plotted individually."),
+                            textInput("bx_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("bx_output", height = "80vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI BOXPLOT 2 ──────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot 2",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Boxplot 2 (Interactive): <br><br>
+                        Visualise distributions and outliers across numeric variables.
+                        Violin mode reveals distribution shape and density.
+                        Group by a categorical variable to compare across levels."),
                             hr(),
-                            checkboxGroupInput("box_transform",
-                                               "Standardisation:",
-                                               choices  = c("Center (subtract mean)" = "center",
-                                                            "Scale (divide by SD)"   = "scale"),
-                                               selected = NULL),
+                            selectizeInput("box_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
                             hr(),
-                            checkboxInput("box_violin", "Show as violin", value = FALSE),
+                            selectInput("box_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("box_transform", "Transform:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "none"),
+                            # hr(),
+                            # sliderInput("box_iqr", "IQR multiplier (outlier criterion):",
+                            #             min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            # helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            hr(),
+                            checkboxInput("box_violin", "Show as violin", value = TRUE),
+                            hr(),
+                            checkboxInput("box_group_on", "Group by categorical variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.box_group_on == true",
+                              selectInput("box_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("box_group_levels", "Levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
+                            ),
+                            hr(),
+                            textInput("box_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
                mainPanel(width = 9,
                          plotlyOutput("box_plot", height = "85vh")
@@ -442,319 +425,141 @@ ui <- fluidPage(
     ),  # end of tab panel
     
     
-    # ── UI BOXPLOT 2 ──────────────────────────────────────────────────────
-    
-    tabPanel("Boxplot 2",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("Boxplot 2: <br><br>
-                                     car::Boxplot alternative."),
-                            hr(),
-                            
-                            selectizeInput("bp2_vars", "Numeric variables:",
-                                           choices  = NULL,
-                                           selected = paste0("Sensor", 1:30),
-                                           multiple = TRUE),
-                            hr(),
-                            
-                            checkboxInput("bp2_group_on", "Group by variable", value = FALSE),
-                            conditionalPanel(
-                              condition = "input.bp2_group_on == true",
-                              selectInput("bp2_group_var", "Group by:", choices = NULL),
-                              selectizeInput("bp2_group_levels", "Show levels:",
-                                             choices  = NULL,
-                                             multiple = TRUE,
-                                             options  = list(placeholder = "All levels shown by default"))
-                            ),
-                            hr(),
-                            
-                            sliderInput("bp2_iqr",
-                                        HTML("Outlier threshold &nbsp;<small>(IQR multiplier)</small>"),
-                                        min   = 0,
-                                        max   = 5,
-                                        value = 1.5,
-                                        step  = 0.1),
-                            helpText("Whiskers extend to the furthest point within",
-                                     "± multiplier × IQR from the box edges.",
-                                     "Points beyond are plotted individually."),
-                            hr(),
-                            
-                            checkboxGroupInput("bp2_transform",
-                                               "Standardisation:",
-                                               choices  = c("Center (subtract mean)" = "center",
-                                                            "Scale (divide by SD)"   = "scale"),
-                                               selected = NULL)
-                            ),
-               mainPanel(width = 9,
-                         plotOutput("bp2_plot", height = "85vh"),
-                         uiOutput("bp2_warning")
-               )
-             )
-    ), # end of tab panel
-    
-    
-    # ── UI Q-Q PLOT ───────────────────────────────────────────────────────
-    
-    tabPanel("Q-Q Plot",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("The Distribution of Y Response: <br><br>
-                                         Q-Q plot evaluates distributional assumptions. 
-                                         Particularly useful for assessing the Y response before modeling."),
-                            hr(),
-                            selectInput("qq_var", "Select Variable:", choices = NULL),
-                            selectInput("qq_dist", "Distribution:", 
-                                        choices = c("Normal" = "norm", 
-                                                    "Exponential" = "exp", 
-                                                    "Log-normal" = "lnorm", 
-                                                    "Gamma" = "gamma", 
-                                                    "Weibull" = "weibull")),
-                            hr(),
-                            h4("Distribution Parameters"),
-                            uiOutput("qq_params"),
-                            hr(),
-                            checkboxInput("qq_line", "Show Reference Line", value = TRUE)
-               ),
-               mainPanel(width = 9,
-                         plotlyOutput("qq_plot", height = "80vh")
-               )
-             )
-    ), # end of tab panel
-    
-    # ── UI INTERACTION PLOT ───────────────────────────────────────────────
-    
-    tabPanel("Interaction Plot",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("Feature Interactions on Y: <br><br>
-                            Select a continuous predictor and a moderator variable to see how 
-                            their interaction affects Y. For example, season could change how 
-                                         the cyclic month signal influences Y."),
-                            hr(),
-                            selectInput("ip_y", "Y response:", choices = NULL),
-                            hr(),
-                            selectInput("ip_x", "X predictor:", choices = NULL),
-                            hr(),
-                            checkboxInput("ip_use_mod", "Use moderator", value = TRUE),
-                            conditionalPanel(
-                              condition = "input.ip_use_mod == true",
-                              selectInput("ip_mod", "Moderator (colour/facet):", choices = NULL),
-                              hr(),
-                              radioButtons("ip_mod_type", "Moderator type:",
-                                           choices = c("Categorical" = "cat", "Continuous (binned)" = "cont"),
-                                           selected = "cat"),
-                              conditionalPanel(
-                                condition = "input.ip_mod_type == 'cont'",
-                                sliderInput("ip_bins", "Number of bins:", min = 2, max = 5, value = 3, step = 1)
-                              ),
-                              hr(),
-                              checkboxInput("ip_facet", "Facet instead of colour", value = TRUE)
-                            ), 
-                            hr(),
-                            checkboxInput("ip_se", "Show confidence ribbon", value = TRUE)
-               ),
-               mainPanel(width = 9,
-                         plotlyOutput("ip_plot", height = "80vh")
-               )
-             )
-    ), # end of tab panel
-    
-    
     # ── UI MOSAIC ─────────────────────────────────────────────────────────
     
     tabPanel("Mosaic",
              sidebarLayout(
-               sidebarPanel(width = 3,   # 3/12 = 25%, narrow sidebar
-                            sidebar_note("Feature Dependency: <br><br>
-                                         This Mosaic Plot is good for exploring dependency 
-                                         between categorical features."),
+               sidebarPanel(width = 3,
+                            sidebar_note("Mosaic: <br><br>
+                            Visualise dependency between categorical variables.
+                            Tile area reflects joint frequency; shading by residuals 
+                            reveals where observed counts deviate from independence.
+                            Use the Pair Advisor to rank variable combinations 
+                            by association strength (Cramér's V)."),
                             hr(),
-                            # side bar for mosaic plot controls
+                            sliderInput("mosaic_max_levels", "Max levels per variable (cardinality filter):",
+                                        min = 2, max = 10, value = 4, step = 1, width = "100%"),
+                            helpText("Variables with more unique levels than this are excluded from the dropdowns."),
+                            hr(),
                             uiOutput("mosaic_x_ui"),
                             uiOutput("mosaic_y_ui"),
                             uiOutput("mosaic_z_ui"),
+                            hr(),
                             checkboxInput("mosaic_shade", "Shade (colour by residuals)", value = TRUE),
                             hr(),
-                            
-                            # font adjusting
                             sliderInput("mosaic_rot_labels", "Rotate Variable 1 labels (degrees):",
-                                        min = 0, max = 360, value = 90, step = 15),
+                                        min = 0, max = 360, value = 0, step = 15, width = "100%"),
                             checkboxInput("mosaic_abbreviate", "Abbreviate labels", value = TRUE),
                             sliderInput("mosaic_fontsize", "Label font size:",
-                                        min = 6, max = 24, value = 12, step = 1),
+                                        min = 6, max = 24, value = 10, step = 1, width = "100%"),
                             hr(),
-                            
-                            # side bar for mosaic pair advisor controls
-                            strong("Pair Advisor"),
-                            br(),
-                            helpText("Ranks variable combinations by Cramér's V (effect size). Higher = stronger association."),
-                            br(),
+                            textInput("mosaic_title", "Custom plot title:", 
+                                      placeholder = "Auto-generated if empty"),
+                            hr(),
+                            sidebar_note("Pair Advisor: <br><br>
+                            Ranks variable combinations by Cramér's V (effect size).
+                            Higher = stronger association.
+                            0.1 = weak, 0.3 = moderate, 0.5+ = strong.
+                            3-way score = average Cramér's V across all 3 pairs in the trio.
+                            <br><br>
+                            Click a row in the results table to load variables into the plot."),
+                            hr(),
                             radioButtons("pairs_way", "Combinations:",
                                          choices = c("2-way", "3-way"), selected = "2-way",
                                          inline = TRUE),
                             numericInput("pairs_top", "Show top N:", value = 15, min = 5, max = 200),
-                            actionButton("pairs_search", "Find Pairs", icon = icon("search"), width = "100%"),
-                            br(), br(),
-                            helpText("Click a row to load variables into the plot above.")
+                            actionButton("pairs_search", "Find Pairs", 
+                                         icon = icon("search"), width = "100%")
                ),
-               
-               mainPanel(
-                 width = 9,     # must add up to 12
-                 
-                 # mosaic plotting
-                 plotOutput("mosaic_plot", height = "90vh"),
-                 
-                 hr(),
-                 
-                 # pair advisor results (hidden until Search clicked)
-                 conditionalPanel(
-                   condition = "input.pairs_search > 0",
-                   h4("Pair Advisor Results — ranked by Cramér's V"),
-                   helpText("Cramér's V: 0.1 = weak, 0.3 = moderate, 0.5+ = strong. Not inflated by sample size."),
-                   helpText("3-way score = average Cramér's V across the 3 possible pairs within the trio."),
-                   DTOutput("pairs_table")
-                 )
+               mainPanel(width = 9,
+                         plotOutput("mosaic_plot", height = "70vh"),
+                         conditionalPanel(
+                           condition = "input.pairs_search > 0",
+                           hr(),
+                           h4("Pair Advisor Results — ranked by Cramér's V"),
+                           DTOutput("pairs_table")
+                         )
                )
              )
     ),  # end of tab panel
     
     
-    # ── UI CORRELATION HEATMAP 1 ──────────────────────────────────────────
+    # ── UI GGPAIRS ────────────────────────────────────────────────────────
     
-    tabPanel("Heatmap 1",
+    tabPanel("GGPairs",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Note: <br><br>
-                                         This correlation heatmap is good for diagnosing multicollinearity 
-                                         and detect highly correlated predictors before modeling."),
+                            sidebar_note("GGPairs: <br><br>
+                                         This GGPairs graph provides a quick overview of pairwise relationships, 
+                                         correlations, and marginal density distributions across multiple 
+                                         variables, allowing potential suspicious relationships, outliers, or 
+                                         structural irregularities in the data to be detected early."),
                             hr(),
-                            
-                            # variable selection
-                            selectizeInput("cor_vars", "Numeric variables:",
+                            selectizeInput("gg_vars", "Variables to plot:",
                                            choices  = NULL,
-                                           multiple = TRUE,
-                                           options  = list(placeholder = "Default: all numeric")),
+                                           multiple = TRUE),
                             hr(),
-                            
-                            # method
-                            radioButtons("cor_method", "Correlation method:",
-                                         choices  = c("Pearson"  = "pearson",
-                                                      "Spearman" = "spearman",
-                                                      "Kendall"  = "kendall"),
-                                         selected = "pearson"),
+                            selectInput("gg_preset", "Quick variable preset:", choices = NULL),
                             hr(),
-                            
-                            # threshold filter
-                            sliderInput("cor_threshold", "Collinearity threshold:",
-                                        min   = 0,
-                                        max   = 1,
-                                        value = 1,      # default = keep all
-                                        step  = 0.01),
-                            helpText("1.00 = keep all variables.",
-                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
-                                     "0.00 = extremely strict, keeps only uncorrelated variables."),
+                            checkboxInput("gg_group_on", "Group by levels", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.gg_group_on == true",
+                              selectInput("gg_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("gg_group_levels", "Levels of Interest:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels shown by default"))
+                            ),   # conditionalPanel closed here
                             hr(),
-                            
-                            # NA handling
-                            selectInput("cor_na", "Handle NAs:",
-                                        choices  = c("pairwise.complete.obs", "complete.obs"),
-                                        selected = "pairwise.complete.obs")
+                            textInput("gg_title", "Custom plot title:", placeholder = "Auto-generated if empty"),
+                            hr(),
+                            actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
+                            helpText("Select variables then click Plot. Large selections may be slow."),
                ),
-               
                mainPanel(width = 9,
-                         plotlyOutput("cor_plot_gg", height = "90vh"),
-                         hr(),
-                         h4("Correlation Matrix"),
-                         DTOutput("cor_table")
+                         plotOutput("gg_output", height = "80vh")
                )
              )
     ),  # end of tab panel
     
     
-    # ── UI CORRELATION HEATMAP 2 ──────────────────────────────────────────
+    # ── UI CORRELATION HEATMAP ────────────────────────────────────────────
     
-    tabPanel("Heatmap 2",
+    tabPanel("Heatmap",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Correlation Heatmap (Corrgram version): <br><br>
-                                     A visual alternative to Heatmap 1 using the corrgram library."),
+                            sidebar_note("Correlation Heatmap (Corrgram): <br><br>
+                                 Pairwise correlations visualised as a corrgram.
+                                 Pie panels show direction and magnitude above the diagonal,
+                                 shaded panels below. Collinearity threshold trims
+                                 highly correlated variables greedily before plotting."),
                             hr(),
-                            
-                            selectizeInput("cg_vars", "Numeric variables:",
+                            selectizeInput("hm_vars", "Numeric variables to plot:",
                                            choices  = NULL,
-                                           multiple = TRUE,
-                                           options  = list(placeholder = "Default: all numeric")),
+                                           multiple = TRUE),
                             hr(),
-                            
-                            radioButtons("cg_cor", "Correlation method:",
-                                         choices  = c("Pearson"  = "pearson",
-                                                      "Spearman" = "spearman",
-                                                      "Kendall"  = "kendall"),
-                                         selected = "pearson"),
+                            selectInput("hm_preset", "Quick variable preset:", choices = NULL),
                             hr(),
-                            
-                            sliderInput("cg_threshold", "Collinearity threshold:",
-                                        min = 0, max = 1, value = 1, step = 0.01),
-                            helpText("1.00 = keep all variables.",
-                                     "0.80 = drop variables with |r| > 0.80 (pairwise greedy).",
-                                     "0.00 = extremely strict.")
+                            selectInput("hm_cor", "Correlation method:",
+                                        choices  = c("Pearson"  = "pearson",
+                                                     "Spearman" = "spearman",
+                                                     "Kendall"  = "kendall"),
+                                        selected = "spearman"),
+                            hr(),
+                            selectInput("hm_order", "Variable ordering:",
+                                        choices  = c("Original"               = "FALSE",
+                                                     "AOE (Eigenvector)"      = "TRUE",
+                                                     "HC (Hierarchical)"      = "HC",
+                                                     "OLO (Optimal Leaf)"     = "OLO"),
+                                        selected = "HC"),
+                            hr(),
+                            checkboxInput("hm_abs", "Absolute correlation (abs)", value = TRUE),
+                            checkboxInput("hm_missing", "Missingness correlation (NAs)", value = FALSE),
+                            hr(),
+                            textInput("hm_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
                mainPanel(width = 9,
-                         plotOutput("cg_plot", height = "85vh"),
-                         hr(),
-                         h4("Variable Index Legend"),
-                         DTOutput("cg_legend_table")
-               )
-             )
-    ),  # end of tab panel
-    
-    
-    # ── UI HDBSCAN ────────────────────────────────────────────────────────
-    
-    tabPanel("HDBSCAN",
-             sidebarLayout(
-               sidebarPanel(width = 3,
-                            sidebar_note("Hierarchical Clustering: <br><br>
-                                     HDBSCAN identifies dense clusters and flags sparse 
-                                     observations as outliers. The hierarchy plot shows 
-                                     how clusters form and persist across eps values."),
-                            hr(),
-                            
-                            selectizeInput("hdb_vars", "Variables (numeric):",
-                                           choices  = NULL,
-                                           multiple = TRUE,
-                                           options  = list(placeholder = "Select numeric variables")),
-                            hr(),
-                            
-                            numericInput("hdb_minpts", "minPts:",
-                                         value = 5, min = 2, max = 100, step = 1),
-                            helpText("Minimum cluster size. Higher = fewer, denser clusters."),
-                            hr(),
-                            
-                            checkboxInput("hdb_scale", "Scale variables before clustering", value = TRUE),
-                            hr(),
-                            
-                            actionButton("hdb_run", "Run HDBSCAN", icon = icon("play"), width = "100%"),
-                            helpText("Select variables then click Run. Large selections may be slow.")
-               ),
-               mainPanel(width = 9,
-                         
-                         # summary stat row
-                         fluidRow(
-                           column(3,
-                                  div(style = "margin-top:10px;",
-                                      h2(textOutput("hdb_n_clusters")),
-                                      p("Number of clusters"))),
-                           column(3,
-                                  div(style = "margin-top:10px;",
-                                      h2(textOutput("hdb_n_outliers")),
-                                      p("Number of outliers")))
-                         ),
-                         
-                         hr(),
-                         
-                         # base R hierarchy plot
-                         plotOutput("hdb_plot", height = "70vh")
+                         plotOutput("hm_output", height = "80vh")
                )
              )
     ),  # end of tab panel
@@ -788,5 +593,9 @@ ui <- fluidPage(
     
   ) # end tabsetPanel
 )   # end fluidPage
+
+
+
+
 
 
