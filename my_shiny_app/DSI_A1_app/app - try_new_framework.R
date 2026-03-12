@@ -1084,6 +1084,19 @@ server <- function(input, output, session) {
     
     make_panel <- function(sub_df, subtitle = NULL) {
       sub_df <- sub_df[, sel_vars, drop = FALSE]
+      
+      # guard: empty subgroup, return a blank placeholder panel
+      if (nrow(sub_df) == 0) {
+        p <- ggplot2::ggplot() +
+          ggplot2::annotate("text", x = 0.5, y = 0.5,
+                            label = "No data", size = 5, colour = "grey50") +
+          ggplot2::theme_void()
+        if (!is.null(subtitle))
+          p <- p + ggplot2::labs(title = subtitle) +
+            ggplot2::theme(plot.title = element_text(size = 13, face = "bold", hjust = 0.5))
+        return(p)
+      }
+      
       p <- if (input$ms_mode == "visdat") visdat::vis_dat(sub_df) else visdat::vis_miss(sub_df)
       p <- p + ggplot2::theme(
         axis.text.x     = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12), # size for labels
