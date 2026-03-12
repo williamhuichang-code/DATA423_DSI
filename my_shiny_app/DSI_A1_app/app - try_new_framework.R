@@ -11,6 +11,7 @@ library(tidyverse)
 library(plotly)
 library(seriation)
 library(tabplot)
+library(visdat)
 library(DT)
 library(grid)
 
@@ -20,7 +21,6 @@ library(grid)
 # library(dbscan)
 # library(paletteer) # global colour theme
 # library(colorspace)
-# library(visdat)
 # library(shinyjs)
 # library(tidytext)
 # library(wordcloud2)
@@ -639,6 +639,62 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
+    # ── UI WORD CLOUD ─────────────────────────────────────────────────────
+    
+    tabPanel("Word Cloud",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Col Names & Missingness Cooccurrence & Improper Collecting: <br><br>
+                                         This word cloud helps identify inconsistencies in variable names 
+                                         or categorical values, depending on the selected mode.
+                                         Typical scenarios are like col name cleaning, distinct variable values 
+                                         and y label overlapping"),
+                            hr(),
+                            
+                            checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
+                            hr(),
+                            
+                            conditionalPanel(
+                              condition = "input.wc_varnames_mode == false",
+                              selectInput("wc_var", "Categorical variable:", choices = NULL)
+                            ),
+                            hr(),
+                            
+                            checkboxInput("wc_case", "Case sensitive", value = TRUE),
+                            hr(),
+                            
+                            radioButtons("wc_split_mode", "Token split mode:",
+                                         choices = c(
+                                           "None (whole value)"   = "none",
+                                           "Individual characters" = "chars",
+                                           "Alpha / numeric runs"  = "alphanum"
+                                         ),
+                                         selected = "none"),
+                            hr(),
+                            
+                            sliderInput("wc_max_words", "Max words to show:",
+                                        min = 10, max = 500, value = 360, step = 10),
+                            sliderInput("wc_min_freq", "Min frequency:",
+                                        min = 1, max = 50, value = 1, step = 1),
+                            helpText("Font size is proportional to frequency."),
+                            hr(),
+                            
+                            sliderInput("wc_scale", "Plot scale:",
+                                        min = 0.3, max = 3.0, value = 1.0, step = 0.1),
+                            hr(),
+                            
+                            selectInput("wc_palette", "Colour palette:",
+                                        choices = c("Dark2", "Set1", "Set2", "Set3",
+                                                    "Paired", "Accent", "Spectral"),
+                                        selected = "Dark2")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("wc_plot", height = "80vh")
+               )
+             )
+    ),  # end of tab panel
+    
+    
     # ── UI MISSINGNESS ────────────────────────────────────────────────────
     tabPanel("Missingness",
              sidebarLayout(
@@ -1214,6 +1270,107 @@ server <- function(input, output, session) {
         df
       ) |> print(method = "render")
     }
+  })
+  
+  
+  # ── SERVER WORD CLOUD ──────────────────────────────────────────────────
+  
+  observe({
+    df       <- display_data()
+    req(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    updateSelectInput(session, "wc_var", choices = cat_vars, selected = cat_vars[1])
+  })
+  
+  output$wc_plot <- renderPlot({
+    
+    df  <- display_data()
+    
+    # add options to check variable names based on user need
+    if (isTRUE(input$wc_varnames_mode)) {
+      val <- names(df)
+    } else {
+      req(input$wc_var)
+      val <- as.character(df[[input$wc_var]])
+    }
+    
+    val <- val[!is.na(val) & nchar(trimws(val)) > 0]
+    
+    # apply case folding on raw values before any splitting
+    if (!input$wc_case) val <- tolower(val)
+    
+    validate(need(length(val) > 0, "No non-missing values to display."))
+    
+    # optional splitting logic
+    tokens <- switch(input$wc_split_mode,
+                     "none" = val,
+                     "chars" = {
+                       t <- unlist(strsplit(val, ""))
+                       t[!grepl("\\s", t)]
+                     },
+                     "alphanum" = {
+                       t <- unlist(lapply(val, function(tok) {
+                         m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+                         regmatches(tok, m)[[1]]
+                       }))
+                       t[nchar(t) > 0]
+                     }
+    )
+    
+    freq_table <- sort(table(tokens), decreasing = TRUE)
+    freq_table <- freq_table[freq_table >= input$wc_min_freq]
+    validate(need(length(freq_table) > 0,
+                  paste0("No tokens appear at least ", input$wc_min_freq, " times.")))
+    freq_table <- head(freq_table, input$wc_max_words)
+    
+    words <- names(freq_table)
+    freqs <- as.integer(freq_table)
+    n     <- length(words)
+    
+    # colours
+    pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
+    colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
+    
+    # adaptive normalisation with outlier-aware contrast boost
+    freq_ranks <- rank(-freqs, ties.method = "first")   # 1 = most frequent
+    
+    # detect if top token(s) are genuine outliers vs the rest
+    # outlier = top freq is 3x the median freq
+    freq_ratio <- max(freqs) / max(median(freqs), 1)
+    
+    if (freq_ratio >= 3) {
+      # outlier mode: use sqrt-compressed raw freq → preserves contrast without
+      # letting the top token completely dwarf everyone else
+      freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
+                                 max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
+    } else {
+      # normal mode: pure rank-based (flat distribution, no outliers)
+      freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+    }
+    
+    # adaptive scale — use outlier ratio to decide canvas scale
+    # high ratio = we WANT a large max_scale so G/D are visually dominant
+    n_eff      <- min(n, 30)
+    base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+    # boost max_scale proportionally to outlier strength, cap at 12
+    max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
+    min_scale  <- max(0.3, max_scale * 0.15)   # tighter min so rare tokens stay small
+    max_scale <- max_scale * input$wc_scale
+    min_scale <- min_scale * input$wc_scale
+    
+    par(mar = c(0, 0, 0, 0), bg = "white")
+    
+    wordcloud::wordcloud(
+      words        = words,
+      freq         = freqs_norm,
+      max.words    = n,
+      min.freq     = 1,
+      random.order = FALSE,
+      rot.per      = 0.15,
+      colors       = colors,
+      scale        = c(max_scale, min_scale),
+      use.r.layout = FALSE
+    )
   })
   
   
