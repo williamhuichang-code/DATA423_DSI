@@ -859,10 +859,10 @@ ui <- fluidPage(
                                                      "Standardise" = "standardise",
                                                      "Normalise"   = "normalise"),
                                          selected = "none"),
-                            hr(),
-                            sliderInput("box_iqr", "IQR multiplier (outlier criterion):",
-                                        min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
-                            helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            # hr(),
+                            # sliderInput("box_iqr", "IQR multiplier (outlier criterion):",
+                            #             min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            # helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
                             hr(),
                             checkboxInput("box_violin", "Show as violin", value = FALSE),
                             hr(),
@@ -1762,8 +1762,8 @@ server <- function(input, output, session) {
     transform_label <- if (input$box_transform != "none")
       paste0(" | ", tools::toTitleCase(input$box_transform)) else ""
     group_label     <- if (using_group) paste0(" | Grouped by ", input$box_group_var) else ""
-    iqr_label       <- if (!isTRUE(input$box_violin)) paste0(" | IQR ×", input$box_iqr) else ""
-    default_title   <- paste0(mode_label, iqr_label, transform_label, group_label)
+    # iqr_label       <- if (!isTRUE(input$box_violin)) paste0(" | IQR ×", input$box_iqr) else ""
+    default_title   <- paste0(mode_label, transform_label, group_label) # iqr_label, 
     plot_title      <- if (nzchar(input$box_title)) input$box_title else default_title
     
     # x aesthetic: Variable alone, or Variable × group level
@@ -1783,7 +1783,7 @@ server <- function(input, output, session) {
     } else {
       p <- p +
         geom_boxplot(
-          coef = input$box_iqr,
+          coef = 1.5,  # input$box_iqr
           alpha = 0.7,
           outlier.size = 0.8
         )
