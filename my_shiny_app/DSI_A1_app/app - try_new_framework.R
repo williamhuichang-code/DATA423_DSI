@@ -738,6 +738,7 @@ ui <- fluidPage(
                                         selected = "HC"),
                             hr(),
                             checkboxInput("hm_abs", "Absolute correlation (abs)", value = TRUE),
+                            checkboxInput("hm_missing", "Correlate missingness (NA pattern)", value = FALSE),
                             hr(),
                             textInput("hm_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
@@ -1186,8 +1187,16 @@ server <- function(input, output, session) {
     
     df_num <- df[, selected, drop = FALSE]
     
-    # compute correlation matrix first, then apply abs manually if checked
-    cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = input$hm_cor)
+    # compute correlation matrix first (values/NA), then apply abs manually if checked
+    if (isTRUE(input$hm_missing)) {
+      na_mat  <- is.na(df_num) * 1L                  # 1 = missing, 0 = observed
+      keep    <- apply(na_mat, 2, var) > 0            # drop zero-variance cols (never/always missing)
+      na_mat  <- na_mat[, keep, drop = FALSE]
+      validate(need(ncol(na_mat) >= 2, "Not enough variables with missingness to correlate."))
+      cor_mat <- cor(na_mat, use = "pairwise.complete.obs", method = input$hm_cor)
+    } else {
+      cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = input$hm_cor)
+    }
     if (isTRUE(input$hm_abs)) cor_mat <- abs(cor_mat)
     
     # build order label
@@ -1199,7 +1208,8 @@ server <- function(input, output, session) {
     )
     
     default_title <- paste0(
-      "Corrgram | ", tools::toTitleCase(input$hm_cor),
+      if (isTRUE(input$hm_missing)) "Missingness Correlation Heatmap" else "Correlation Heatmap",
+      " | ", tools::toTitleCase(input$hm_cor),
       " | ", order_label,
       if (isTRUE(input$hm_abs)) " | Absolute" else ""
     )
