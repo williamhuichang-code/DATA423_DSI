@@ -10,6 +10,7 @@ library(shinyAce)  # R console ace editor
 library(tidyverse)
 library(plotly)
 library(seriation)
+library(tabplot)
 
 # library(dplyr)
 # library(DT)
@@ -342,6 +343,8 @@ VAR_PRESETS <- list(
   "Gapped Sensors"  = paste0("Sensor", c(4,6,8,11,16,22,24,28)),
   "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
   "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
+  "Gapped Sensors (excl. 6 &IG&OP)"  = c("IdGroup", "Operator", 
+                                          paste0("Sensor", c(4,8,11,16,22,24,28))),
   "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))]),
   "All Variables (raw)" = names(ds_typed),
   "All Categorical (raw)"  = names(ds_typed)[sapply(ds_typed, is.factor)],
@@ -350,11 +353,12 @@ VAR_PRESETS <- list(
 
 # which to display as preset choices (using this meta)
 VAR_PRESET_META <- tibble::tribble(
-  ~plot,        ~s1s, ~s10s, ~s20s, ~sl, ~sly, ~gp, ~gpy, ~gpel6, ~s1se48, ~vr, ~cr, ~nr,
-  "rising",      1,    1,     1,     1,   1,    1,   1,    1,      0,       0,   0,   0,
-  "ggpairs",     1,    1,     1,     0,   0,    1,   1,    1,      1,       0,   0,   0,
-  "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,      1,       0,   0,   0,
-  "missing",     1,    1,     1,     1,   1,    1,   1,    1,      0,       1,   1,   1
+  ~plot,        ~s1s, ~s10s, ~s20s, ~sl, ~sly, ~gp, ~gpy, ~gpe6, ~gpe6IO, ~s1se48, ~vr, ~cr, ~nr,
+  "rising",      1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       0,   0,   0,
+  "ggpairs",     1,    1,     1,     0,   0,    1,   1,    1,     0,       1,       0,   0,   0,
+  "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
+  "missing",     1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       1,   1,   1,
+  "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1
 )
 
 # default select box content per plot
@@ -362,7 +366,8 @@ DEFAULT_PRESET <- list(
   rising  = "Gapped Sensors vs Y",
   ggpairs = "Sensor 1-10 (excl. 4,8)",
   heatmap = "All Sensors vs Y", 
-  missing = "All Variables (raw)"
+  missing = "All Variables (raw)",
+  tabplot = "Gapped Sensors (excl. 6 &IG&OP)"
 )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -389,7 +394,7 @@ GROUPBY_META <- tibble::tribble(
   "rising",    0,         NA,          NULL,
   "ggpairs",   1,         "NaFlag_S6", NULL,
   "heatmap",   0,         NA,          NULL,
-  "missing",   1,         "Temp",      NULL   # could check with Speed, they give good info
+  "missing",   1,         "Temp",      NULL,  # could check with Speed, they give good info
 )
 
 # lookup helper: for groupby default
@@ -735,6 +740,49 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          plotlyOutput("rv_output", height = "80vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI TABPLOT ────────────────────────────────────────────────────────
+    
+    tabPanel("Tabplot",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Tabplot: <br><br>
+      Visualises distributions and relationships of multiple 
+      variables simultaneously, sorted by a target variable. 
+      Useful for spotting patterns across many variables at once 
+      and identifying how they relate to the outcome Y."),
+                            hr(),
+                            selectizeInput("tp_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("tp_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            checkboxInput("tp_sort_on", "Sort by variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.tp_sort_on == true",
+                              selectInput("tp_sortvar", "Sort by variable:", choices = NULL),
+                              checkboxInput("tp_decreasing", "Sort descending", value = FALSE)
+                            ),
+                            hr(),
+                            radioButtons("tp_transform", "Transform numeric columns:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "normalise"),
+                            hr(),
+                            sliderInput("tp_nbin", "Number of bins:",
+                                        min = 10, max = 500, value = 60, step = 10, width = "100%"),
+                            hr(),
+                            textInput("tp_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("tp_output", height = "80vh")
                )
              )
     ), # end of tab panel
@@ -1295,6 +1343,106 @@ server <- function(input, output, session) {
         yaxis  = list(title    = list(text = "<b>Value</b>", font = list(size = 20)),
                       tickfont = list(size = 18))
         )
+  })
+  
+  
+  # ── SERVER TABPLOT ─────────────────────────────────────────────────────
+  
+  # 1st block: variable selector and preset dropdown initialisation
+  observe({
+    df       <- display_data()
+    all_vars <- names(df)
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    updateSelectizeInput(session, "tp_vars", choices = all_vars)
+    apply_preset_selection(session, "tabplot", "tp_vars", all_vars)
+    
+    # preset dropdown — only presets valid for this tab
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("tabplot"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "tp_preset", choices = choices)
+    
+    # sort-by selector — numeric vars + any Date cols, default to Y if present
+    date_vars    <- names(df)[sapply(df, inherits, what = "Date")]
+    sortable_vars <- c(date_vars, num_vars)
+    sort_default  <- if (length(date_vars) > 0) date_vars[1] else sortable_vars[1]
+    updateSelectInput(session, "tp_sortvar", choices = sortable_vars, selected = sort_default)
+  })
+  
+  # 2nd block: preset observer
+  observeEvent(input$tp_preset, {
+    req(input$tp_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$tp_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "tp_vars", selected = sel)
+  })
+  
+  # 3rd block: plot output
+  output$tp_output <- renderPlot({
+    req(input$tp_vars)
+    df <- display_data()
+    
+    sel_vars <- intersect(input$tp_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 variable."))
+    
+    # apply transform to numeric columns in the plot subset
+    df_plot <- df[, sel_vars, drop = FALSE]
+    if (input$tp_transform != "none") {
+      num_cols <- names(df_plot)[sapply(df_plot, is.numeric)]
+      df_plot[num_cols] <- lapply(df_plot[num_cols], function(y) {
+        switch(input$tp_transform,
+               "center"      = y - mean(y, na.rm = TRUE),
+               "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+               "normalise"   = (y - min(y, na.rm = TRUE)) /
+                 (max(y, na.rm = TRUE) - min(y, na.rm = TRUE))
+        )
+      })
+    }
+    
+    # sorting logic
+    #   sort_on = FALSE → inject a natural row-index col and sort by it (preserves original order visually)
+    #   sort_on = TRUE  → sort by the chosen numeric variable
+    using_index <- !isTRUE(input$tp_sort_on)
+    
+    if (using_index) {
+      df_plot$.row_index <- seq_len(nrow(df_plot))
+      sort_col           <- ".row_index"
+      df_plot <- df_plot[, c(".row_index", setdiff(names(df_plot), ".row_index")), drop = FALSE]
+    } else {
+      req(input$tp_sortvar)
+      validate(need(input$tp_sortvar %in% names(df), "Sort variable not found in dataset."))
+      sort_col <- input$tp_sortvar
+      
+      if (!sort_col %in% names(df_plot))
+        df_plot[[sort_col]] <- df[[sort_col]]
+      
+      # if sorting by a Date col, coerce it to numeric for tableplot's sort key
+      # (the display version was already converted to factor above — this only
+      #  affects the sort col copy that tableplot reads internally)
+      if (inherits(df_plot[[sort_col]], "Date"))
+        df_plot[[sort_col]] <- as.numeric(df_plot[[sort_col]])
+      
+      df_plot <- df_plot[, c(sort_col, setdiff(names(df_plot), sort_col)), drop = FALSE]
+    }
+    
+    sort_label <- if (using_index) "Original Row Order" else input$tp_sortvar
+    transform_label <- if (input$tp_transform != "none")
+      paste0(" | ", tools::toTitleCase(input$tp_transform)) else ""
+    
+    default_title <- paste0("Tabplot | Sorted by ", sort_label, transform_label)
+    plot_title    <- if (nzchar(input$tp_title)) input$tp_title else default_title
+    
+    tabplot::tableplot(
+      df_plot,
+      sortCol    = sort_col,
+      decreasing = if (using_index) FALSE else isTRUE(input$tp_decreasing),
+      nBins      = input$tp_nbin,
+      title      = plot_title,
+      fontsize   = 14,
+      fontsize.title  = 22
+    )
   })
   
   
