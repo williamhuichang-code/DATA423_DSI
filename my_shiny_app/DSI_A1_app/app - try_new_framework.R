@@ -343,16 +343,18 @@ VAR_PRESETS <- list(
   "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
   "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
   "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))]),
-  "All Variables (Origin)" = names(ds_renamed)
+  "All Variables (raw)" = names(ds_typed),
+  "All Categorical (raw)"  = names(ds_typed)[sapply(ds_typed, is.factor)],
+  "All Numeric (raw)"      = names(ds_typed)[sapply(ds_typed, is.numeric)]
 )
 
 # which to display as preset choices (using this meta)
 VAR_PRESET_META <- tibble::tribble(
-  ~plot,        ~s1_10, ~s11_20, ~s21_30, ~sall, ~sall_y, ~gapped, ~gapped_y, ~gapped_excl6, ~s1_10_excl48, ~ori,
-  "rising",      1,      1,       1,       1,     1,       1,       1,         1,             0,             0,
-  "ggpairs",     1,      1,       1,       0,     0,       1,       1,         1,             1,             0,
-  "heatmap",     1,      1,       1,       1,     1,       1,       1,         1,             1,             0,
-  "missingness", 1,      1,       1,       1,     1,       1,       1,         1,             0,             1
+  ~plot,        ~s1s, ~s10s, ~s20s, ~sl, ~sly, ~gp, ~gpy, ~gpel6, ~s1se48, ~vr, ~cr, ~nr,
+  "rising",      1,    1,     1,     1,   1,    1,   1,    1,      0,       0,   0,   0,
+  "ggpairs",     1,    1,     1,     0,   0,    1,   1,    1,      1,       0,   0,   0,
+  "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,      1,       0,   0,   0,
+  "missing",     1,    1,     1,     1,   1,    1,   1,    1,      0,       1,   1,   1
 )
 
 # default select box content per plot
@@ -360,7 +362,7 @@ DEFAULT_PRESET <- list(
   rising  = "Gapped Sensors vs Y",
   ggpairs = "Sensor 1-10 (excl. 4,8)",
   heatmap = "All Sensors vs Y", 
-  missingness = "All Variables (Origin)"
+  missing = "All Variables (raw)"
 )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -386,7 +388,8 @@ GROUPBY_META <- tibble::tribble(
   ~plot,      ~group_on, ~group_var,  ~group_levels,
   "rising",    0,         NA,          NULL,
   "ggpairs",   1,         "NaFlag_S6", NULL,
-  "heatmap",   0,         NA,          NULL,  
+  "heatmap",   0,         NA,          NULL,
+  "missing",   1,         "Temp",      NULL   # could check with Speed, they give good info
 )
 
 # lookup helper: for groupby default
@@ -647,20 +650,20 @@ ui <- fluidPage(
                                                      "vis_miss (missingness only)"  = "vismiss"),
                                          selected = "visdat"),
                             hr(),
-                            checkboxInput("ms_group_on", "Group by categorical variable", value = FALSE),
+                            checkboxInput("ms_group_on", "Group by categorical variable", value = TRUE),
                             conditionalPanel(
                               condition = "input.ms_group_on == true",
                               selectInput("ms_group_var", "Grouping variable (primary):", choices = NULL),
                               selectizeInput("ms_group_levels", "Primary levels to include:",
                                              choices  = NULL,
                                              multiple = TRUE,
-                                             options  = list(placeholder = "All levels included")),
+                                             options  = list(placeholder = "All levels included by default")),
                               hr(),
                               selectInput("ms_group_var2", "Grouping variable (secondary):", choices = NULL),
                               selectizeInput("ms_group_levels2", "Secondary levels to include:",
                                              choices  = NULL,
                                              multiple = TRUE,
-                                             options  = list(placeholder = "All levels included"))
+                                             options  = list(placeholder = "All levels included by default"))
                             ),
                             hr(),
                             checkboxInput("ms_mcar", "Test for MCAR (Little's test)", value = FALSE),
@@ -1013,16 +1016,15 @@ server <- function(input, output, session) {
     cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
     
     # variable selector — default by preset
-    all_vars <- names(df)
     updateSelectizeInput(session, "ms_vars", choices = all_vars)
-    apply_preset_selection(session, "missingness", "ms_vars", all_vars)
+    apply_preset_selection(session, "missing", "ms_vars", all_vars)
     
     # preset dropdown
-    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("missingness"))
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("missing"))
     choices_p    <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
     updateSelectInput(session, "ms_preset", choices = choices_p)
     
-    updateSelectInput(session, "ms_group_var",  choices = cat_vars)
+    apply_groupby_defaults(session, "missing", cat_vars, "ms_group_var")
     
     updateSelectInput(session, "ms_group_var2",
                       choices  = c("None" = "none", cat_vars),
@@ -1084,7 +1086,7 @@ server <- function(input, output, session) {
       sub_df <- sub_df[, sel_vars, drop = FALSE]
       p <- if (input$ms_mode == "visdat") visdat::vis_dat(sub_df) else visdat::vis_miss(sub_df)
       p <- p + ggplot2::theme(
-        axis.text.x     = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 11),
+        axis.text.x     = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12), # size for labels
         axis.text.y     = element_text(size = 11),
         axis.title      = element_text(size = 13),
         legend.text     = element_text(size = 11),
@@ -1093,7 +1095,7 @@ server <- function(input, output, session) {
       )
       if (!is.null(subtitle))
         p <- p + ggplot2::labs(title = subtitle) +
-        ggplot2::theme(plot.title = element_text(size = 13, face = "plain", hjust = 0.5))
+        ggplot2::theme(plot.title = element_text(size = 13, face = "bold", hjust = 0.5))  # or face = "plain"
       p
     }
     
