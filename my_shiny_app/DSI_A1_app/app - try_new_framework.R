@@ -738,7 +738,7 @@ ui <- fluidPage(
                                         selected = "HC"),
                             hr(),
                             checkboxInput("hm_abs", "Absolute correlation (abs)", value = TRUE),
-                            checkboxInput("hm_missing", "Correlate missingness (NA pattern)", value = FALSE),
+                            checkboxInput("hm_missing", "Missingness correlation (NAs)", value = FALSE),
                             hr(),
                             textInput("hm_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                ),
