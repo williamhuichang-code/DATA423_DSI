@@ -791,7 +791,7 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
-    # ── UI BOXPLOT ────────────────────────────────────────────────────────
+    # ── UI BOXPLOT 1 ──────────────────────────────────────────────────────
     
     tabPanel("Boxplot",
              sidebarLayout(
@@ -1495,7 +1495,7 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER BOXPLOT ─────────────────────────────────────────────────────
+  # ── SERVER BOXPLOT 1 ───────────────────────────────────────────────────
   
   # 1st block: variable selector, preset dropdown, group var initialisation
   observe({
