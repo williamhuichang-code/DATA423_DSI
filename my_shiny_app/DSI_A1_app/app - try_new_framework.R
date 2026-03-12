@@ -91,171 +91,6 @@ reorder_cols <- function(df) {
 }
 
 
-# ·· VARIABLE PRESET ······················································
-
-# all conceptualised presets for this dataset
-VAR_PRESETS <- list(
-  "Sensor 1-10"  = paste0("Sensor", 1:10),
-  "Sensor 11-20" = paste0("Sensor", 11:20),
-  "Sensor 21-30" = paste0("Sensor", 21:30),
-  "All Sensors"  = paste0("Sensor", 1:30),
-  "All Sensors vs Y"  = c("Y", paste0("Sensor", 1:30)),
-  "Gapped Sensors"  = paste0("Sensor", c(4,6,8,11,16,22,24,28)),
-  "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
-  "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
-  "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))])
-)
-
-# which to display as preset choices (using this meta)
-VAR_PRESET_META <- tibble::tribble(
-  ~plot,        ~s1_10, ~s11_20, ~s21_30, ~sall, ~sall_y, ~gapped, ~gapped_y, ~gapped_excl6, ~s1_10_excl48,
-  "rising",      1,      1,       1,       1,     1,       1,       1,         1,             0,
-  "ggpairs",     1,      1,       1,       0,     0,       1,       1,         1,             1,
-  "heatmap",     1,      1,       1,       1,     1,       1,       1,         1,             1
-)
-
-# default select box content per plot
-DEFAULT_PRESET <- list(
-  rising  = "Gapped Sensors vs Y",
-  ggpairs = "Sensor 1-10 (excl. 4,8)",
-  heatmap = "All Sensors vs Y"
-  )
-
-# lookup helper: returns named VAR_PRESETS list valid for a given plot
-presets_for <- function(plot_name) {
-  row  <- VAR_PRESET_META[VAR_PRESET_META$plot == plot_name, -1]  # drop ~plot col
-  keep <- as.logical(row)
-  VAR_PRESETS[keep]
-}
-
-# logic helper: sets ONLY the selected values from preset, caller controls choices separately
-apply_preset_selection <- function(session, plot_name, input_id, available_vars) {
-  preset_name <- DEFAULT_PRESET[[plot_name]]
-  default_sel <- intersect(VAR_PRESETS[[preset_name]], available_vars)
-  updateSelectizeInput(session, input_id, selected = default_sel)
-}
-
-
-# ·· GROUPBY DEFAULT ······················································
-
-# groupby default and its levels (NULL = all levels)
-#   group_on, means this plot should have a groupby option
-GROUPBY_META <- tibble::tribble(
-  ~plot,      ~group_on, ~group_var,  ~group_levels,
-  "rising",    0,         NA,          NULL,
-  "ggpairs",   1,         "NaFlag_S6", NULL,
-  "heatmap",   0,         NA,          NULL,  
-)
-
-# lookup helper: for groupby default
-groupby_for <- function(plot_name) {
-  GROUPBY_META[GROUPBY_META$plot == plot_name, ]
-}
-
-# logic helper: applies groupby defaults to checkbox, group var selector, and level selector
-apply_groupby_defaults <- function(session, plot_name, cat_vars, input_group_var) {
-  grp_meta <- groupby_for(plot_name)
-  grp_var  <- if (grp_meta$group_var %in% cat_vars) grp_meta$group_var else cat_vars[1]
-  updateSelectInput(session, input_group_var, choices = cat_vars, selected = grp_var)
-}
-
-# logic helper: resolves level preselection from groupby meta
-resolve_group_levels <- function(plot_name, all_lvls) {
-  grp_meta <- groupby_for(plot_name)
-  if (!is.null(grp_meta$group_levels[[1]])) {
-    intersect(grp_meta$group_levels[[1]], all_lvls)  # specific levels from meta
-  } else {
-    all_lvls                                          # NULL = all levels
-  }
-}
-
-# ·· GLOBAL COLOUR THEME ··················································
-
-# grouping color strategy
-# interleave light/dark within each group for maximum within-group contrast
-sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
-sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
-
-sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
-sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
-
-sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
-sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
-
-THEME_COLOURS <- c(
-  sensor1_cols,
-  sensor2_cols,
-  sensor3_cols,
-  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
-)
-
-# named designations (only pin variables that need a meaningful fixed colour)
-THEME_DESIGNATED <- c(
-  "Y" = "#C41E3A"   # target variable always red
-)
-
-# helper: give it any character vector of names -> get back a named colour vector
-#   designated names always get their fixed colour
-#   everything else samples from THEME_COLOURS automatically
-
-theme_colours_for <- function(vars) {
-  colours <- character(length(vars))
-  names(colours) <- vars
-  
-  for (v in vars) {
-    
-    # 1️⃣ designated colours
-    if (v %in% names(THEME_DESIGNATED)) {
-      colours[v] <- THEME_DESIGNATED[v]
-      next
-    }
-    
-    # 2️⃣ raw sensors 1–30 (true grouping logic)
-    if (grepl("^Sensor[0-9]+$", v)) {
-      num <- as.integer(sub("Sensor", "", v))
-      
-      if (num <= 10) {
-        colours[v] <- sensor1_cols[num]
-      } else if (num <= 20) {
-        colours[v] <- sensor2_cols[num - 10]
-      } else {
-        colours[v] <- sensor3_cols[num - 20]
-      }
-      
-      next
-    }
-    
-    # 3️⃣ everything else (fallback deterministic mapping)
-    idx <- abs(sum(utf8ToInt(v)))
-    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
-  }
-  
-  colours
-}
-
-
-# ·· GENERAL HELPER ·······················································
-
-# sidebar note
-sidebar_note <- function(text) {
-  div(
-    style = "
-      font-size: 13px;
-      font-weight: 500;
-      color: #343a40;
-      background-color: white;
-      padding: 10px;
-      border-left: 4px solid #0d6efd;
-      border-radius: 6px;
-      margin-bottom: 12px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    ",
-    icon("info-circle", style = "color:#0d6efd;"),
-    HTML(paste("&nbsp;", text))
-  )
-}
-
-
 # ── DATA STAGE ───────────────────────────────────────────────────────────────
 
 # ·· RAW DATASET ··························································
@@ -493,6 +328,180 @@ debug_dataset <- eda_dataset %>%
   )
 
 
+# ── APPEARANCE ───────────────────────────────────────────────────────────────
+
+# ·· VARIABLE PRESET ······················································
+
+# all conceptualised presets for this dataset
+VAR_PRESETS <- list(
+  "Sensor 1-10"  = paste0("Sensor", 1:10),
+  "Sensor 11-20" = paste0("Sensor", 11:20),
+  "Sensor 21-30" = paste0("Sensor", 21:30),
+  "All Sensors"  = paste0("Sensor", 1:30),
+  "All Sensors vs Y"  = c("Y", paste0("Sensor", 1:30)),
+  "Gapped Sensors"  = paste0("Sensor", c(4,6,8,11,16,22,24,28)),
+  "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
+  "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
+  "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))]),
+  "All Variables (Origin)" = names(ds_renamed)
+)
+
+# which to display as preset choices (using this meta)
+VAR_PRESET_META <- tibble::tribble(
+  ~plot,        ~s1_10, ~s11_20, ~s21_30, ~sall, ~sall_y, ~gapped, ~gapped_y, ~gapped_excl6, ~s1_10_excl48, ~ori,
+  "rising",      1,      1,       1,       1,     1,       1,       1,         1,             0,             0,
+  "ggpairs",     1,      1,       1,       0,     0,       1,       1,         1,             1,             0,
+  "heatmap",     1,      1,       1,       1,     1,       1,       1,         1,             1,             0,
+  "missingness", 1,      1,       1,       1,     1,       1,       1,         1,             0,             1
+)
+
+# default select box content per plot
+DEFAULT_PRESET <- list(
+  rising  = "Gapped Sensors vs Y",
+  ggpairs = "Sensor 1-10 (excl. 4,8)",
+  heatmap = "All Sensors vs Y", 
+  missingness = "All Variables (Origin)"
+)
+
+# lookup helper: returns named VAR_PRESETS list valid for a given plot
+presets_for <- function(plot_name) {
+  row  <- VAR_PRESET_META[VAR_PRESET_META$plot == plot_name, -1]  # drop ~plot col
+  keep <- as.logical(row)
+  VAR_PRESETS[keep]
+}
+
+# logic helper: sets ONLY the selected values from preset, caller controls choices separately
+apply_preset_selection <- function(session, plot_name, input_id, available_vars) {
+  preset_name <- DEFAULT_PRESET[[plot_name]]
+  default_sel <- intersect(VAR_PRESETS[[preset_name]], available_vars)
+  updateSelectizeInput(session, input_id, selected = default_sel)
+}
+
+
+# ·· GROUPBY DEFAULT ······················································
+
+# groupby default and its levels (NULL = all levels)
+#   group_on, means this plot should have a groupby option
+GROUPBY_META <- tibble::tribble(
+  ~plot,      ~group_on, ~group_var,  ~group_levels,
+  "rising",    0,         NA,          NULL,
+  "ggpairs",   1,         "NaFlag_S6", NULL,
+  "heatmap",   0,         NA,          NULL,  
+)
+
+# lookup helper: for groupby default
+groupby_for <- function(plot_name) {
+  GROUPBY_META[GROUPBY_META$plot == plot_name, ]
+}
+
+# logic helper: applies groupby defaults to checkbox, group var selector, and level selector
+apply_groupby_defaults <- function(session, plot_name, cat_vars, input_group_var) {
+  grp_meta <- groupby_for(plot_name)
+  grp_var  <- if (grp_meta$group_var %in% cat_vars) grp_meta$group_var else cat_vars[1]
+  updateSelectInput(session, input_group_var, choices = cat_vars, selected = grp_var)
+}
+
+# logic helper: resolves level preselection from groupby meta
+resolve_group_levels <- function(plot_name, all_lvls) {
+  grp_meta <- groupby_for(plot_name)
+  if (!is.null(grp_meta$group_levels[[1]])) {
+    intersect(grp_meta$group_levels[[1]], all_lvls)  # specific levels from meta
+  } else {
+    all_lvls                                          # NULL = all levels
+  }
+}
+
+# ·· GLOBAL COLOUR THEME ··················································
+
+# grouping color strategy
+# interleave light/dark within each group for maximum within-group contrast
+sensor1_cols <- colorspace::sequential_hcl(10, h = c(200, 260), c = c(100, 60), l = c(25, 85), power = 0.7)
+sensor1_cols <- sensor1_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]   # interleave dark/light
+
+sensor2_cols <- colorspace::sequential_hcl(10, h = c(90, 150),  c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor2_cols <- sensor2_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+sensor3_cols <- colorspace::sequential_hcl(10, h = c(270, 330), c = c(100, 55), l = c(25, 85), power = 0.7)
+sensor3_cols <- sensor3_cols[c(1, 6, 2, 7, 3, 8, 4, 9, 5, 10)]
+
+THEME_COLOURS <- c(
+  sensor1_cols,
+  sensor2_cols,
+  sensor3_cols,
+  as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
+)
+
+# named designations (only pin variables that need a meaningful fixed colour)
+THEME_DESIGNATED <- c(
+  "Y" = "#C41E3A"   # target variable always red
+)
+
+# helper: give it any character vector of names -> get back a named colour vector
+#   designated names always get their fixed colour
+#   everything else samples from THEME_COLOURS automatically
+
+theme_colours_for <- function(vars) {
+  colours <- character(length(vars))
+  names(colours) <- vars
+  
+  for (v in vars) {
+    
+    # 1️⃣ designated colours
+    if (v %in% names(THEME_DESIGNATED)) {
+      colours[v] <- THEME_DESIGNATED[v]
+      next
+    }
+    
+    # 2️⃣ raw sensors 1–30 (true grouping logic)
+    if (grepl("^Sensor[0-9]+$", v)) {
+      num <- as.integer(sub("Sensor", "", v))
+      
+      if (num <= 10) {
+        colours[v] <- sensor1_cols[num]
+      } else if (num <= 20) {
+        colours[v] <- sensor2_cols[num - 10]
+      } else {
+        colours[v] <- sensor3_cols[num - 20]
+      }
+      
+      next
+    }
+    
+    # 3️⃣ everything else (fallback deterministic mapping)
+    idx <- abs(sum(utf8ToInt(v)))
+    colours[v] <- THEME_COLOURS[((idx - 1) %% length(THEME_COLOURS)) + 1]
+  }
+  
+  colours
+}
+
+
+# ·· GENERAL HELPER ·······················································
+
+# sidebar note
+sidebar_note <- function(text) {
+  div(
+    style = "
+      font-size: 13px;
+      font-weight: 500;
+      color: #343a40;
+      background-color: white;
+      padding: 10px;
+      border-left: 4px solid #0d6efd;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    ",
+    icon("info-circle", style = "color:#0d6efd;"),
+    HTML(paste("&nbsp;", text))
+  )
+}
+
+
+
+
+
+
 
 
 
@@ -613,6 +622,66 @@ ui <- fluidPage(
                ),
                mainPanel(width = 9,
                          verbatimTextOutput("summary_output")
+               )
+             )
+    ), # end of tab panel
+    
+    
+    # ── UI MISSINGNESS ────────────────────────────────────────────────────
+    tabPanel("Missingness",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Missingness Explorer: <br><br>
+                          Visualise missing data patterns across the dataset.
+                          Group by a categorical variable to reveal whether 
+                          missingness differs across subgroups."),
+                            hr(),
+                            selectizeInput("ms_vars", "Variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("ms_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("ms_mode", "View:",
+                                         choices = c("vis_dat (type + missingness)" = "visdat",
+                                                     "vis_miss (missingness only)"  = "vismiss"),
+                                         selected = "visdat"),
+                            hr(),
+                            checkboxInput("ms_group_on", "Group by categorical variable", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.ms_group_on == true",
+                              selectInput("ms_group_var", "Grouping variable (primary):", choices = NULL),
+                              selectizeInput("ms_group_levels", "Primary levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included")),
+                              hr(),
+                              selectInput("ms_group_var2", "Grouping variable (secondary):", choices = NULL),
+                              selectizeInput("ms_group_levels2", "Secondary levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included"))
+                            ),
+                            hr(),
+                            checkboxInput("ms_mcar", "Test for MCAR (Little's test)", value = FALSE),
+                            conditionalPanel(
+                              condition = "input.ms_mcar == true",
+                              sidebar_note("Little's MCAR test: <br><br>
+                            H0: data is Missing Completely At Random. 
+                            A significant p-value (< 0.05) suggests 
+                            missingness is NOT random — i.e. MAR or MNAR.")
+                            ),
+                            hr(),
+                            textInput("ms_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("ms_output", height = "70vh"),
+                         conditionalPanel(
+                           condition = "input.ms_mcar == true",
+                           hr(),
+                           h4("Little's MCAR Test Result"),
+                           verbatimTextOutput("ms_mcar_output")
+                         )
                )
              )
     ), # end of tab panel
@@ -932,6 +1001,202 @@ server <- function(input, output, session) {
            "base"    = summary(df),
            "glimpse" = cat(capture.output(tibble::glimpse(df)), sep = "\n"),
            "dfsummary" = summarytools::dfSummary(df))
+  })
+  
+  
+  # ── SERVER MISSINGNESS ─────────────────────────────────────────────────
+  
+  # 1st block: variable + group selectors initialisation
+  observe({
+    df       <- display_data()
+    all_vars <- names(df)
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    # variable selector — default by preset
+    all_vars <- names(df)
+    updateSelectizeInput(session, "ms_vars", choices = all_vars)
+    apply_preset_selection(session, "missingness", "ms_vars", all_vars)
+    
+    # preset dropdown
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("missingness"))
+    choices_p    <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "ms_preset", choices = choices_p)
+    
+    updateSelectInput(session, "ms_group_var",  choices = cat_vars)
+    
+    updateSelectInput(session, "ms_group_var2",
+                      choices  = c("None" = "none", cat_vars),
+                      selected = "none")
+  })
+  
+  # preset observer for missingness
+  observeEvent(input$ms_preset, {
+    req(input$ms_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$ms_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "ms_vars", selected = sel)
+  })
+  
+  # populate primary group levels when group var changes
+  observeEvent(input$ms_group_var, {
+    req(input$ms_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$ms_group_var]]))))
+    updateSelectizeInput(session, "ms_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  # populate secondary group levels when group var2 changes
+  observeEvent(input$ms_group_var2, {
+    req(input$ms_group_var2)
+    if (input$ms_group_var2 == "none") {
+      updateSelectizeInput(session, "ms_group_levels2", choices = character(0), selected = character(0))
+      return()
+    }
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$ms_group_var2]]))))
+    updateSelectizeInput(session, "ms_group_levels2", choices = lvls, selected = lvls)
+  })
+  
+  # 2nd block: vis_dat / vis_miss plot
+  output$ms_output <- renderPlot({
+    df <- display_data()
+    req(input$ms_vars)
+    
+    sel_vars <- intersect(input$ms_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 variable."))
+    
+    default_title <- paste0(
+      if (input$ms_mode == "visdat") "Type-Wise Missingness Overview" else "Missingness Overview",
+      if (input$ms_group_on && !is.null(input$ms_group_var) && input$ms_group_var %in% names(df)) {
+        grp_label <- input$ms_group_var
+        if (!is.null(input$ms_group_var2) && input$ms_group_var2 != "none" &&
+            input$ms_group_var2 %in% names(df) && input$ms_group_var2 != input$ms_group_var)
+          paste0(" | Grouped by ", grp_label, " & ", input$ms_group_var2)
+        else
+          paste0(" | Grouped by ", grp_label)
+      } else ""
+    )
+    plot_title    <- if (nzchar(input$ms_title)) input$ms_title else default_title
+    
+    make_panel <- function(sub_df, subtitle = NULL) {
+      sub_df <- sub_df[, sel_vars, drop = FALSE]
+      p <- if (input$ms_mode == "visdat") visdat::vis_dat(sub_df) else visdat::vis_miss(sub_df)
+      p <- p + ggplot2::theme(
+        axis.text.x     = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 11),
+        axis.text.y     = element_text(size = 11),
+        axis.title      = element_text(size = 13),
+        legend.text     = element_text(size = 11),
+        legend.title    = element_text(size = 12),
+        legend.position = "none"
+      )
+      if (!is.null(subtitle))
+        p <- p + ggplot2::labs(title = subtitle) +
+        ggplot2::theme(plot.title = element_text(size = 13, face = "plain", hjust = 0.5))
+      p
+    }
+    
+    if (input$ms_group_on && !is.null(input$ms_group_var) && input$ms_group_var %in% names(df)) {
+      
+      grp1  <- input$ms_group_var
+      lvls1 <- if (!is.null(input$ms_group_levels) && length(input$ms_group_levels) > 0)
+        input$ms_group_levels else sort(unique(na.omit(as.character(df[[grp1]]))))
+      
+      grp2  <- if (!is.null(input$ms_group_var2) && input$ms_group_var2 != "none" &&
+                   input$ms_group_var2 %in% names(df) && input$ms_group_var2 != grp1)
+        input$ms_group_var2 else NULL
+      lvls2 <- if (!is.null(grp2) && !is.null(input$ms_group_levels2) && length(input$ms_group_levels2) > 0)
+        input$ms_group_levels2 else if (!is.null(grp2))
+          sort(unique(na.omit(as.character(df[[grp2]])))) else NULL
+      
+      # filter df to selected levels
+      df_filtered <- df[as.character(df[[grp1]]) %in% lvls1, , drop = FALSE]
+      if (!is.null(grp2))
+        df_filtered <- df_filtered[as.character(df_filtered[[grp2]]) %in% lvls2, , drop = FALSE]
+      
+      if (!is.null(grp2)) {
+        plots <- list()
+        for (l1 in lvls1) {
+          for (l2 in lvls2) {
+            sub <- df_filtered[as.character(df_filtered[[grp1]]) == l1 &
+                                 as.character(df_filtered[[grp2]]) == l2, , drop = FALSE]
+            plots[[length(plots) + 1]] <- make_panel(sub, paste0(grp1, "=", l1, " & ", grp2, "=", l2))
+          }
+        }
+        ncols <- length(lvls2)
+      } else {
+        plots <- lapply(lvls1, function(l1) {
+          sub <- df_filtered[as.character(df_filtered[[grp1]]) == l1, , drop = FALSE]
+          make_panel(sub, paste0(grp1, " = ", l1))
+        })
+        ncols <- length(lvls1)
+      }
+      
+      combined <- patchwork::wrap_plots(plots, ncol = ncols) +
+        patchwork::plot_layout(guides = "collect")
+      print(combined + patchwork::plot_annotation(
+        title = plot_title,
+        theme = ggplot2::theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5))
+      ))
+      
+    } else {
+      print(make_panel(df) +
+              ggplot2::labs(title = plot_title) +
+              ggplot2::theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)))
+    }
+  })
+  
+  # 3rd block: Little's MCAR test — on selected variables only
+  output$ms_mcar_output <- renderPrint({
+    req(input$ms_mcar)
+    df       <- display_data()
+    sel_vars <- intersect(input$ms_vars, names(df))
+    
+    # apply same level filtering as the plot
+    if (input$ms_group_on && !is.null(input$ms_group_var) && input$ms_group_var %in% names(df)) {
+      lvls1 <- if (!is.null(input$ms_group_levels) && length(input$ms_group_levels) > 0)
+        input$ms_group_levels else sort(unique(na.omit(as.character(df[[input$ms_group_var]]))))
+      df <- df[as.character(df[[input$ms_group_var]]) %in% lvls1, , drop = FALSE]
+      
+      if (!is.null(input$ms_group_var2) && input$ms_group_var2 != "none" &&
+          input$ms_group_var2 %in% names(df) && input$ms_group_var2 != input$ms_group_var) {
+        lvls2 <- if (!is.null(input$ms_group_levels2) && length(input$ms_group_levels2) > 0)
+          input$ms_group_levels2 else sort(unique(na.omit(as.character(df[[input$ms_group_var2]]))))
+        df <- df[as.character(df[[input$ms_group_var2]]) %in% lvls2, , drop = FALSE]
+      }
+    }
+    
+    num_df <- df[, sel_vars, drop = FALSE]
+    num_df <- num_df[, sapply(num_df, is.numeric), drop = FALSE]
+    
+    validate(need(ncol(num_df) >= 2, "Select at least 2 numeric variables for the MCAR test."))
+    
+    has_na <- sapply(num_df, anyNA)
+    validate(need(any(has_na), "No missing values in the selected numeric variables — MCAR test not applicable."))
+    
+    result <- tryCatch(
+      naniar::mcar_test(num_df),
+      error = function(e) paste("Test failed:", conditionMessage(e))
+    )
+    
+    if (is.character(result)) {
+      cat(result, "\n")
+    } else {
+      cat("Little's MCAR Test\n")
+      cat(sprintf("Variables tested     : %d numeric columns\n", ncol(num_df)))
+      cat(sprintf("Observation included : %d rows\n", nrow(num_df)))
+      cat("──────────────────────────────\n")
+      cat(sprintf("Chi-square statistic : %.4f\n", result$statistic))
+      cat(sprintf("Degrees of freedom   : %d\n",   result$df))
+      cat(sprintf("p-value              : %.4f\n",  result$p.value))
+      cat("──────────────────────────────\n")
+      if (result$p.value < 0.05) {
+        cat("Conclusion: Reject H0 — missingness is NOT MCAR (likely MAR or MNAR).\n")
+      } else {
+        cat("Conclusion: Fail to reject H0 — data is consistent with MCAR.\n")
+      }
+    }
   })
   
   
