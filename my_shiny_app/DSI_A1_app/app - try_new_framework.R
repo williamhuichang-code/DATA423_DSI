@@ -358,7 +358,8 @@ VAR_PRESET_META <- tibble::tribble(
   "ggpairs",     1,    1,     1,     0,   0,    1,   1,    1,     0,       1,       0,   0,   0,
   "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
   "missing",     1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       1,   1,   1,
-  "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1
+  "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1,
+  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0
 )
 
 # default select box content per plot
@@ -367,7 +368,8 @@ DEFAULT_PRESET <- list(
   ggpairs = "Sensor 1-10 (excl. 4,8)",
   heatmap = "All Sensors vs Y", 
   missing = "All Variables (raw)",
-  tabplot = "Gapped Sensors (excl. 6 &IG&OP)"
+  tabplot = "Gapped Sensors (excl. 6 &IG&OP)",
+  boxplot = "All Sensors"
 )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -395,6 +397,7 @@ GROUPBY_META <- tibble::tribble(
   "ggpairs",   1,         "NaFlag_S6", NULL,
   "heatmap",   0,         NA,          NULL,
   "missing",   1,         "Temp",      NULL,  # could check with Speed, they give good info
+  "boxplot",   1,         "IdGroup",   NULL
 )
 
 # lookup helper: for groupby default
@@ -639,7 +642,7 @@ ui <- fluidPage(
     tabPanel("Missingness",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Missingness Explorer: <br><br>
+                            sidebar_note("Missingness: <br><br>
                           Visualise missing data patterns across the dataset.
                           Group by a categorical variable to reveal whether 
                           missingness differs across subgroups."),
@@ -700,7 +703,7 @@ ui <- fluidPage(
     tabPanel("Rising Value",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Note: <br><br>
+                            sidebar_note("Rising Value: <br><br>
                                          This rising value chart is useful for examining continuity.
                                          If a variable is truly continuous, the sorted values should increase smoothly; 
                                          visible gaps or steps may therefore signal suspicious patterns in the data. 
@@ -788,12 +791,58 @@ ui <- fluidPage(
     ), # end of tab panel
     
     
+    # ── UI BOXPLOT ────────────────────────────────────────────────────────
+    
+    tabPanel("Boxplot",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Boxplot: <br><br>
+                        Visualise distributions and outliers across numeric variables.
+                        Uses car::Boxplot with automatic outlier labelling by row index.
+                        Group by a categorical variable to compare across levels."),
+                            hr(),
+                            selectizeInput("bx_vars", "Numeric variables to plot:",
+                                           choices  = NULL,
+                                           multiple = TRUE),
+                            hr(),
+                            selectInput("bx_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            radioButtons("bx_transform", "Transform:",
+                                         choices = c("None"        = "none",
+                                                     "Centre"      = "center",
+                                                     "Standardise" = "standardise",
+                                                     "Normalise"   = "normalise"),
+                                         selected = "none"),
+                            hr(),
+                            sliderInput("bx_coef", "IQR multiplier (outlier criterion):",
+                                        min = 0, max = 5, value = 1.5, step = 0.5, width = "100%"),
+                            helpText("1.5 = standard Tukey fences. Higher = fewer outliers flagged."),
+                            hr(),
+                            checkboxInput("bx_group_on", "Group by categorical variable", value = TRUE),
+                            conditionalPanel(
+                              condition = "input.bx_group_on == true",
+                              selectInput("bx_group_var", "Grouping variable:", choices = NULL),
+                              selectizeInput("bx_group_levels", "Levels to include:",
+                                             choices  = NULL,
+                                             multiple = TRUE,
+                                             options  = list(placeholder = "All levels included by default"))
+                            ),
+                            hr(),
+                            textInput("bx_title", "Custom plot title:", placeholder = "Auto-generated if empty")
+               ),
+               mainPanel(width = 9,
+                         plotOutput("bx_output", height = "80vh")
+               )
+             )
+    ), # end of tab panel
+    
+    
     # ── UI GGPAIRS ────────────────────────────────────────────────────────
     
     tabPanel("GGPairs",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Note: <br><br>
+                            sidebar_note("GGPairs: <br><br>
                                          This GGPairs graph provides a quick overview of pairwise relationships, 
                                          correlations, and marginal density distributions across multiple 
                                          variables, allowing potential suspicious relationships, outliers, or 
@@ -1442,6 +1491,143 @@ server <- function(input, output, session) {
       title      = plot_title,
       fontsize   = 14,
       fontsize.title  = 22
+    )
+  })
+  
+  
+  # ── SERVER BOXPLOT ─────────────────────────────────────────────────────
+  
+  # 1st block: variable selector, preset dropdown, group var initialisation
+  observe({
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    
+    updateSelectizeInput(session, "bx_vars", choices = num_vars)
+    apply_preset_selection(session, "boxplot", "bx_vars", num_vars)
+    
+    valid_groups <- Filter(function(v) any(v %in% num_vars), presets_for("boxplot"))
+    choices      <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "bx_preset", choices = choices)
+    
+    apply_groupby_defaults(session, "boxplot", cat_vars, "bx_group_var")
+  })
+  
+  # 2nd block: preset observer
+  observeEvent(input$bx_preset, {
+    req(input$bx_preset != "none")
+    df       <- display_data()
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    sel      <- intersect(VAR_PRESETS[[input$bx_preset]], num_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "bx_vars", selected = sel)
+  })
+  
+  # 3rd block: group level selector
+  observeEvent(input$bx_group_var, {
+    req(input$bx_group_var)
+    df   <- display_data()
+    lvls <- sort(unique(na.omit(as.character(df[[input$bx_group_var]]))))
+    updateSelectizeInput(session, "bx_group_levels", choices = lvls, selected = lvls)
+  })
+  
+  # 4th block: plot output
+  output$bx_output <- renderPlot({
+    req(input$bx_vars)
+    df       <- display_data()
+    sel_vars <- intersect(input$bx_vars, names(df))
+    validate(need(length(sel_vars) >= 1, "Select at least 1 numeric variable."))
+    
+    # apply transform to a local copy only
+    df_plot <- df[, sel_vars, drop = FALSE]
+    if (input$bx_transform != "none") {
+      df_plot[] <- lapply(df_plot, function(y) {
+        switch(input$bx_transform,
+               "center"      = y - mean(y, na.rm = TRUE),
+               "standardise" = as.numeric(scale(y, center = TRUE, scale = TRUE)),
+               "normalise"   = (y - min(y, na.rm = TRUE)) /
+                 (max(y, na.rm = TRUE) - min(y, na.rm = TRUE))
+        )
+      })
+    }
+    
+    # resolve grouping
+    using_group <- isTRUE(input$bx_group_on) &&
+      !is.null(input$bx_group_var) &&
+      input$bx_group_var %in% names(df)
+    
+    if (using_group) {
+      grp  <- input$bx_group_var
+      lvls <- if (!is.null(input$bx_group_levels) && length(input$bx_group_levels) > 0)
+        input$bx_group_levels else sort(unique(na.omit(as.character(df[[grp]]))))
+      df_plot[[grp]] <- df[[grp]]
+      df_plot <- df_plot[as.character(df_plot[[grp]]) %in% lvls, , drop = FALSE]
+      df_plot[[grp]] <- droplevels(as.factor(df_plot[[grp]]))
+    }
+    
+    # build auto title
+    transform_label <- if (input$bx_transform != "none")
+      paste0(" | ", tools::toTitleCase(input$bx_transform)) else ""
+    group_label   <- if (using_group) paste0(" | Grouped by ", input$bx_group_var) else ""
+    default_title <- paste0("Boxplot | IQR ×", input$bx_coef, transform_label, group_label)
+    plot_title    <- if (nzchar(input$bx_title)) input$bx_title else default_title
+    
+    colours <- theme_colours_for(sel_vars)
+    
+    # pivot to long format
+    df_long <- tidyr::pivot_longer(df_plot,
+                                   cols      = all_of(sel_vars),
+                                   names_to  = "Variable",
+                                   values_to = "Value")
+    df_long$Variable <- factor(df_long$Variable, levels = sel_vars)
+    
+    n_vars    <- length(sel_vars)
+    angle_val <- if (n_vars > 8) 45 else 0
+    hjust_val <- if (n_vars > 8) 1  else 0.5
+    
+    p <- if (using_group) {
+      ggplot2::ggplot(df_long,
+                      aes(x = Variable, y = Value, fill = Variable)) +
+        ggplot2::geom_boxplot(
+          coef          = input$bx_coef,
+          outlier.shape = 21,
+          outlier.size  = 1.5,
+          outlier.alpha = 0.5,
+          alpha         = 0.75,
+          colour        = "grey25"
+        ) +
+        ggplot2::facet_wrap(as.formula(paste("~", grp)), scales = "free_y") +
+        ggplot2::scale_fill_manual(values = colours, guide = "none")
+    } else {
+      ggplot2::ggplot(df_long,
+                      aes(x = Variable, y = Value, fill = Variable)) +
+        ggplot2::geom_boxplot(
+          coef          = input$bx_coef,
+          outlier.shape = 21,
+          outlier.size  = 1.5,
+          outlier.alpha = 0.5,
+          alpha         = 0.75,
+          colour        = "grey25"
+        ) +
+        ggplot2::scale_fill_manual(values = colours, guide = "none")
+    }
+    
+    print(
+      p +
+        ggplot2::theme_minimal(base_size = 13) +
+        ggplot2::theme(
+          plot.title         = element_text(size = 24, face = "bold", hjust = 0.5),
+          strip.text         = element_text(size = 18, face = "bold"),
+          panel.grid.major.x = element_blank(),
+          axis.text.x        = element_text(angle = angle_val, hjust = hjust_val,
+                                            size  = if (n_vars > 20) 14 else 18),
+          axis.text.y        = element_text(size = 16),
+          plot.margin        = margin(t = 15)
+        ) +
+        ggplot2::labs(title = plot_title, x = NULL, y = "Value") +
+        ggplot2::theme(
+          axis.title.y = element_text(size = 16, face = "bold")
+        )
     )
   })
   
