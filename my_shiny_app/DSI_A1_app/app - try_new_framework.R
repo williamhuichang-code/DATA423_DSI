@@ -644,10 +644,11 @@ ui <- fluidPage(
     tabPanel("Word Cloud",
              sidebarLayout(
                sidebarPanel(width = 3,
-                            sidebar_note("Col Names & Missingness Cooccurrence & Improper Collecting: <br><br>
+                            sidebar_note("Word Cloud: <br><br>
                                          This word cloud helps identify inconsistencies in variable names 
                                          or categorical values, depending on the selected mode.
-                                         Typical scenarios are like col name cleaning, distinct variable values 
+                                         Typical scenarios are like col name cleaning 
+                                         (should check raw_dataset stage instead), distinct variable values 
                                          and y label overlapping"),
                             hr(),
                             
@@ -1275,18 +1276,17 @@ server <- function(input, output, session) {
   
   # ── SERVER WORD CLOUD ──────────────────────────────────────────────────
   
+  # 1st block: categorical variable selector initialisation
   observe({
     df       <- display_data()
-    req(df)
     cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
     updateSelectInput(session, "wc_var", choices = cat_vars, selected = cat_vars[1])
   })
   
+  # 2nd block: plot output
   output$wc_plot <- renderPlot({
+    df <- display_data()
     
-    df  <- display_data()
-    
-    # add options to check variable names based on user need
     if (isTRUE(input$wc_varnames_mode)) {
       val <- names(df)
     } else {
@@ -1296,15 +1296,13 @@ server <- function(input, output, session) {
     
     val <- val[!is.na(val) & nchar(trimws(val)) > 0]
     
-    # apply case folding on raw values before any splitting
     if (!input$wc_case) val <- tolower(val)
     
     validate(need(length(val) > 0, "No non-missing values to display."))
     
-    # optional splitting logic
     tokens <- switch(input$wc_split_mode,
-                     "none" = val,
-                     "chars" = {
+                     "none"     = val,
+                     "chars"    = {
                        t <- unlist(strsplit(val, ""))
                        t[!grepl("\\s", t)]
                      },
@@ -1327,36 +1325,25 @@ server <- function(input, output, session) {
     freqs <- as.integer(freq_table)
     n     <- length(words)
     
-    # colours
     pal    <- RColorBrewer::brewer.pal(max(3, min(8, n)), input$wc_palette)
     colors <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
     
-    # adaptive normalisation with outlier-aware contrast boost
-    freq_ranks <- rank(-freqs, ties.method = "first")   # 1 = most frequent
-    
-    # detect if top token(s) are genuine outliers vs the rest
-    # outlier = top freq is 3x the median freq
+    freq_ranks <- rank(-freqs, ties.method = "first")
     freq_ratio <- max(freqs) / max(median(freqs), 1)
     
     if (freq_ratio >= 3) {
-      # outlier mode: use sqrt-compressed raw freq → preserves contrast without
-      # letting the top token completely dwarf everyone else
       freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
                                  max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
     } else {
-      # normal mode: pure rank-based (flat distribution, no outliers)
       freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
     }
     
-    # adaptive scale — use outlier ratio to decide canvas scale
-    # high ratio = we WANT a large max_scale so G/D are visually dominant
     n_eff      <- min(n, 30)
     base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
-    # boost max_scale proportionally to outlier strength, cap at 12
     max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1))))
-    min_scale  <- max(0.3, max_scale * 0.15)   # tighter min so rare tokens stay small
-    max_scale <- max_scale * input$wc_scale
-    min_scale <- min_scale * input$wc_scale
+    min_scale  <- max(0.3, max_scale * 0.15)
+    max_scale  <- max_scale * input$wc_scale
+    min_scale  <- min_scale * input$wc_scale
     
     par(mar = c(0, 0, 0, 0), bg = "white")
     
