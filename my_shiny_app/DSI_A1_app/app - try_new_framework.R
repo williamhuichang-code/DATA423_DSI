@@ -632,7 +632,8 @@ ui <- fluidPage(
                                          "),
                ),
                mainPanel(width = 9,
-                         verbatimTextOutput("summary_output")
+                         # verbatimTextOutput("summary_output")
+                         uiOutput("summary_output")
                )
              )
     ), # end of tab panel
@@ -1202,12 +1203,17 @@ server <- function(input, output, session) {
   
   # ── SERVER SUMMARY ─────────────────────────────────────────────────────
   
-  output$summary_output <- renderPrint({
+  output$summary_output <- renderUI({
     df <- display_data()
-    switch(input$summary_style,
-           "base"    = summary(df),
-           "glimpse" = cat(capture.output(tibble::glimpse(df)), sep = "\n"),
-           "dfsummary" = summarytools::dfSummary(df))
+    if (input$summary_style == "base") {
+      tags$pre(paste(capture.output(summary(df)), collapse = "\n"))
+    } else if (input$summary_style == "glimpse") {
+      tags$pre(paste(capture.output(tibble::glimpse(df)), collapse = "\n"))
+    } else if (input$summary_style == "dfsummary") {
+      summarytools::dfSummary(
+        df
+      ) |> print(method = "render")
+    }
   })
   
   
