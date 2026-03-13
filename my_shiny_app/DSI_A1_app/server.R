@@ -132,11 +132,75 @@ server <- function(input, output, session) {
   
   # ── SERVER DATA TABLE ──────────────────────────────────────────────────
   
+  # 1st block: preset dropdown initialisation only
+  observe({
+    df       <- display_data()
+    all_vars <- names(df)
+    
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("dtable"))
+    choices_p    <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "dt_preset", choices = choices_p)
+  })
+  
+  # 2nd block: column choices reset only when dataset stage changes
+  observeEvent(input$dataset_choice, {
+    df       <- display_data()
+    all_vars <- names(df)
+    updateSelectizeInput(session, "dt_cols", choices = all_vars)
+    apply_preset_selection(session, "dtable", "dt_cols", all_vars)
+  })
+  
+  # 3rd block: preset observer
+  observeEvent(input$dt_preset, {
+    req(input$dt_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$dt_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "dt_cols", selected = sel)
+  })
+  
+  # 4th block: table output
   output$data_table <- DT::renderDataTable({
-    df <- head(display_data(), 1000)
-    DT::datatable(df,
-                  caption = paste0(input$dataset_choice,
-                                   " — ", nrow(df), " rows × ", ncol(df), " cols"))
+    
+    df <- head(display_data(), input$dt_row_cap)
+    
+    if (!is.null(input$dt_cols) && length(input$dt_cols) > 0)
+      df <- df[, intersect(input$dt_cols, names(df)), drop = FALSE]
+    
+    tbl_class <- paste(
+      c("display", "nowrap",
+        if (isTRUE(input$dt_compact)) "compact" else "cell-border"),
+      collapse = " "
+    )
+    
+    extensions <- c("Buttons", "ColReorder")
+    freeze_n   <- max(0, as.integer(input$dt_freeze), na.rm = TRUE)
+    if (freeze_n > 0) extensions <- c(extensions, "FixedColumns")
+    
+    opts <- list(
+      pageLength = as.integer(input$dt_page_len),
+      dom        = "Bfrtip",
+      buttons    = c("copy", "csv", "excel", "pdf"),
+      scrollX    = TRUE,
+      autoWidth  = FALSE,
+      colReorder = TRUE
+    )
+    
+    if (freeze_n > 0)
+      opts$fixedColumns <- list(leftColumns = freeze_n)
+    
+    DT::datatable(
+      df,
+      extensions = extensions,
+      filter     = input$dt_filter,
+      selection  = input$dt_selection,
+      rownames   = FALSE,
+      class      = tbl_class,
+      caption    = paste0(input$dataset_choice, " — ",
+                          nrow(df), " rows × ", ncol(df), " cols"),
+      options    = opts
+    )
   })
   
   
@@ -530,7 +594,7 @@ server <- function(input, output, session) {
                       tickfont = list(size = 18)),
         yaxis  = list(title    = list(text = "<b>Value</b>", font = list(size = 20)),
                       tickfont = list(size = 18))
-        )
+      )
   })
   
   
@@ -1369,8 +1433,3 @@ server <- function(input, output, session) {
   
   
 } # end server
-
-
-
-
-

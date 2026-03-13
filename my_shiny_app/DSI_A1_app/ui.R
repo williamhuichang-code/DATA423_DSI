@@ -32,7 +32,7 @@ ui <- fluidPage(
              "DATA423-26S1 Assignment 1 (EDA with Shiny)",
              br(),
              "William Hui Chang (69051925)"
-             )
+           )
     ),
     
     # passphrase + lock toggle
@@ -55,8 +55,49 @@ ui <- fluidPage(
   tabsetPanel(
     
     # ── UI Data Table ─────────────────────────────────────────────────────
+    tabPanel("Data Table",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Data Table: <br><br>
+                                         Interactive table with filtering, export, and display controls."),
+                            hr(),
+                            # column to show
+                            selectizeInput("dt_cols", "Columns to show:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "All columns shown by default")),
+                            selectInput("dt_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            # row count cap
+                            sliderInput("dt_row_cap", "Observations (export ignores this cap):",
+                                        min = 0, max = nrow(eda_dataset), value = 360, step = 50, width = "100%"),
+                            # obs per page
+                            selectInput("dt_page_len", "Observations per page:",
+                                        choices  = c(10, 20, 25, 50, 100, 200),
+                                        selected = 25),
+                            # compact style
+                            checkboxInput("dt_compact", "Compact (dense) style", value = TRUE),
+                            hr(),
+                            # variable value filter
+                            radioButtons("dt_filter", "Column filters:",
+                                         choices  = c("None" = "none", "Top" = "top", "Bottom" = "bottom"),
+                                         selected = "none",
+                                         inline   = TRUE),
+                            # freeze first N columns
+                            numericInput("dt_freeze", "Freeze left N columns:", value = 0, min = 0, max = 10),
+                            hr(),
+                            # instance selection
+                            radioButtons("dt_selection", "Instance selection:",
+                                         choices  = c("None" = "none", "Single" = "single", "Multiple" = "multiple"),
+                                         selected = "single",
+                                         inline   = TRUE)
+               ),
+               mainPanel(width = 9,
+                         DT::dataTableOutput("data_table")
+               )
+             )
+    ),  # end of tab panel
     
-    tabPanel("Data Table",   DT::dataTableOutput("data_table")),  # end of tab panel
     
     # ── UI SUMMARY ────────────────────────────────────────────────────────
     
@@ -66,7 +107,6 @@ ui <- fluidPage(
                             sidebar_note("Data Summary: <br><br>
                                          Can select a style to inspect the dataset structure."),
                             hr(),
-                            
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
@@ -133,19 +173,15 @@ ui <- fluidPage(
                                          (should check raw_dataset stage instead), distinct variable values 
                                          and y label overlapping"),
                             hr(),
-                            
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
                             hr(),
-                            
                             conditionalPanel(
                               condition = "input.wc_varnames_mode == false",
                               selectInput("wc_var", "Categorical variable:", choices = NULL)
                             ),
                             hr(),
-                            
                             checkboxInput("wc_case", "Case sensitive", value = TRUE),
                             hr(),
-                            
                             radioButtons("wc_split_mode", "Token split mode:",
                                          choices = c(
                                            "None (whole value)"   = "none",
@@ -154,18 +190,15 @@ ui <- fluidPage(
                                          ),
                                          selected = "none"),
                             hr(),
-                            
                             sliderInput("wc_max_words", "Max words to show:",
                                         min = 10, max = 500, value = 360, step = 10),
                             sliderInput("wc_min_freq", "Min frequency:",
                                         min = 1, max = 50, value = 1, step = 1),
                             helpText("Font size is proportional to frequency."),
                             hr(),
-                            
                             sliderInput("wc_scale", "Plot scale:",
                                         min = 0.3, max = 3.0, value = 1.0, step = 0.1),
                             hr(),
-                            
                             selectInput("wc_palette", "Colour palette:",
                                         choices = c("Dark2", "Set1", "Set2", "Set3",
                                                     "Paired", "Accent", "Spectral"),
@@ -593,9 +626,3 @@ ui <- fluidPage(
     
   ) # end tabsetPanel
 )   # end fluidPage
-
-
-
-
-
-

@@ -8,7 +8,6 @@
 library(shiny)
 library(shinyAce)  # R console ace editor
 library(tidyverse)
-library(dplyr)
 library(plotly)
 library(seriation)
 library(tabplot)
@@ -16,13 +15,16 @@ library(visdat)
 library(DT)
 library(grid)
 
-library(vcd)
-library(paletteer) # global colour theme
-library(colorspace)
-library(shinyjs)
-library(tidytext)
-library(wordcloud2)
-library(pls)
+# library(dplyr)
+# library(ggplot2)
+# library(vcd)
+# library(dbscan)
+# library(paletteer) # global colour theme
+# library(colorspace)
+# library(shinyjs)
+# library(tidytext)
+# library(wordcloud2)
+# library(pls)
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
@@ -308,8 +310,8 @@ enriched_dataset <- eda_dataset %>%
 # trim down to only the columns a model needs
 model_dataset <- enriched_dataset %>%
   
-  dplyr::select(
-    -any_of(c("ID", "Date"))        # example drops
+  select(
+    -any_of(c("ID", "Date")),       # example drops
     # -matches("^RawSensor\\d+$"),  # drop Sensor1, Sensor2, ... Sensor30
     # -matches("^Normalised"),      # drop NormalisedSG1, NormalisedSG2, NormalisedSG3
   )
@@ -342,7 +344,7 @@ VAR_PRESETS <- list(
   "Gapped Sensors vs Y"  = c("Y", paste0("Sensor", c(4,6,8,11,16,22,24,28))),
   "Gapped Sensors (excl. 6)"  = paste0("Sensor", c(4,8,11,16,22,24,28)),
   "Gapped Sensors (excl. 6 &IG&OP)"  = c("IdGroup", "Operator", 
-                                          paste0("Sensor", c(4,8,11,16,22,24,28))),
+                                         paste0("Sensor", c(4,8,11,16,22,24,28))),
   "Sensor 1-10 (excl. 4,8)"  = paste0("Sensor", (1:10)[!(1:10 %in% c(4, 8))]),
   "All Variables (raw)" = names(ds_typed),
   "All Categorical (raw)"  = names(ds_typed)[sapply(ds_typed, is.factor)],
@@ -357,7 +359,8 @@ VAR_PRESET_META <- tibble::tribble(
   "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
   "missing",     1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       1,   1,   1,
   "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1,
-  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0
+  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
+  "dtable",      1,    1,     1,     1,   1,    1,   1,    1,     1,       1,       1,   1,   1
 )
 
 # default select box content per plot
@@ -367,7 +370,8 @@ DEFAULT_PRESET <- list(
   heatmap = "All Sensors vs Y", 
   missing = "All Variables (raw)",
   tabplot = "Gapped Sensors (excl. 6 &IG&OP)",
-  boxplot = "All Sensors"
+  boxplot = "All Sensors",
+  dtable  = "All Variables (raw)"
 )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -505,6 +509,3 @@ sidebar_note <- function(text) {
     HTML(paste("&nbsp;", text))
   )
 }
-
-
-

@@ -359,7 +359,8 @@ VAR_PRESET_META <- tibble::tribble(
   "heatmap",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
   "missing",     1,    1,     1,     1,   1,    1,   1,    1,     0,       0,       1,   1,   1,
   "tabplot",     1,    1,     1,     1,   1,    1,   1,    1,     1,       0,       1,   1,   1,
-  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0
+  "boxplot",     1,    1,     1,     1,   1,    1,   1,    1,     0,       1,       0,   0,   0,
+  "dtable",      1,    1,     1,     1,   1,    1,   1,    1,     1,       1,       1,   1,   1
 )
 
 # default select box content per plot
@@ -369,7 +370,8 @@ DEFAULT_PRESET <- list(
   heatmap = "All Sensors vs Y", 
   missing = "All Variables (raw)",
   tabplot = "Gapped Sensors (excl. 6 &IG&OP)",
-  boxplot = "All Sensors"
+  boxplot = "All Sensors",
+  dtable  = "All Variables (raw)"
 )
 
 # lookup helper: returns named VAR_PRESETS list valid for a given plot
@@ -577,44 +579,38 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(width = 3,
                             sidebar_note("Data Table: <br><br>
-                   Interactive table with filtering, export, and display controls."),
+                                         Interactive table with filtering, export, and display controls."),
                             hr(),
-                            
-                            # ·· Row display ··················································
-                            selectInput("dt_page_len", "Rows per page:",
-                                        choices  = c(10, 20, 30, 50, 100, 200),
-                                        selected = 20),
-                            
-                            # ·· Column filter ················································
+                            # column to show
+                            selectizeInput("dt_cols", "Columns to show:",
+                                           choices  = NULL,
+                                           multiple = TRUE,
+                                           options  = list(placeholder = "All columns shown by default")),
+                            selectInput("dt_preset", "Quick variable preset:", choices = NULL),
+                            hr(),
+                            # row count cap
+                            sliderInput("dt_row_cap", "Observations (export ignores this cap):",
+                                        min = 0, max = nrow(eda_dataset), value = 360, step = 50, width = "100%"),
+                            # obs per page
+                            selectInput("dt_page_len", "Observations per page:",
+                                        choices  = c(10, 20, 25, 50, 100, 200),
+                                        selected = 25),
+                            # compact style
+                            checkboxInput("dt_compact", "Compact (dense) style", value = TRUE),
+                            hr(),
+                            # variable value filter
                             radioButtons("dt_filter", "Column filters:",
                                          choices  = c("None" = "none", "Top" = "top", "Bottom" = "bottom"),
                                          selected = "none",
                                          inline   = TRUE),
-                            
-                            hr(),
-                            
-                            # ·· Row selection ················································
-                            radioButtons("dt_selection", "Row selection:",
-                                         choices  = c("None" = "none", "Single" = "single", "Multiple" = "multiple"),
-                                         selected = "none",
-                                         inline   = TRUE),
-                            
-                            hr(),
-                            
-                            # ·· Compact style ················································
-                            checkboxInput("dt_compact", "Compact (dense) style", value = FALSE),
-                            
-                            # ·· Freeze first N columns ·······································
+                            # freeze first N columns
                             numericInput("dt_freeze", "Freeze left N columns:", value = 0, min = 0, max = 10),
-                            
                             hr(),
-                            
-                            # ·· Row count cap ················································
-                            sliderInput("dt_row_cap", "Max rows to display:",
-                                        min = 1, max = nrow(eda_dataset), value = 360, step = 100, width = "100%"),
-                            
-                            helpText("Capped for performance. Full export ignores this cap.")
-                            
+                            # instance selection
+                            radioButtons("dt_selection", "Instance selection:",
+                                         choices  = c("None" = "none", "Single" = "single", "Multiple" = "multiple"),
+                                         selected = "single",
+                                         inline   = TRUE)
                ),
                mainPanel(width = 9,
                          DT::dataTableOutput("data_table")
@@ -631,7 +627,6 @@ ui <- fluidPage(
                             sidebar_note("Data Summary: <br><br>
                                          Can select a style to inspect the dataset structure."),
                             hr(),
-                            
                             radioButtons("summary_style", "Style:",
                                          choices = c("base R"  = "base",
                                                      "glimpse" = "glimpse",
@@ -698,19 +693,15 @@ ui <- fluidPage(
                                          (should check raw_dataset stage instead), distinct variable values 
                                          and y label overlapping"),
                             hr(),
-                            
                             checkboxInput("wc_varnames_mode", "Check variable names instead", value = FALSE),
                             hr(),
-                            
                             conditionalPanel(
                               condition = "input.wc_varnames_mode == false",
                               selectInput("wc_var", "Categorical variable:", choices = NULL)
                             ),
                             hr(),
-                            
                             checkboxInput("wc_case", "Case sensitive", value = TRUE),
                             hr(),
-                            
                             radioButtons("wc_split_mode", "Token split mode:",
                                          choices = c(
                                            "None (whole value)"   = "none",
@@ -719,18 +710,15 @@ ui <- fluidPage(
                                          ),
                                          selected = "none"),
                             hr(),
-                            
                             sliderInput("wc_max_words", "Max words to show:",
                                         min = 10, max = 500, value = 360, step = 10),
                             sliderInput("wc_min_freq", "Min frequency:",
                                         min = 1, max = 50, value = 1, step = 1),
                             helpText("Font size is proportional to frequency."),
                             hr(),
-                            
                             sliderInput("wc_scale", "Plot scale:",
                                         min = 0.3, max = 3.0, value = 1.0, step = 0.1),
                             hr(),
-                            
                             selectInput("wc_palette", "Colour palette:",
                                         choices = c("Dark2", "Set1", "Set2", "Set3",
                                                     "Paired", "Accent", "Spectral"),
@@ -1297,47 +1285,63 @@ server <- function(input, output, session) {
   
   # ── SERVER DATA TABLE ──────────────────────────────────────────────────
   
+  # 1st block: preset dropdown initialisation only
+  observe({
+    df       <- display_data()
+    all_vars <- names(df)
+    
+    valid_groups <- Filter(function(v) any(v %in% all_vars), presets_for("dtable"))
+    choices_p    <- c("None" = "none", setNames(names(valid_groups), names(valid_groups)))
+    updateSelectInput(session, "dt_preset", choices = choices_p)
+  })
+  
+  # 2nd block: column choices reset only when dataset stage changes
+  observeEvent(input$dataset_choice, {
+    df       <- display_data()
+    all_vars <- names(df)
+    updateSelectizeInput(session, "dt_cols", choices = all_vars)
+    apply_preset_selection(session, "dtable", "dt_cols", all_vars)
+  })
+  
+  # 3rd block: preset observer
+  observeEvent(input$dt_preset, {
+    req(input$dt_preset != "none")
+    df       <- display_data()
+    all_vars <- names(df)
+    sel      <- intersect(VAR_PRESETS[[input$dt_preset]], all_vars)
+    if (length(sel) > 0)
+      updateSelectizeInput(session, "dt_cols", selected = sel)
+  })
+  
+  # 4th block: table output
   output$data_table <- DT::renderDataTable({
     
     df <- head(display_data(), input$dt_row_cap)
     
-    # ·· build extensions list ··········································
-    extensions <- c()
-    if (isTRUE(TRUE)) extensions <- c(extensions, "ColReorder", "Buttons")
-    else if (isTRUE(TRUE) || isTRUE(TRUE)) extensions <- c(extensions, "Buttons")
-    if (input$dt_freeze > 0) extensions <- c(extensions, "FixedColumns")
-    extensions <- unique(extensions)
+    if (!is.null(input$dt_cols) && length(input$dt_cols) > 0)
+      df <- df[, intersect(input$dt_cols, names(df)), drop = FALSE]
     
-    # ·· build buttons list ·············································
-    btn_list <- c()
-    if (isTRUE(TRUE))   btn_list <- c(btn_list, "copy")
-    if (isTRUE(TRUE)) btn_list <- c(btn_list, "csv", "excel", "pdf")
-    if (isTRUE(TRUE)) btn_list <- c(btn_list, "colvis")
-    
-    # ·· build dom string ···············································
-    #   B = buttons, f = search box, l = length, r = processing, t = table, i = info, p = pagination
-    dom_str <- if (length(btn_list) > 0) "Bfrtip" else "frtip"
-    
-    # ·· build class string ·············································
     tbl_class <- paste(
-      "display nowrap",
-      if (isTRUE(FALSE)) "stripe" else "",
-      if (isTRUE(input$dt_compact)) "compact" else "cell-border"
+      c("display", "nowrap",
+        if (isTRUE(input$dt_compact)) "compact" else "cell-border"),
+      collapse = " "
     )
     
-    # ·· build options ··················································
+    extensions <- c("Buttons", "ColReorder")
+    freeze_n   <- max(0, as.integer(input$dt_freeze), na.rm = TRUE)
+    if (freeze_n > 0) extensions <- c(extensions, "FixedColumns")
+    
     opts <- list(
-      pageLength  = as.integer(input$dt_page_len),
-      dom         = dom_str,
-      buttons     = btn_list,
-      scrollX     = TRUE,
-      autoWidth   = TRUE,
-      colReorder  = isTRUE(TRUE)
+      pageLength = as.integer(input$dt_page_len),
+      dom        = "Bfrtip",
+      buttons    = c("copy", "csv", "excel", "pdf"),
+      scrollX    = TRUE,
+      autoWidth  = FALSE,
+      colReorder = TRUE
     )
     
-    if (input$dt_freeze > 0) {
-      opts$fixedColumns <- list(leftColumns = input$dt_freeze)
-    }
+    if (freeze_n > 0)
+      opts$fixedColumns <- list(leftColumns = freeze_n)
     
     DT::datatable(
       df,
