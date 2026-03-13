@@ -573,8 +573,55 @@ ui <- fluidPage(
   tabsetPanel(
     
     # ── UI Data Table ─────────────────────────────────────────────────────
+    tabPanel("Data Table",
+             sidebarLayout(
+               sidebarPanel(width = 3,
+                            sidebar_note("Data Table: <br><br>
+                   Interactive table with filtering, export, and display controls."),
+                            hr(),
+                            
+                            # ·· Row display ··················································
+                            selectInput("dt_page_len", "Rows per page:",
+                                        choices  = c(10, 20, 30, 50, 100, 200),
+                                        selected = 20),
+                            
+                            # ·· Column filter ················································
+                            radioButtons("dt_filter", "Column filters:",
+                                         choices  = c("None" = "none", "Top" = "top", "Bottom" = "bottom"),
+                                         selected = "none",
+                                         inline   = TRUE),
+                            
+                            hr(),
+                            
+                            # ·· Row selection ················································
+                            radioButtons("dt_selection", "Row selection:",
+                                         choices  = c("None" = "none", "Single" = "single", "Multiple" = "multiple"),
+                                         selected = "none",
+                                         inline   = TRUE),
+                            
+                            hr(),
+                            
+                            # ·· Compact style ················································
+                            checkboxInput("dt_compact", "Compact (dense) style", value = FALSE),
+                            
+                            # ·· Freeze first N columns ·······································
+                            numericInput("dt_freeze", "Freeze left N columns:", value = 0, min = 0, max = 10),
+                            
+                            hr(),
+                            
+                            # ·· Row count cap ················································
+                            sliderInput("dt_row_cap", "Max rows to display:",
+                                        min = 1, max = nrow(eda_dataset), value = 360, step = 100, width = "100%"),
+                            
+                            helpText("Capped for performance. Full export ignores this cap.")
+                            
+               ),
+               mainPanel(width = 9,
+                         DT::dataTableOutput("data_table")
+               )
+             )
+    ),  # end of tab panel
     
-    tabPanel("Data Table",   DT::dataTableOutput("data_table")),  # end of tab panel
     
     # ── UI SUMMARY ────────────────────────────────────────────────────────
     
@@ -1251,10 +1298,58 @@ server <- function(input, output, session) {
   # ── SERVER DATA TABLE ──────────────────────────────────────────────────
   
   output$data_table <- DT::renderDataTable({
-    df <- head(display_data(), 1000)
-    DT::datatable(df,
-                  caption = paste0(input$dataset_choice,
-                                   " — ", nrow(df), " rows × ", ncol(df), " cols"))
+    
+    df <- head(display_data(), input$dt_row_cap)
+    
+    # ·· build extensions list ··········································
+    extensions <- c()
+    if (isTRUE(TRUE)) extensions <- c(extensions, "ColReorder", "Buttons")
+    else if (isTRUE(TRUE) || isTRUE(TRUE)) extensions <- c(extensions, "Buttons")
+    if (input$dt_freeze > 0) extensions <- c(extensions, "FixedColumns")
+    extensions <- unique(extensions)
+    
+    # ·· build buttons list ·············································
+    btn_list <- c()
+    if (isTRUE(TRUE))   btn_list <- c(btn_list, "copy")
+    if (isTRUE(TRUE)) btn_list <- c(btn_list, "csv", "excel", "pdf")
+    if (isTRUE(TRUE)) btn_list <- c(btn_list, "colvis")
+    
+    # ·· build dom string ···············································
+    #   B = buttons, f = search box, l = length, r = processing, t = table, i = info, p = pagination
+    dom_str <- if (length(btn_list) > 0) "Bfrtip" else "frtip"
+    
+    # ·· build class string ·············································
+    tbl_class <- paste(
+      "display nowrap",
+      if (isTRUE(FALSE)) "stripe" else "",
+      if (isTRUE(input$dt_compact)) "compact" else "cell-border"
+    )
+    
+    # ·· build options ··················································
+    opts <- list(
+      pageLength  = as.integer(input$dt_page_len),
+      dom         = dom_str,
+      buttons     = btn_list,
+      scrollX     = TRUE,
+      autoWidth   = TRUE,
+      colReorder  = isTRUE(TRUE)
+    )
+    
+    if (input$dt_freeze > 0) {
+      opts$fixedColumns <- list(leftColumns = input$dt_freeze)
+    }
+    
+    DT::datatable(
+      df,
+      extensions = extensions,
+      filter     = input$dt_filter,
+      selection  = input$dt_selection,
+      rownames   = FALSE,
+      class      = tbl_class,
+      caption    = paste0(input$dataset_choice, " — ",
+                          nrow(df), " rows × ", ncol(df), " cols"),
+      options    = opts
+    )
   })
   
   
