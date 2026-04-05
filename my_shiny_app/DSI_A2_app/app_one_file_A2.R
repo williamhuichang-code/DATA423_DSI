@@ -247,23 +247,22 @@ plot_rising_value <- function(df, vars, transform, omit_na, lwd, lty) {
 }
 
 # plot correlation corrgram (reusable for miss cor and variable heatmap)
-plot_corrgram <- function(cor_mat, order, title = NULL) {
-  
+plot_corrgram <- function(cor_mat, order, title = NULL, label_cex = 0.9) {
   par(oma = c(0, 0, 3, 0))
-  
   corrgram::corrgram(
     cor_mat,
-    order = if (order == "FALSE") FALSE else order,
-    abs   = FALSE
+    order      = if (order == "FALSE") FALSE else order,
+    abs        = FALSE,
+    cex.labels = label_cex,
+    font.labels = 2        # ← 2 = bold
   )
-  
   if (!is.null(title)) {
     title(main = title, cex.main = 1.8, font.main = 2, outer = TRUE, line = 1)
   }
 }
 
 # plot missingness correlation
-plot_miss_cor <- function(df, order, abs_cor, method = "pearson") {
+plot_miss_cor <- function(df, order, abs_cor, method = "pearson", label_cex = 0.9) {
   
   m  <- is.na(df) + 0
   cm <- colMeans(m)
@@ -284,7 +283,8 @@ plot_miss_cor <- function(df, order, abs_cor, method = "pearson") {
     cor_mat = cor_m,
     order   = order,
     title   = paste0("Variable Missingness Correlation | ", tools::toTitleCase(method),
-                     if (abs_cor) " | Absolute" else "")
+                     if (abs_cor) " | Absolute" else ""),
+    label_cex = label_cex
   )
 }
 
@@ -520,7 +520,7 @@ plot_mosaic <- function(df, x_var, y_var, z_var, shade, rot_labels, abbreviate, 
 }
 
 # plot ggpairs graph
-plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, cardinality_threshold = 15) {
+plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, fontsize = 14, cardinality_threshold = 15) {
   
   sel <- intersect(vars, names(df))
   
@@ -561,12 +561,14 @@ plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, cardinalit
                      discrete   = GGally::wrap("barDiag", alpha = 0.5)),
       legend  = 1
     ) +
-      theme_minimal(base_size = 13) +
-      theme(plot.title  = element_text(size = 20, face = "bold", hjust = 0.5),
-            strip.text  = element_text(size = 14, face = "bold"),
-            axis.text   = element_text(size = 14),
+      theme_minimal(base_size = fontsize) +
+      theme(plot.title   = element_text(size = fontsize + 6, face = "bold", hjust = 0.5),
+            strip.text.x = element_text(size = fontsize, face = "bold"),
+            strip.text.y = element_text(size = fontsize, face = "bold", angle = 0),
+            axis.text.x  = element_text(size = fontsize, angle = 90, vjust = 0.5, hjust = 1),
+            axis.text.y  = element_text(size = fontsize),
             legend.title = element_text(face = "bold"),
-            legend.text  = element_text(size = 12)) +
+            legend.text  = element_text(size = fontsize - 2)) +
       labs(title = paste0("GGPairs | Grouped by ", group_var))
     
   } else {
@@ -577,16 +579,20 @@ plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, cardinalit
       lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
       diag  = list(continuous = GGally::wrap("densityDiag"))
     ) +
-      theme_minimal(base_size = 13) +
-      theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
-            strip.text = element_text(size = 14, face = "bold"),
-            axis.text  = element_text(size = 14)) +
+      theme_minimal(base_size = fontsize) +
+      theme(plot.title   = element_text(size = fontsize + 6, face = "bold", hjust = 0.5),
+            strip.text.x = element_text(size = fontsize, face = "bold"),
+            strip.text.y = element_text(size = fontsize, face = "bold", angle = 0),
+            axis.text.x  = element_text(size = fontsize, angle = 90, vjust = 0.5, hjust = 1),
+            axis.text.y  = element_text(size = fontsize),
+            legend.title = element_text(face = "bold"),
+            legend.text  = element_text(size = fontsize - 2)) +
       labs(title = "GGPairs")
   }
 }
 
 # plot variable correlation heatmap
-plot_var_cor <- function(df, vars, method, order, abs_cor) {
+plot_var_cor <- function(df, vars, method, order, abs_cor, label_cex = 0.9) {
   
   num_vars <- vars[sapply(vars, function(v) is.numeric(df[[v]]))]
   
@@ -606,7 +612,8 @@ plot_var_cor <- function(df, vars, method, order, abs_cor) {
     cor_mat = cor_mat,
     order   = order,
     title   = paste0("Variable Correlation Heatmap | ", tools::toTitleCase(method),
-                     if (abs_cor) " | Absolute" else "")
+                     if (abs_cor) " | Absolute" else ""),
+    label_cex = label_cex
   )
 }
 
@@ -1012,7 +1019,7 @@ ui <- fluidPage(
                
                # ── UI MISS COR ───────────────────────────────────────────────────────────────
                
-               tabPanel("Correlation",
+               tabPanel("Heatmap",
                         sidebarLayout(
                           sidebarPanel(width = 3,
                                        sidebar_note("Correlation: <br><br>
@@ -1042,7 +1049,10 @@ ui <- fluidPage(
                                                                 "Original"           = "FALSE"),
                                                    selected = "OLO"),
                                        hr(),
-                                       checkboxInput("cor_abs", "Absolute correlation", value = TRUE)
+                                       checkboxInput("cor_abs", "Absolute correlation", value = TRUE),
+                                       hr(),
+                                       sliderInput("cor_label_size", "Diagonal label size:",
+                                                   min = 0.3, max = 2.5, value = 1.5, step = 0.1, width = "100%")
                           ),
                           mainPanel(width = 9,
                                     plotOutput("cor_output", height = "85vh")
@@ -1302,9 +1312,11 @@ ui <- fluidPage(
                         sidebarLayout(
                           sidebarPanel(width = 3,
                                        sidebar_note("GGPairs: <br><br>
-                        Pairwise relationships, correlations, and marginal distributions
-                        across multiple variables. Useful for detecting suspicious
-                        relationships and structural irregularities early."),
+                                       Pairwise relationships, correlations, and marginal distributions
+                                       across multiple variables. Useful for detecting suspicious
+                                       relationships and structural irregularities early.
+                                       <b>Tip:</b> Set the Outcome role in Data Roles tab first — 
+                                       it will auto-select as the grouping variable here."),
                                        hr(),
                                        selectizeInput("gg_vars", "Variables to plot:",
                                                       choices  = NULL,
@@ -1319,6 +1331,9 @@ ui <- fluidPage(
                                                         multiple = TRUE,
                                                         options  = list(placeholder = "All levels included by default"))
                                        ),
+                                       hr(),
+                                       sliderInput("gg_fontsize", "Label font size:",
+                                                   min = 6, max = 24, value = 10, step = 1, width = "100%"),
                                        hr(),
                                        actionButton("gg_run", "Plot", icon = icon("play"), width = "100%"),
                                        helpText("Large selections may be slow.")
@@ -1995,13 +2010,14 @@ server <- function(input, output, session) {
   # ── SERVER EDA COR HEATMAP ────────────────────────────────────────────────────
   
   observe({
-    df       <- get_data()
-    num_cols <- names(df)[sapply(df, is.numeric)]
+    df          <- get_data()
+    roles       <- get_roles()
+    role_cols   <- names(roles[roles %in% c("Predictor", "Outcome")])
+    role_cols   <- intersect(role_cols, names(df))
     
-    # var cor needs numeric only; miss cor can use all cols — default to all
     updateSelectizeInput(session, "cor_vars",
                          choices  = names(df),
-                         selected = names(df),
+                         selected = role_cols,
                          server   = TRUE)
   })
   
@@ -2012,9 +2028,11 @@ server <- function(input, output, session) {
     df  <- df[, sel, drop = FALSE]
     
     if (input$cor_view == "misscor") {
-      plot_miss_cor(df, input$cor_order, isTRUE(input$cor_abs), input$cor_method)
+      plot_miss_cor(df, input$cor_order, isTRUE(input$cor_abs), 
+                    input$cor_method, label_cex = input$cor_label_size)
     } else {
-      plot_var_cor(df, names(df), input$cor_method, input$cor_order, isTRUE(input$cor_abs))
+      plot_var_cor(df, names(df), input$cor_method, input$cor_order, 
+                   isTRUE(input$cor_abs), label_cex = input$cor_label_size)
     }
   })
   
@@ -2350,14 +2368,24 @@ server <- function(input, output, session) {
   # ── SERVER EDA GGPAIRS ────────────────────────────────────────────────────────
   
   observe({
-    df       <- get_data()
-    all_cols <- names(df)
-    cat_cols <- names(df)[sapply(df, is.factor)]
+    df          <- get_data()
+    roles       <- get_roles()
+    outcome_col <- get_outcome_col()
+    
+    # filter to only Predictor + Outcome roles
+    role_cols <- names(roles[roles %in% c("Predictor", "Outcome")])
+    role_cols <- intersect(role_cols, names(df))  # guard against dropped cols
+    
+    cat_cols  <- names(df)[sapply(df, is.factor)]
+    
     updateSelectizeInput(session, "gg_vars",
-                         choices  = all_cols,
-                         selected = all_cols[1:min(5, length(all_cols))],
+                         choices  = role_cols,
+                         selected = role_cols,   # select ALL predictor+outcome by default
                          server   = TRUE)
-    updateSelectInput(session, "gg_group_var", choices = cat_cols)
+    
+    updateSelectInput(session, "gg_group_var",
+                      choices  = cat_cols,
+                      selected = if (length(outcome_col) > 0) outcome_col[1] else cat_cols[1])
   })
   
   observeEvent(input$gg_group_var, {
@@ -2376,7 +2404,8 @@ server <- function(input, output, session) {
         vars         = input$gg_vars,
         group_on     = isTRUE(input$gg_group_on),
         group_var    = input$gg_group_var,
-        group_levels = input$gg_group_levels
+        group_levels = input$gg_group_levels,
+        fontsize     = input$gg_fontsize
       )
     })
   })
