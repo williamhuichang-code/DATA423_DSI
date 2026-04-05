@@ -671,9 +671,13 @@ apply_not_applicable_strategy <- function(df, rules) {
     if (is.null(rule$cond_col)   || rule$cond_col   == "(none)") next
     if (is.null(rule$cond_val)   || rule$cond_val   == "")       next
     
-    mask <- !is.na(df[[rule$cond_col]]) &
-      as.character(df[[rule$cond_col]]) == rule$cond_val &
-      is.na(df[[rule$target_col]])
+    mask <- if (rule$cond_val == "NA") {
+      is.na(df[[rule$cond_col]]) & is.na(df[[rule$target_col]])
+    } else {
+      !is.na(df[[rule$cond_col]]) &
+        as.character(df[[rule$cond_col]]) == rule$cond_val &
+        is.na(df[[rule$target_col]])
+    }
     
     impute_val <- switch(rule$impute,
                          "not_applicable" = "Not Applicable",
@@ -1426,10 +1430,22 @@ ui <- fluidPage(
                           mainPanel(width = 9,
                                     h5("Rule 1"),
                                     fluidRow(
-                                      column(3, selectInput("strat_na_target_1",  "Target column (has NAs):", choices = NULL)),
-                                      column(3, selectInput("strat_na_cond_col_1", "When column:", choices = NULL)),
-                                      column(3, selectInput("strat_na_cond_val_1", "Equals:", choices = NULL)),
+                                      column(3, selectInput("strat_na_target_1",   "Target column (has NAs):", choices = NULL)),
+                                      column(3, selectInput("strat_na_cond_col_1", "When column:",             choices = NULL)),
+                                      column(3, selectInput("strat_na_cond_val_1", "Equals:",                  choices = NULL)),
                                       column(3, selectInput("strat_na_impute_1",   "Impute with:",
+                                                            choices = c("Not Applicable" = "not_applicable",
+                                                                        "0"              = "zero",
+                                                                        "Mean"           = "mean",
+                                                                        "Median"         = "median")))
+                                    ),
+                                    hr(),
+                                    h5("Rule 2"),
+                                    fluidRow(
+                                      column(3, selectInput("strat_na_target_2",   "Target column (has NAs):", choices = NULL)),
+                                      column(3, selectInput("strat_na_cond_col_2", "When column:",             choices = NULL)),
+                                      column(3, selectInput("strat_na_cond_val_2", "Equals:",                  choices = NULL)),
+                                      column(3, selectInput("strat_na_impute_2",   "Impute with:",
                                                             choices = c("Not Applicable" = "not_applicable",
                                                                         "0"              = "zero",
                                                                         "Mean"           = "mean",
@@ -2463,35 +2479,38 @@ server <- function(input, output, session) {
     cols <- c("(none)", names(df))
     updateSelectInput(session, "strat_na_target_1",   choices = cols)
     updateSelectInput(session, "strat_na_cond_col_1", choices = cols)
-  })
-  
-  observeEvent(input$strat_na_cond_col_1, {
-    col <- input$strat_na_cond_col_1
-    req(col != "(none)")
-    vals <- sort(unique(as.character(get_raw()[[col]])))
-    vals <- vals[!is.na(vals)]
-    updateSelectInput(session, "strat_na_cond_val_1", choices = c("", vals))
+    updateSelectInput(session, "strat_na_target_2",   choices = cols)
+    updateSelectInput(session, "strat_na_cond_col_2", choices = cols)
   })
   
   # populate condition value dropdown when condition column changes
-  lapply(1:3, function(i) {
+  lapply(1:2, function(i) {
     observeEvent(input[[paste0("strat_na_cond_col_", i)]], {
       col <- input[[paste0("strat_na_cond_col_", i)]]
       req(col != "(none)")
       vals <- unique(as.character(get_raw()[[col]]))
       vals <- sort(vals[!is.na(vals)])
-      updateSelectInput(session, paste0("strat_na_cond_val_", i), choices = c("", vals))
+      updateSelectInput(session, paste0("strat_na_cond_val_", i),
+                        choices = c("", "NA", vals))
     })
   })
   
   # reactive: collect rules from inputs
   get_na_rules <- reactive({
-    list(list(
-      target_col = input$strat_na_target_1,
-      cond_col   = input$strat_na_cond_col_1,
-      cond_val   = input$strat_na_cond_val_1,
-      impute     = input$strat_na_impute_1
-    ))
+    list(
+      list(
+        target_col = input$strat_na_target_1,
+        cond_col   = input$strat_na_cond_col_1,
+        cond_val   = input$strat_na_cond_val_1,
+        impute     = input$strat_na_impute_1
+      ),
+      list(
+        target_col = input$strat_na_target_2,
+        cond_col   = input$strat_na_cond_col_2,
+        cond_val   = input$strat_na_cond_val_2,
+        impute     = input$strat_na_impute_2
+      )
+    )
   })
   
   
