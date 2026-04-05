@@ -8,6 +8,9 @@ library(shiny)
 library(tidyverse)
 library(sortable)
 library(DT)
+library(wordcloud)
+library(RColorBrewer)
+library(scales)
 library(plotly)
 library(tabplot)
 library(GGally)
@@ -91,58 +94,143 @@ make_hints_dt <- function(df_raw, df_clean, page_length = 10) {
   )
 }
 
+plot_wordcloud <- function(df, mode, wc_var, include_numeric, case_sensitive,
+                           split_mode, max_words, min_freq, scale_val, palette) {
+  val <- switch(mode,
+                "varnames" = names(df),
+                "allvals"  = unlist(lapply(names(df), function(col) as.character(df[[col]]))),
+                "catvar" = unlist(lapply(wc_var, function(v) as.character(df[[v]])))
+  )
+  val <- val[!is.na(val) & nchar(trimws(val)) > 0]
+  if (!case_sensitive) val <- tolower(val)
+  if (length(val) == 0) stop("No non-missing values to display.")
+  tokens <- switch(split_mode,
+                   "none"     = val,
+                   "chars"    = { t <- unlist(strsplit(val, "")); t[!grepl("\\s", t)] },
+                   "alphanum" = {
+                     t <- unlist(lapply(val, function(tok) {
+                       m <- gregexpr("[A-Za-z]+|[0-9]+", tok, perl = TRUE)
+                       regmatches(tok, m)[[1]]
+                     }))
+                     t[nchar(t) > 0]
+                   }
+  )
+  freq_table <- sort(table(tokens), decreasing = TRUE)
+  freq_table <- freq_table[freq_table >= min_freq]
+  if (length(freq_table) == 0) stop(paste0("No tokens appear at least ", min_freq, " times."))
+  freq_table <- head(freq_table, max_words)
+  words      <- names(freq_table)
+  freqs      <- as.integer(freq_table)
+  n          <- length(words)
+  pal        <- RColorBrewer::brewer.pal(max(3, min(8, n)), palette)
+  colors     <- colorRampPalette(pal)(n)[rank(-freqs, ties.method = "first")]
+  freq_ratio <- max(freqs) / max(median(freqs), 1)
+  if (freq_ratio >= 3) {
+    freqs_norm <- as.integer(20 + (sqrt(freqs) - sqrt(min(freqs))) /
+                               max(sqrt(max(freqs)) - sqrt(min(freqs)), 1) * 80)
+  } else {
+    freq_ranks <- rank(-freqs, ties.method = "first")
+    freqs_norm <- as.integer(100 - (freq_ranks - 1) / max(freq_ranks - 1, 1) * 80)
+  }
+  n_eff      <- min(n, 30)
+  base_scale <- max(3, min(9, 40 / sqrt(n_eff)))
+  max_scale  <- min(12, base_scale * (1 + log10(max(freq_ratio, 1)))) * scale_val
+  min_scale  <- max(0.3, max_scale * 0.15)
+  par(mar = c(0, 0, 0, 0), bg = "white")
+  wordcloud::wordcloud(
+    words        = words,
+    freq         = freqs_norm,
+    max.words    = n,
+    min.freq     = 1,
+    random.order = FALSE,
+    rot.per      = 0.15,
+    colors       = colors,
+    scale        = c(max_scale, min_scale),
+    use.r.layout = FALSE
+  )
+}
+
 # plot barchart graph
-plot_barchart <- function(df, var, top_n, include_na, group_on, group_var) {
+plot_barchart <- function(df, vars, top_n, include_na, group_on, group_var, stack_vars = FALSE, custom_title = NULL) {
   
-  # coerce to character first to avoid factor level mismatch issues
-  x <- as.character(df[[var]])
+  var_label <- if (length(vars) == 1) vars else paste0(length(vars), " variables")
+  
+  # build long-format df tracking which variable each value came from
+  long_df <- do.call(rbind, lapply(vars, function(v) {
+    data.frame(value = as.character(df[[v]]), variable = v, stringsAsFactors = FALSE)
+  }))
   
   if (include_na) {
-    x[is.na(x)] <- "(NA)"
+    long_df$value[is.na(long_df$value)] <- "(NA)"
   } else {
-    x <- x[!is.na(x)]
-    df <- df[!is.na(df[[var]]), , drop = FALSE]
+    long_df <- long_df[!is.na(long_df$value), ]
   }
   
-  df[[var]] <- x
-  
-  counts_all <- sort(table(x), decreasing = TRUE)
+  counts_all <- sort(table(long_df$value), decreasing = TRUE)
   top_levels <- names(head(counts_all, top_n))
-  df <- df[df[[var]] %in% top_levels, , drop = FALSE]
-  df[[var]] <- factor(df[[var]], levels = top_levels)
+  long_df    <- long_df[long_df$value %in% top_levels, ]
+  long_df$value <- factor(long_df$value, levels = top_levels)
   
-  if (group_on) {
-    df <- df[!is.na(df[[group_var]]), , drop = FALSE]
-    n_levels <- length(unique(na.omit(df[[group_var]])))
-    muted_palette <- c("#4a80d4", "#2a9d8f", "#e07b39", "#7c5cbf",
-                       "#c2537a", "#3aaf85", "#868e96", "#5a4fcf",
-                       "#a06040", "#856404")
-    fill_vals <- rep_len(muted_palette, n_levels)
-    ggplot(df, aes(x = .data[[var]], fill = .data[[group_var]])) +
+  if (stack_vars && length(vars) > 1) {
+    long_df$variable <- factor(long_df$variable, levels = vars)
+    fill_vals <- scales::hue_pal(l = 55, c = 40)(length(vars))
+    
+    default_title <- paste("Bar Chart for", var_label)
+    plot_title <- if (!is.null(custom_title) && nzchar(custom_title)) custom_title else default_title
+    
+    ggplot(long_df, aes(x = value, fill = variable)) +
+      geom_bar(position = "stack") +
+      geom_text(
+        stat = "count",
+        aes(label = ..count..),
+        position = position_stack(vjust = 0.5),
+        size = 4.5,
+        fontface = "bold",
+        check_overlap = TRUE
+      ) +
+      scale_fill_manual(values = setNames(fill_vals, vars)) +
+      labs(title = plot_title,
+           x = "Value", y = "Count", fill = "Variable") +
+      theme_minimal(base_size = 14) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title.x = element_text(size = 15, face = "bold"),
+        axis.title.y = element_text(size = 15, face = "bold"),
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5,
+                                  margin = margin(b = 12)),
+        legend.title = element_text(size = 13, face = "bold"),
+        legend.text  = element_text(size = 12)
+      )
+    
+  } else if (group_on) {
+    grp_vec <- do.call(rbind, lapply(vars, function(v) {
+      data.frame(value = as.character(df[[v]]), grp = as.character(df[[group_var]]),
+                 stringsAsFactors = FALSE)
+    }))
+    if (!include_na) grp_vec <- grp_vec[!is.na(grp_vec$value), ]
+    grp_vec <- grp_vec[grp_vec$value %in% top_levels, ]
+    grp_vec$value <- factor(grp_vec$value, levels = top_levels)
+    grp_vec <- grp_vec[!is.na(grp_vec$grp), ]
+    n_levels  <- length(unique(grp_vec$grp))
+    fill_vals <- viridis::viridis(length(vars), option = "C", begin = 0.1, end = 0.9)
+    ggplot(grp_vec, aes(x = value, fill = grp)) +
       geom_bar(position = "dodge") +
       scale_fill_manual(values = fill_vals) +
-      labs(
-        title = paste("Bar Chart for", var, "grouped by", group_var),
-        x     = var,
-        y     = "Count",
-        fill  = group_var
-      ) +
+      labs(title = paste("Bar Chart for", var_label, "grouped by", group_var),
+           x = "Value", y = "Count", fill = group_var) +
       theme_minimal(base_size = 13) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    
   } else {
-    counts <- table(df[[var]])
     plot_df <- data.frame(
-      level = factor(names(counts), levels = top_levels),
-      count = as.integer(counts)
+      level = factor(names(table(long_df$value)[top_levels]),  levels = top_levels),
+      count = as.integer(table(long_df$value)[top_levels])
     )
     ggplot(plot_df, aes(x = level, y = count)) +
       geom_col() +
-      geom_text(aes(label = count), vjust = -0.4, size = 3.5) +
-      labs(
-        title = paste("Bar Chart for", var),
-        x     = var,
-        y     = "Count"
-      ) +
+      geom_text(aes(label = count), vjust = -0.4, fontface = "bold", size = 4.5) +
+      labs(title = paste("Bar Chart for", var_label), x = "Value", y = "Count") +
       theme_minimal(base_size = 13) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
   }
@@ -885,6 +973,63 @@ ui <- fluidPage(
                ), # end tab panel
                
                
+               # ── UI WORDCLOUD ──────────────────────────────────────────────────────────────
+               
+               tabPanel("Word Cloud",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Word Cloud: <br><br>
+        Useful for spotting inconsistencies in variable names or values.
+        Use <b>Check all values</b> mode to detect disguised NAs like
+        <code>-99</code>, <code>--</code>, <code>?</code> appearing suspiciously often."),
+                                       hr(),
+                                       radioButtons("wc_mode", "Mode:",
+                                                    choices = c(
+                                                      "Categorical variable values" = "catvar",
+                                                      "Check variable names"        = "varnames",
+                                                      "Quick check for all values (character)" = "allvals"
+                                                    ),
+                                                    selected = "catvar"),
+                                       hr(),
+                                       conditionalPanel(
+                                         condition = "input.wc_mode == 'catvar'",
+                                         checkboxInput("wc_include_numeric",
+                                                       "Switch to numeric variables (converted to text, not recommended)",
+                                                       value = FALSE),
+                                         selectizeInput("wc_var", "Variables:", choices = NULL, multiple = TRUE)
+                                       ),
+                                       hr(),
+                                       checkboxInput("wc_case", "Case sensitive", value = TRUE),
+                                       hr(),
+                                       radioButtons("wc_split_mode", "Token split mode:",
+                                                    choices = c(
+                                                      "None (whole value)"    = "none",
+                                                      "Individual characters" = "chars",
+                                                      "Alpha / numeric runs"  = "alphanum"
+                                                    ),
+                                                    selected = "none"),
+                                       hr(),
+                                       sliderInput("wc_max_words", "Max words to show:",
+                                                   min = 10, max = 500, value = 200, step = 10),
+                                       sliderInput("wc_min_freq", "Min frequency:",
+                                                   min = 1, max = 50, value = 1, step = 1),
+                                       helpText("Font size is proportional to frequency."),
+                                       hr(),
+                                       sliderInput("wc_scale", "Plot scale:",
+                                                   min = 0.3, max = 3.0, value = 1.0, step = 0.1),
+                                       hr(),
+                                       selectInput("wc_palette", "Colour palette:",
+                                                   choices  = c("Dark2", "Set1", "Set2", "Set3",
+                                                                "Paired", "Accent", "Spectral"),
+                                                   selected = "Dark2")
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("wc_plot", height = "80vh")
+                          )
+                        )
+               ), # end tab panel
+               
+               
                # ── UI BARCHART ───────────────────────────────────────────────────────────────
                
                tabPanel("Bar Chart",
@@ -895,7 +1040,7 @@ ui <- fluidPage(
                         discrete variable. Useful for spotting dominant categories,
                         rare levels, and unexpected values."),
                                        hr(),
-                                       selectInput("bc_var", "Variable:", choices = NULL),
+                                       selectizeInput("bc_var", "Variables:", choices = NULL, multiple = TRUE),
                                        hr(),
                                        sliderInput("bc_top_n", "Levels to show:",
                                                    min = 1, max = 50, value = 8, step = 1, width = "100%"),
@@ -906,7 +1051,11 @@ ui <- fluidPage(
                                        conditionalPanel(
                                          condition = "input.bc_group_on == true",
                                          selectInput("bc_group_var", "Grouping variable:", choices = NULL)
-                                       )
+                                       ),
+                                       checkboxInput("bc_stack_vars", 
+                                                     "Stack by variable name (when multiple selected)", value = FALSE),
+                                       hr(),
+                                       textInput("bc_title", "Custom plot title:", placeholder = "Auto-generated if empty")
                           ),
                           mainPanel(width = 9,
                                     plotOutput("bc_output", height = "80vh")
@@ -1864,26 +2013,68 @@ server <- function(input, output, session) {
   })
   
   
+  # ── SERVER EDA WORD CLOUD ────────────────────────────────────────────────────
+  
+  observe({
+    df       <- get_data()
+    cat_cols <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    num_cols <- names(df)[sapply(df, is.numeric)]
+    choices  <- if (isTRUE(input$wc_include_numeric)) num_cols else cat_cols
+    updateSelectizeInput(session, "wc_var",
+                         choices  = choices,
+                         selected = if (length(choices) > 0) choices[1] else NULL,
+                         server   = TRUE)
+  })
+  
+  output$wc_plot <- renderPlot({
+    req(input$wc_mode)
+    if (input$wc_mode == "catvar") req(length(input$wc_var) > 0)
+    tryCatch(
+      plot_wordcloud(
+        df              = get_data(),
+        mode            = input$wc_mode,
+        wc_var          = input$wc_var,
+        include_numeric = isTRUE(input$wc_include_numeric),
+        case_sensitive  = isTRUE(input$wc_case),
+        split_mode      = input$wc_split_mode,
+        max_words       = input$wc_max_words,
+        min_freq        = input$wc_min_freq,
+        scale_val       = input$wc_scale,
+        palette         = input$wc_palette
+      ),
+      error = function(e) {
+        plot.new()
+        text(0.5, 0.5, conditionMessage(e), cex = 1.2, col = "#C41E3A", adj = 0.5)
+      }
+    )
+  })
+  
+  
   # ── SERVER EDA BARCHART ───────────────────────────────────────────────────────
   
   observe({
-    df <- get_data()
-    updateSelectInput(session, "bc_var", choices = names(df))
+    df       <- get_data()
+    all_cols <- names(df)
     cat_cols <- names(df)[sapply(df, is.factor)]
+    updateSelectizeInput(session, "bc_var", choices = all_cols,
+                         selected = if (length(all_cols) > 0) all_cols[1] else NULL,
+                         server = TRUE)
     updateSelectInput(session, "bc_group_var", choices = cat_cols)
   })
   
   output$bc_output <- renderPlot({
-    req(input$bc_var)
+    req(length(input$bc_var) > 0)
     plot_barchart(
       df         = get_data(),
-      var        = input$bc_var,
+      vars       = input$bc_var,
       top_n      = input$bc_top_n,
       include_na = isTRUE(input$bc_include_na),
       group_on   = isTRUE(input$bc_group_on) &&
         !is.null(input$bc_group_var) &&
         input$bc_group_var %in% names(get_data()),
-      group_var  = input$bc_group_var
+      group_var  = input$bc_group_var,
+      stack_vars = isTRUE(input$bc_stack_vars),
+      custom_title = input$bc_title
     )
   })
   
@@ -2179,7 +2370,7 @@ server <- function(input, output, session) {
     
     if (n < 3 || anyNA(x)) return(NULL)
     
-    # ── Distribution check ──────────────────────────────────────────────
+    # distribution check
     sk  <- moments::skewness(x)
     kur <- moments::kurtosis(x) - 3   # excess kurtosis
     sw  <- if (n <= 5000) shapiro.test(x)$p.value else NA_real_
