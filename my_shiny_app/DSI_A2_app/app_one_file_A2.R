@@ -1849,13 +1849,18 @@ server <- function(input, output, session) {
   roles_rv <- reactiveVal(NULL)
   
   observe({
-    df      <- get_raw()
+    df      <- get_data()
     current <- roles_rv()
     new_roles <- setNames(rep("Predictor", ncol(df)), names(df))
     if (!is.null(current)) {
       shared <- intersect(names(new_roles), names(current))
       new_roles[shared] <- current[shared]
     }
+    # default new shadow columns to Ignore
+    shadow_cols <- grep("_shadow$", names(new_roles), value = TRUE)
+    new_shadow  <- shadow_cols[!shadow_cols %in% names(current)]
+    new_roles[new_shadow] <- "Ignore"
+    
     roles_rv(new_roles)
   })
   
