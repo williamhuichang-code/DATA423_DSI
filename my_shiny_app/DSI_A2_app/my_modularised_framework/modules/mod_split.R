@@ -23,13 +23,10 @@ split_ui <- function(id) {
                  padding: 10px; border-left: 4px solid #0d6efd; border-radius: 6px;
                  margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);",
         icon("info-circle", style = "color:#0d6efd;"),
-        HTML("&nbsp; Tab Note: <br><br>
-              Define how data is split into train and test sets.
-              Use a pre-existing split column or a ratio-based split.")
+        HTML("&nbsp; Tab Note: <br><br> Placeholder for now.")
       ),
       hr(),
       
-      # response variable
       tags$div(
         style = "margin-bottom:12px;",
         tags$label("Response Variable:",
@@ -38,7 +35,6 @@ split_ui <- function(id) {
       ),
       hr(),
       
-      # split method
       tags$label("Split Method:",
                  style = "font-weight:600; font-size:13px; color:#343a40;"),
       radioButtons(ns("split_method"), label = NULL,
@@ -65,6 +61,14 @@ split_ui <- function(id) {
           sliderInput(ns("train_ratio"), label = NULL,
                       min = 50, max = 95, value = 80, step = 5, width = "100%",
                       post = "%")
+        ),
+        tags$div(
+          style = "margin-top:8px;",
+          tags$label("Seed:",
+                     style = "font-weight:600; font-size:13px; color:#343a40;"),
+          numericInput(ns("ratio_seed"), label = NULL,
+                       value = NA, min = 0, step = 1, width = "100%"),
+          uiOutput(ns("seed_warning"))
         )
       ),
       hr(),
@@ -82,7 +86,7 @@ split_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-split_server <- function(id, get_data, get_roles = NULL) {
+split_server <- function(id, get_data, get_roles = NULL, global_seed = NULL) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -94,8 +98,6 @@ split_server <- function(id, get_data, get_roles = NULL) {
       req(df)
       
       all_vars <- names(df)
-      
-      # defaults from roles if available
       role_vals <- if (!is.null(get_roles)) get_roles() else NULL
       
       default_response <- if (!is.null(role_vals)) {
@@ -116,12 +118,18 @@ split_server <- function(id, get_data, get_roles = NULL) {
                         choices  = all_vars,
                         selected = default_split_col)
       
-    }) |> bindEvent(get_data())
+    }) |> bindEvent(get_data(), if (!is.null(get_roles)) get_roles() else NULL)
     
     observeEvent(input$reset, {
       updateRadioButtons(session, "split_method", selected = "ratio")
       updateSliderInput(session, "train_ratio", value = 80)
     })
+    
+    # sync ratio_seed from global_seed when global_seed changes
+    observe({
+      req(!is.null(global_seed))
+      updateNumericInput(session, "ratio_seed", value = global_seed())
+    }) |> bindEvent(if (!is.null(global_seed)) global_seed() else NULL)
     
     # ── split reactive ────────────────────────────────────────────────────
     
@@ -131,28 +139,33 @@ split_server <- function(id, get_data, get_roles = NULL) {
       
       if (input$split_method == "column") {
         req(input$split_col, input$split_col %in% names(df))
-        col     <- df[[input$split_col]]
-        col_chr <- tolower(trimws(as.character(col)))
+        col        <- df[[input$split_col]]
+        col_chr    <- tolower(trimws(as.character(col)))
         train_mask <- col_chr %in% c("train", "1", "true")
         test_mask  <- col_chr %in% c("test",  "0", "false")
         
-        # if column doesn't yield valid splits, warn but don't error
         if (sum(train_mask) == 0 && sum(test_mask) == 0) {
-          # fall back to ratio so UI still renders
           n         <- nrow(df)
           train_idx <- sample(seq_len(n), floor(n * 0.8))
-          return(list(
-            train  = df[ train_idx, , drop = FALSE],
-            test   = df[-train_idx, , drop = FALSE],
-            method = "column_fallback"
-          ))
+          return(list(train = df[train_idx, , drop = FALSE],
+                      test  = df[-train_idx, , drop = FALSE],
+                      method = "column_fallback"))
         }
         
-        list(
-          train  = df[train_mask, , drop = FALSE],
-          test   = df[test_mask,  , drop = FALSE],
-          method = "column"
-        )
+        list(train  = df[train_mask, , drop = FALSE],
+             test   = df[test_mask,  , drop = FALSE],
+             method = "column")
+        
+      } else {
+        req(input$train_ratio)
+        ratio     <- input$train_ratio / 100
+        n         <- nrow(df)
+        seed_val <- input$ratio_seed
+        if (!is.null(seed_val) && !is.na(seed_val)) set.seed(as.integer(seed_val))
+        train_idx <- sample(seq_len(n), floor(n * ratio))
+        list(train  = df[ train_idx, , drop = FALSE],
+             test   = df[-train_idx, , drop = FALSE],
+             method = "ratio")
       }
     })
     
@@ -249,6 +262,20 @@ split_server <- function(id, get_data, get_roles = NULL) {
       } else NULL
       
       tagList(fallback_warn, cards, imbalance_section)
+    })
+    
+    # ── seed warning ──────────────────────────────────────────────────────────
+    output$seed_warning <- renderUI({
+      seed_val <- input$ratio_seed
+      if (is.na(seed_val) || is.null(seed_val)) {
+        tags$div(
+          style = "font-size:11px; color:#856404; background:#fff3cd;
+               border:0.5px solid #ffc107; border-radius:4px;
+               padding:6px 8px; margin-top:4px;",
+          icon("triangle-exclamation"),
+          " No seed set — results will differ each run. Set a value here or in Config > Global Seed."
+        )
+      }
     })
     
     # ── imbalance table render ────────────────────────────────────────────

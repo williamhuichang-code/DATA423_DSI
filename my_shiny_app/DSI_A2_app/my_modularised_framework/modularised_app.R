@@ -77,8 +77,10 @@ ui <- dashboardPage(
       ),
       
       menuItem("Config", tabName = "config", icon = icon("sliders"),
-               menuSubItem("Data Roles", tabName = "data_roles"),
-               menuSubItem("Download Data", tabName = "data_download", icon = icon("download"))
+               menuSubItem("Data Roles",     tabName = "data_roles"),
+               menuSubItem("Important Vars", tabName = "config_important"),
+               menuSubItem("Global Seed",    tabName = "config_seed"),
+               menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
                # add more subtabs here
       ),
       
@@ -131,6 +133,8 @@ ui <- dashboardPage(
       
       # Config
       tabItem(tabName = "data_roles", data_roles_ui("data_roles")),
+      tabItem(tabName = "config_important", config_important_ui("config_important")),
+      tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
       tabItem(tabName = "data_download", data_download_ui("data_download")),
       
       # Miss Strategy
@@ -196,7 +200,9 @@ server <- function(input, output, session) {
   # ── NECESSARY VARS  ──────────────────────────────────────────────────────
   
   roles <- data_roles_server("data_roles", get_data)
-  split <- split_server("split", get_data, roles)
+  important_vars <- config_important_server("config_important", get_data)
+  global_seed    <- config_seed_server("config_seed")
+  split <- split_server("split", get_data, roles, global_seed)
   
   
   # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────
