@@ -10,17 +10,26 @@ library(sortable)
 library(DT)
 library(wordcloud)
 library(RColorBrewer)
+library(ipred)
 library(scales)
 library(plotly)
 library(tabplot)
 library(GGally)
 library(vcd)
 library(rpart.plot)
+library(MASS)
+library(bestNormalize)
 library(recipes)
+library(e1071)
+library(isotree)
+library(glmnet)
+library(caret)
+
 
 # ── DATA INITIALISATION ──────────────────────────────────────────────────────
 
-raw_dataset <- read.csv('Ass2Data.csv', header = TRUE, na.strings = c('NA', 'N/A'), stringsAsFactors = TRUE)
+# raw_dataset <- read.csv('Ass2Data.csv', header = TRUE, na.strings = c('NA', 'N/A'), stringsAsFactors = TRUE)
+raw_dataset <- read.csv('Ass20Data.csv', header = TRUE, na.strings = c('NA', 'N/A'), stringsAsFactors = TRUE)
 
 # ── GENERAL HELPER ───────────────────────────────────────────────────────────
 
@@ -814,24 +823,31 @@ apply_shadow_variables <- function(df, shadow_cols) {
 }
 
 # for knn imputation
-apply_knn_imputation <- function(df, knn_response, knn_cols, knn_k) {
+apply_knn_imputation <- function(df, knn_response, knn_cols, knn_k, method = "knn") {
   if (is.null(knn_response) || knn_response == "" || knn_response == "(none)") return(df)
   if (is.null(knn_cols) || length(knn_cols) == 0) return(df)
-  if (is.null(knn_k) || is.na(knn_k) || knn_k < 1) return(df)
   if (!knn_response %in% names(df)) return(df)
+  
+  # only validate k when actually needed
+  if (method != "bag" && (is.null(knn_k) || is.na(knn_k) || knn_k < 1)) return(df)
   
   cols_present <- intersect(knn_cols, setdiff(names(df), knn_response))
   if (length(cols_present) == 0) return(df)
   
-  # exclude y entirely so it cannot influence neighbour distance calculation
   df_pred <- df[, setdiff(names(df), knn_response), drop = FALSE]
   
-  imputed <- recipes::recipe(~ ., data = df_pred) |>
-    recipes::step_impute_knn(tidyselect::all_of(cols_present), neighbors = knn_k) |>
+  rec <- recipes::recipe(~ ., data = df_pred)
+  
+  if (method == "bag") {
+    rec <- rec |> recipes::step_impute_bag(tidyselect::all_of(cols_present))
+  } else {
+    rec <- rec |> recipes::step_impute_knn(tidyselect::all_of(cols_present), neighbors = knn_k)
+  }
+  
+  imputed <- rec |>
     recipes::prep(training = df_pred) |>
     recipes::bake(new_data = df_pred)
   
-  # put y back unchanged, preserving original column order
   df[, setdiff(names(df), knn_response)] <- imputed
   df
 }
@@ -877,6 +893,192 @@ apply_centre_scale <- function(df, centre_cols, scale_cols) {
   df
 }
 
+# apply recipes-based power transform (Box-Cox or Yeo-Johnson) to selected cols
+apply_power_transform_strategy <- function(df, cols, method) {
+  if (is.null(cols) || length(cols) == 0 || method == "none") return(df)
+  
+  cols_present <- intersect(cols, names(df))
+  num_cols     <- cols_present[sapply(cols_present, function(v) is.numeric(df[[v]]))]
+  if (length(num_cols) == 0) return(df)
+  
+  tryCatch({
+    rec <- recipes::recipe(~ ., data = df[, num_cols, drop = FALSE])
+    
+    if (method == "boxcox") {
+      # Box-Cox only works on strictly positive columns — skip others silently
+      pos_cols <- num_cols[sapply(num_cols, function(v) {
+        all(df[[v]] > 0, na.rm = TRUE)
+      })]
+      if (length(pos_cols) == 0) return(df)
+      rec <- rec |> recipes::step_BoxCox(tidyselect::all_of(pos_cols))
+      num_cols <- pos_cols
+    } else if (method == "yeojohnson") {
+      rec <- rec |> recipes::step_YeoJohnson(tidyselect::all_of(num_cols))
+    }
+    
+    prepped <- recipes::prep(rec, training = df[, num_cols, drop = FALSE])
+    baked   <- recipes::bake(prepped, new_data = NULL)
+    
+    for (col in intersect(names(baked), names(df))) {
+      df[[col]] <- baked[[col]]
+    }
+    df
+  }, error = function(e) {
+    message("apply_power_transform_strategy error: ", conditionMessage(e))
+    df
+  })
+}
+
+# apply power transform for visualisation only (never modifies df)
+apply_power_transform <- function(x, method) {
+  if (method == "none" || all(is.na(x))) return(x)
+  tryCatch({
+    if (method == "boxcox") {
+      # Box-Cox requires strictly positive values
+      if (any(x <= 0, na.rm = TRUE)) stop("Box-Cox requires all values > 0")
+      est <- MASS::boxcox(x ~ 1, plotit = FALSE)
+      lam <- est$x[which.max(est$y)]
+      if (abs(lam) < 1e-6) log(x) else (x^lam - 1) / lam
+    } else if (method == "yeojohnson") {
+      obj <- bestNormalize::yeojohnson(x, standardize = FALSE)
+      predict(obj)
+    }
+  }, error = function(e) {
+    warning("Transform failed: ", conditionMessage(e))
+    x   # return untransformed on failure
+  })
+}
+
+# plot mahalanobis distance
+plot_mahalanobis <- function(df, predictor_cols, id_col, threshold_p) {
+  
+  num_cols <- predictor_cols[sapply(predictor_cols, function(v) is.numeric(df[[v]]))]
+  
+  if (length(num_cols) < 2) {
+    plot.new()
+    text(0.5, 0.5, "Need at least 2 numeric predictor columns.",
+         cex = 1.2, col = "#C41E3A", adj = 0.5)
+    return(invisible(NULL))
+  }
+  
+  df_num <- df[, num_cols, drop = FALSE]
+  n_before <- nrow(df_num)
+  
+  # always remove rows with any NA before mahalanobis
+  df_num <- df_num[complete.cases(df_num), , drop = FALSE]
+  n_after <- nrow(df_num)
+  
+  if (n_after < 3) {
+    plot.new()
+    text(0.5, 0.5, paste0(
+      "Only ", n_after, " complete rows remain after removing NAs\n",
+      "(", n_before - n_after, " rows removed).\n",
+      "Apply imputation first, or select fewer columns."
+    ), cex = 1.1, col = "#C41E3A", adj = 0.5)
+    return(invisible(NULL))
+  }
+  
+  processed <- tryCatch({
+    rec <- recipes::recipe(~ ., data = df_num) |>
+      recipes::step_nzv(recipes::all_predictors()) |>
+      recipes::step_lincomb(recipes::all_numeric_predictors()) |>
+      recipes::step_YeoJohnson(recipes::all_numeric_predictors()) |>
+      recipes::prep(training = df_num) |>
+      recipes::bake(new_data = NULL)
+    rec
+  }, error = function(e) {
+    message("Mahalanobis recipe error: ", conditionMessage(e))
+    NULL
+  })
+  
+  if (is.null(processed) || ncol(processed) < 2) {
+    plot.new()
+    text(0.5, 0.5, paste0(
+      "Recipe reduced columns to ", 
+      if (is.null(processed)) 0 else ncol(processed),
+      ".\nCheck for near-zero variance or linearly dependent variables."
+    ), cex = 1.1, col = "#C41E3A", adj = 0.5)
+    return(invisible(NULL))
+  }
+  
+  # row names of processed match rows of df_num
+  orig_row_names <- rownames(df_num)
+  orig_rows      <- match(orig_row_names, rownames(df))
+  id_labels      <- as.character(df[[id_col]])[orig_rows]
+  
+  Covar     <- var(processed)
+  Means     <- colMeans(processed)
+  md2       <- mahalanobis(x = processed, center = Means, cov = Covar)
+  names(md2) <- id_labels
+  
+  threshold    <- qchisq(p = threshold_p, df = ncol(processed))
+  label        <- ifelse(md2 > threshold, id_labels, NA_character_)
+  Observations <- ifelse(md2 > threshold, "outlier", "non-outlier")
+  id           <- seq_along(md2) / length(md2)
+  n_out        <- sum(md2 > threshold)
+  
+  plot_df <- data.frame(md2, label, id, Observations)
+  
+  ggplot(plot_df, aes(y = md2, x = id)) +
+    geom_point(aes(colour = Observations), size = 2) +
+    ggrepel::geom_text_repel(aes(label = label), max.overlaps = 50,
+                             size = 3.2, na.rm = TRUE) +
+    scale_colour_manual(values = c("non-outlier" = "#4a80d4",
+                                   "outlier"     = "#C41E3A")) +
+    geom_hline(yintercept = threshold, colour = "black", linetype = "dashed") +
+    scale_x_continuous(breaks = c(0, 0.5, 1),
+                       labels = c("0%", "50%", "100%")) +
+    annotate("text", x = 0.01, y = threshold * 1.05,
+             label = sprintf("χ²=%.1f  (%d outliers)", threshold, n_out),
+             hjust = 0, size = 3.5, colour = "#333333") +
+    labs(
+      title = paste0(
+        "Mahalanobis D² | p=", threshold_p,
+        " | χ²(", ncol(processed), ")=", round(threshold, 1),
+        " | n=", n_after, " complete rows"
+      ),
+      y = "Mahalanobis distance squared",
+      x = "Complete observations"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      plot.title   = element_text(size = 13, face = "bold", hjust = 0.5),
+      legend.title = element_text(face = "bold"),
+      legend.text  = element_text(size = 12)
+    )
+}
+
+get_mahalanobis_outliers <- function(df, predictor_cols, id_col, threshold_p) {
+  num_cols <- predictor_cols[sapply(predictor_cols, function(v) is.numeric(df[[v]]))]
+  if (length(num_cols) < 2) return(df[0, ])
+  
+  df_num    <- df[, num_cols, drop = FALSE]
+  orig_rows <- which(complete.cases(df_num))
+  df_num    <- df_num[orig_rows, , drop = FALSE]
+  if (nrow(df_num) < 3) return(df[0, ])
+  
+  processed <- tryCatch({
+    recipes::recipe(~ ., data = df_num) |>
+      recipes::step_nzv(recipes::all_predictors()) |>
+      recipes::step_lincomb(recipes::all_numeric_predictors()) |>
+      recipes::step_YeoJohnson(recipes::all_numeric_predictors()) |>
+      recipes::prep(training = df_num) |>
+      recipes::bake(new_data = NULL)
+  }, error = function(e) NULL)
+  
+  if (is.null(processed) || ncol(processed) < 2) return(df[0, ])
+  
+  Covar     <- var(processed)
+  Means     <- colMeans(processed)
+  md2       <- mahalanobis(x = processed, center = Means, cov = Covar)
+  threshold <- qchisq(p = threshold_p, df = ncol(processed))
+  
+  df[orig_rows[md2 > threshold], , drop = FALSE]
+}
+
+
+
+
 
 
 # =================================================================================
@@ -888,10 +1090,30 @@ ui <- fluidPage(
   # ·· HEADER ·································································
   
   fluidRow(
-    column(12,
+    column(10,
            div(
              style = "margin-top:20px; text-align:center; font-size:24px; font-weight:600; color:#495057;",
              "DATA423-26S1 Assignment 2 (EDA, Strategy, Model) \u2003 | \u2003 William Hui Chang (69051925)"
+           )
+    ),
+    column(2,
+           div(
+             style = "margin-top:14px; text-align:right; padding-right:10px;",
+             downloadButton(
+               "download_csv",
+               label = "Download CSV",
+               icon  = icon("download"),
+               style = "
+               background-color: #2a9d8f;
+               color: white;
+               border: none;
+               border-radius: 6px;
+               font-weight: 600;
+               font-size: 13px;
+               padding: 8px 14px;
+               box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+             "
+             )
            )
     )
   ),
@@ -1317,7 +1539,19 @@ ui <- fluidPage(
                                        hr(),
                                        checkboxInput("hist_tolerate_na",
                                                      "Ignore NAs",
-                                                     value = TRUE)
+                                                     value = TRUE),
+                                       hr(),
+                                       radioButtons("hist_transform", "Power transform (visual only):",
+                                                    choices  = c("None"         = "none",
+                                                                 "Box-Cox"      = "boxcox",
+                                                                 "Yeo-Johnson"  = "yeojohnson"),
+                                                    selected = "none"),
+                                       conditionalPanel(
+                                         condition = "input.hist_transform != 'none'",
+                                         sidebar_note("Transform applied for display only —
+                                         the dataset is not changed. <br><br>
+                                         Box-Cox requires all values > 0.")
+                                       )
                           ),
                           mainPanel(width = 9,
                                     plotOutput("hist_output", height = "60vh")
@@ -1344,7 +1578,19 @@ ui <- fluidPage(
                                        hr(),
                                        checkboxInput("bp_tolerate_na", 
                                                      "Tolerate NAs (exclude NA rows for this variable only)", 
-                                                     value = TRUE)
+                                                     value = TRUE),
+                                       hr(),
+                                       radioButtons("bp_transform", "Power transform (visual only):",
+                                                    choices  = c("None"         = "none",
+                                                                 "Box-Cox"      = "boxcox",
+                                                                 "Yeo-Johnson"  = "yeojohnson"),
+                                                    selected = "none"),
+                                       conditionalPanel(
+                                         condition = "input.bp_transform != 'none'",
+                                         sidebar_note("Transform applied for display only —
+                                         the dataset is not changed. <br><br>
+                                         Box-Cox requires all values > 0.")
+                                       )
                           ),
                           mainPanel(width = 9,
                                     plotOutput("bp_output", height = "40vh"),
@@ -1377,7 +1623,19 @@ ui <- fluidPage(
                                        hr(),
                                        checkboxInput("bag_tolerate_na", 
                                                      "Tolerate NAs (exclude NA rows for these variables only)", 
-                                                     value = TRUE)
+                                                     value = TRUE),
+                                       hr(),
+                                       radioButtons("bag_transform", "Power transform (visual only):",
+                                                    choices  = c("None"         = "none",
+                                                                 "Box-Cox"      = "boxcox",
+                                                                 "Yeo-Johnson"  = "yeojohnson"),
+                                                    selected = "none"),
+                                       conditionalPanel(
+                                         condition = "input.bag_transform != 'none'",
+                                         sidebar_note("Transform applied for display only —
+                                         the dataset is not changed. <br><br>
+                                         Box-Cox requires all values > 0.")
+                                       )
                           ),
                           mainPanel(width = 9,
                                     plotOutput("bag_output", height = "60vh"),
@@ -1657,6 +1915,19 @@ ui <- fluidPage(
                                        numericInput("strat_knn_k", "Number of neighbours (k):",
                                                     value = 5, min = 1, max = 50, step = 1),
                                        hr(),
+                                       radioButtons("strat_knn_method", "Imputation method:",
+                                                    choices  = c("KNN (k-nearest neighbours)" = "knn",
+                                                                 "Bagged trees"               = "bag"),
+                                                    selected = "knn"),
+                                       conditionalPanel(
+                                         condition = "input.strat_knn_method == 'bag'",
+                                         sidebar_note("Bag imputation: <br><br>
+                                         Uses an ensemble of bagged decision trees. 
+                                         More robust than KNN for mixed-type data and non-linear relationships,
+                                         but significantly slower on large datasets. 
+                                         The <b>k</b> setting above is ignored when bag is selected.")
+                                       ),
+                                       hr(),
                                        selectizeInput("strat_knn_cols", "Columns to impute with KNN:",
                                                       choices  = NULL,
                                                       multiple = TRUE,
@@ -1716,34 +1987,421 @@ ui <- fluidPage(
                
                # ── UI OUTLIER STRATEGY ───────────────────────────────────────────────
                
-               tabPanel("TRANSFORM: Centre / Scale",
+               tabPanel("OUT: Transform",
                         sidebarLayout(
                           sidebarPanel(width = 3,
-                                       sidebar_note("TRANSFORM: Centre / Scale: <br><br>
-                                       <b>Centre</b>: subtract the column mean so the variable has mean = 0. <br><br>
-                                       <b>Scale</b>: divide by the standard deviation so the variable has SD = 1. <br><br>
-                                       Applying both produces a fully standardised (z-score) variable. <br><br>
-                                       Apply <b>after</b> imputation — centering/scaling on columns with NAs
-                                       will propagate NAs into the result."),
+                                       sidebar_note("TRANSFORM: <br><br>
+                     Apply power or scaling transforms to numeric columns. <br><br>
+                     <b>Centre</b>: subtract mean → mean = 0. <br><br>
+                     <b>Scale</b>: divide by SD → SD = 1. <br><br>
+                     <b>Box-Cox</b>: power transform for <b>strictly positive</b> data.
+                     Skips columns with any value ≤ 0. <br><br>
+                     <b>Yeo-Johnson</b>: power transform that works on any data,
+                     including zero and negative values. <br><br>
+                     Apply transforms <b>after imputation</b>. <br><br>
+                     Transforms are applied in order: 
+                     Box-Cox / Yeo-Johnson first, then Centre, then Scale."),
                                        hr(),
-                                       sidebar_note("Note: only applied to numeric columns.")
+                                       sidebar_note("Note: only numeric columns are transformed."),
+                                       hr(),
+                                       tags$b("Centre + Scale:"),
+                                       helpText("These can be applied together."),
+                                       fluidRow(
+                                         column(6,
+                                                actionButton("transform_centre_select_all", "All → Centre",
+                                                             icon = icon("check-square"), class = "btn-sm btn-outline-secondary",
+                                                             width = "100%")
+                                         ),
+                                         column(6,
+                                                actionButton("transform_scale_select_all", "All → Scale",
+                                                             icon = icon("check-square"), class = "btn-sm btn-outline-secondary",
+                                                             width = "100%")
+                                         )
                                        ),
+                                       br(),
+                                       actionButton("transform_centre_scale_select_all", "All → Centre + Scale",
+                                                    icon = icon("check-square"), class = "btn-sm btn-outline-primary",
+                                                    width = "100%"),
+                                       hr(),
+                                       actionButton("transform_clear_all", "Clear All",
+                                                    icon = icon("times"), class = "btn-sm btn-outline-danger",
+                                                    width = "100%"),
+                                       hr(),
+                                       tags$b("Power Transform (pick one):"),
+                                       helpText("Box-Cox and Yeo-Johnson are mutually exclusive."),
+                                       radioButtons("transform_power_choice",
+                                                    label = NULL,
+                                                    choices = c("None"        = "none",
+                                                                "Box-Cox"     = "boxcox",
+                                                                "Yeo-Johnson" = "yeojohnson"),
+                                                    selected = "none"),
+                                       conditionalPanel(
+                                         condition = "input.transform_power_choice != 'none'",
+                                         actionButton("transform_power_select_all", "Select All Vars",
+                                                      icon = icon("check-square"), class = "btn-sm btn-outline-primary",
+                                                      width = "100%")
+                                       )
+                                       
+                          ),
                           mainPanel(width = 9,
+                                    
+                                    h5("Box-Cox Transform"),
+                                    helpText("Strictly positive columns only. Columns with any value ≤ 0 are skipped."),
+                                    selectizeInput("strat_boxcox_cols", "Columns to Box-Cox transform:",
+                                                   choices  = NULL,
+                                                   multiple = TRUE),
+                                    hr(),
+                                    
+                                    h5("Yeo-Johnson Transform"),
+                                    helpText("Works on any numeric data including zeros and negatives."),
+                                    selectizeInput("strat_yj_cols", "Columns to Yeo-Johnson transform:",
+                                                   choices  = NULL,
+                                                   multiple = TRUE),
+                                    hr(),
+                                    
                                     h5("Centre (subtract mean)"),
                                     selectizeInput("strat_centre_cols", "Columns to centre:",
                                                    choices  = NULL,
                                                    multiple = TRUE),
                                     hr(),
+                                    
                                     h5("Scale (divide by SD)"),
                                     selectizeInput("strat_scale_cols", "Columns to scale:",
                                                    choices  = NULL,
                                                    multiple = TRUE),
                                     hr(),
+                                    
                                     h5("Transform Summary"),
                                     verbatimTextOutput("transform_summary")
-                                    )
+                          )
                         )
                ), # end tab panel
+               
+               
+               tabPanel("OUT: Mahalanobis Distance",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Mahalanobis Distance: <br><br>
+                        Multivariate outlier detection. Treats all numeric predictors
+                        jointly as a multi-dimensional normal distribution and flags
+                        observations far from the centroid. <br><br>
+                        Internally applies: <br>
+                        &nbsp;• remove NAs <br>
+                        &nbsp;• remove zero/near-zero variance <br>
+                        &nbsp;• remove linear combinations <br>
+                        &nbsp;• Yeo-Johnson transform <br><br>
+                        Then computes D² and compares to a χ² threshold."),
+                                       hr(),
+                                       selectInput("mah_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectizeInput("mah_pred_cols",
+                                                      "Predictor columns (numeric used only):",
+                                                      choices  = NULL,
+                                                      multiple = TRUE,
+                                                      options  = list(
+                                                        placeholder = "Defaults to all Predictor roles"
+                                                      )),
+                                       hr(),
+                                       sliderInput("mah_threshold_p",
+                                                   "Chi-squared threshold (p):",
+                                                   min = 0.90, max = 0.999,
+                                                   value = 0.999, step = 0.001,
+                                                   width = "100%"),
+                                       helpText("Higher p = stricter, fewer outliers flagged."),
+                                       hr(),
+                                       checkboxInput("mah_tolerate_na",
+                                                     "Remove rows with any NA before computing",
+                                                     value = TRUE)
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("mah_output", height = "60vh"),
+                                    hr(),
+                                    h5("Outlier Rows"),
+                                    DT::dataTableOutput("mah_outliers_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               
+               tabPanel("OUT: Cook's Distance",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Cook's Distance: <br><br>
+                        Measures how much a <b>linear regression</b> is affected by each observation.
+                        Flags observations with both high leverage and large residuals. <br><br>
+                        Internally applies: <br>
+                        &nbsp;• remove nominal predictors <br>
+                        &nbsp;• remove rows with NAs <br>
+                        &nbsp;• remove near-zero variance <br>
+                        &nbsp;• remove linear combinations <br>
+                        &nbsp;• remove highly correlated variables <br><br>
+                        Then fits a <b>glm (gaussian)</b> and computes D_c per observation. <br><br>
+                        Threshold: <b>4 × mean(D_c)</b> — the standard empirical rule."),
+                                       hr(),
+                                       selectInput("cook_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectInput("cook_response_col", "Response variable (y):",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectizeInput("cook_pred_cols",
+                                                      "Predictor columns:",
+                                                      choices  = NULL,
+                                                      multiple = TRUE,
+                                                      options  = list(
+                                                        placeholder = "Defaults to all Predictor roles"
+                                                      )),
+                                       hr(),
+                                       sliderInput("cook_threshold_mult",
+                                                   "Threshold multiplier (k × mean D_c):",
+                                                   min = 1, max = 10, value = 4, step = 0.5,
+                                                   width = "100%"),
+                                       helpText("Standard rule: 4 × mean. Higher = fewer outliers flagged.")
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("cook_output", height = "60vh"),
+                                    hr(),
+                                    h5("Outlier Rows"),
+                                    DT::dataTableOutput("cook_outliers_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               
+               tabPanel("OUT: LOF",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Local Outlier Factor (LOF): <br><br>
+                        Scores each observation by the density of its neighbourhood.
+                        Isolated points far from any local cluster get high scores. <br><br>
+                        Interpretation: <br>
+                        &nbsp;• lof ≤ 1: not an outlier <br>
+                        &nbsp;• lof ≥ 1: possible outlier <br>
+                        &nbsp;• lof >> 1: probable outlier <br><br>
+                        Internally applies: <br>
+                        &nbsp;• remove nominal predictors <br>
+                        &nbsp;• remove rows with NAs <br>
+                        &nbsp;• remove near-zero variance <br>
+                        &nbsp;• remove linear combinations <br>
+                        &nbsp;• scale by SD <br><br>
+                        Uses <code>dbscan::lof()</code>. Requires <b>dbscan</b> package."),
+                                       hr(),
+                                       selectInput("lof_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectizeInput("lof_pred_cols",
+                                                      "Predictor columns (numeric only):",
+                                                      choices  = NULL,
+                                                      multiple = TRUE,
+                                                      options  = list(
+                                                        placeholder = "Defaults to all Predictor roles"
+                                                      )),
+                                       hr(),
+                                       numericInput("lof_min_pts", "minPts (nearest neighbours):",
+                                                    value = 4, min = 2, max = 50, step = 1),
+                                       helpText("Range 3–6 is usually optimal."),
+                                       hr(),
+                                       sliderInput("lof_threshold", "LOF threshold:",
+                                                   min = 1.0, max = 5.0, value = 2.0, step = 0.1,
+                                                   width = "100%"),
+                                       helpText("Observations with LOF > threshold are flagged as outliers."),
+                                       hr(),
+                                       checkboxInput("lof_scale", "Scale predictors (divide by SD)",
+                                                     value = TRUE)
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("lof_output", height = "60vh"),
+                                    hr(),
+                                    h5("Outlier Rows"),
+                                    DT::dataTableOutput("lof_outliers_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               
+               tabPanel("OUT: SVM",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Support Vector Machine (SVM): <br><br>
+                        One-class SVM for novelty/outlier detection. Observations
+                        outside the learned boundary are flagged as outliers. <br><br>
+                        Key parameters: <br>
+                        &nbsp;• <b>nu</b>: upper bound on the fraction of outliers
+                        (0.05 = ~5% flagged). Lower = stricter. <br>
+                        &nbsp;• <b>kernel</b>: shape of the decision boundary. <br>
+                        &nbsp;• <b>scale</b>: whether to scale inside the SVM
+                        (redundant if already scaled). <br><br>
+                        Internally applies: <br>
+                        &nbsp;• remove nominal predictors <br>
+                        &nbsp;• remove rows with NAs <br>
+                        &nbsp;• remove near-zero variance <br>
+                        &nbsp;• remove linear combinations <br><br>
+                        Uses <code>e1071::svm()</code>. Requires <b>e1071</b> package."),
+                                       hr(),
+                                       selectInput("svm_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectizeInput("svm_pred_cols",
+                                                      "Predictor columns (numeric only):",
+                                                      choices  = NULL,
+                                                      multiple = TRUE,
+                                                      options  = list(
+                                                        placeholder = "Defaults to all Predictor roles"
+                                                      )),
+                                       hr(),
+                                       sliderInput("svm_nu", "nu (outlier fraction):",
+                                                   min = 0.001, max = 0.5, value = 0.05,
+                                                   step = 0.005, width = "100%"),
+                                       helpText("~nu × n observations will be flagged."),
+                                       hr(),
+                                       selectInput("svm_kernel", "Kernel:",
+                                                   choices  = c("linear", "polynomial",
+                                                                "radial", "sigmoid"),
+                                                   selected = "linear"),
+                                       hr(),
+                                       checkboxInput("svm_scale", "Scale inside SVM", value = FALSE),
+                                       helpText("Set TRUE if predictors are not already scaled.")
+                          ),
+                          mainPanel(width = 9,
+                                    verbatimTextOutput("svm_summary"),
+                                    hr(),
+                                    h5("Outlier Rows"),
+                                    DT::dataTableOutput("svm_outliers_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               
+               tabPanel("OUT: Random Forest",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Random Forest Residuals: <br><br>
+                        Trains a Random Forest to predict the response variable,
+                        then flags observations whose <b>residuals</b> are outliers
+                        to the residual distribution (IQR method). <br><br>
+                        Characteristics: <br>
+                        &nbsp;• uses numeric and low-cardinality categorical vars <br>
+                        &nbsp;• not sensitive to scaling <br>
+                        &nbsp;• does NOT tolerate missing values <br>
+                        &nbsp;• somewhat robust to outliers <br>
+                        &nbsp;• enables non-linear relationships <br><br>
+                        Uses <code>randomForest::randomForest()</code>.
+                        Requires <b>randomForest</b> package."),
+                                       hr(),
+                                       selectInput("rf_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectInput("rf_response_col", "Response variable (y):",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectizeInput("rf_pred_cols",
+                                                      "Predictor columns:",
+                                                      choices  = NULL,
+                                                      multiple = TRUE,
+                                                      options  = list(
+                                                        placeholder = "Defaults to all Predictor roles"
+                                                      )),
+                                       hr(),
+                                       numericInput("rf_iqr_k", "IQR multiplier (k):",
+                                                    value = 2.0, min = 0.5, step = 0.5),
+                                       helpText("Residuals beyond k × IQR are flagged. Try 2.0 for broader detection.")
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("rf_output", height = "40vh"),
+                                    hr(),
+                                    verbatimTextOutput("rf_summary"),
+                                    hr(),
+                                    h5("Outlier Rows"),
+                                    DT::dataTableOutput("rf_outliers_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               
+               tabPanel("OUT: Isolation Forest",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Isolation Forest: <br><br>
+             A tree-based technique for detecting outliers. <br><br>
+             Characteristics: <br>
+             &nbsp;• uses numeric and nominal variables <br>
+             &nbsp;• does tolerate missing values <br>
+             &nbsp;• has many tuning parameters <br><br>
+             The <code>isolation.forest()</code> function from the <b>isotree</b>
+             package is used. <code>predict()</code> returns scores between 0 and 1
+             — higher scores indicate greater outlierness. <br><br>
+             An arbitrary threshold of 0.60 is commonly used as a starting point."),
+                                       hr(),
+                                       selectInput("iforest_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       selectizeInput("iforest_pred_cols",
+                                                      "Predictor columns:",
+                                                      choices  = NULL,
+                                                      multiple = TRUE,
+                                                      options  = list(
+                                                        placeholder = "Defaults to all Predictor roles"
+                                                      )),
+                                       hr(),
+                                       sliderInput("iforest_threshold",
+                                                   "Outlier score threshold:",
+                                                   min = 0.50, max = 0.95, value = 0.60,
+                                                   step = 0.01, width = "100%"),
+                                       helpText("Scores above threshold are flagged as outliers.")
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("iforest_output", height = "60vh"),
+                                    hr(),
+                                    verbatimTextOutput("iforest_summary"),
+                                    hr(),
+                                    h5("Outlier Rows"),
+                                    DT::dataTableOutput("iforest_outliers_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               
+               tabPanel("OUT: Outlier Summary",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Outlier Summary: <br><br>
+                        Stacks outlier flags from all active detection methods into a
+                        single <b>cumulative novelty score</b> per observation. <br><br>
+                        Taller bars = flagged by more methods = more likely a true outlier. <br><br>
+                        Currently includes: <br>
+                        &nbsp;• <b>Mahalanobis</b> distance <br>
+                        &nbsp;• <b>Cook's</b> distance <br><br>
+                        More methods will be added as they are implemented."),
+                                       hr(),
+                                       selectInput("os_id_col", "ID / label column:",
+                                                   choices = NULL),
+                                       hr(),
+                                       numericInput("os_min_count", "Min flag count to display:",
+                                                    value = 2, min = 1, step = 1),
+                                       helpText("Only show observations flagged by at least this many methods.")
+                          ),
+                          mainPanel(width = 9,
+                                    plotOutput("os_output", height = "70vh"),
+                                    hr(),
+                                    h5("Observations Flagged by Multiple Methods"),
+                                    DT::dataTableOutput("os_table")
+                          )
+                        )
+               ), # end tab panel
+               
+               tabPanel("Coming Soon", p("Under development."))
+               
+             ) # end strategy tabsetPanel
+    ), # end strategy
+    
+    
+    # ══ PREPROCESSING STRATEGY ════════════════════════════════════════════════
+    
+    tabPanel("Preprocessing Strategy",
+             tabsetPanel(
+               
+               # ── UI PREPROCESSING STRATEGY ─────────────────────────────────────────
                
                tabPanel("Coming Soon", p("Under development."))
                
@@ -1751,11 +2409,143 @@ ui <- fluidPage(
              ) # end strategy tabsetPanel
     ), # end strategy
     
+    
     # ══ MODEL ═════════════════════════════════════════════════════════════════
     
     tabPanel("Model",
              tabsetPanel(
+               
+               tabPanel("MOD: Regularised Regression",
+                        sidebarLayout(
+                          sidebarPanel(width = 3,
+                                       sidebar_note("Regularised Regression: <br><br>
+                        Fits Ridge, Lasso, or ElasticNet via <b>caret::train</b> with a
+                        recipe-based preprocessing pipeline. <br><br>
+                        The recipe applies KNN imputation, centering, scaling, and dummy
+                        encoding — fitted on training data only to prevent data leakage. <br><br>
+                        Assign roles in <b>EDA > Data Roles</b> before running: <br>
+                        &nbsp;• <b>Outcome</b>: response variable (y) <br>
+                        &nbsp;• <b>Predictor</b>: features to use <br>
+                        &nbsp;• <b>Train-Test Split</b>: column with Train/Test labels <br>
+                        &nbsp;• <b>Observation ID</b>: excluded from modelling"),
+                                       hr(),
+                                       
+                                       tags$b("Data"),
+                                       helpText("Defaults pulled from Data Roles."),
+                                       selectInput("mod_response",   "Response variable (y):", choices = NULL),
+                                       selectizeInput("mod_pred_cols", "Predictor columns:",
+                                                      choices = NULL, multiple = TRUE,
+                                                      options = list(placeholder = "Defaults to Predictor roles")),
+                                       selectInput("mod_split_col", "Train-Test Split column:",
+                                                   choices = NULL),
+                                       helpText("Column must contain values 'Train' and 'Test'."),
+                                       hr(),
+                                       
+                                       tags$b("Recipe"),
+                                       numericInput("mod_knn_k", "KNN imputation neighbours (k):",
+                                                    value = 5, min = 1, max = 50, step = 1),
+                                       helpText("Used in step_impute_knn inside the recipe."),
+                                       hr(),
+                                       
+                                       tags$b("Cross Validation"),
+                                       selectInput("mod_cv_method", "CV method:",
+                                                   choices = c("k-fold"         = "cv",
+                                                               "Repeated k-fold" = "repeatedcv",
+                                                               "LOOCV"           = "LOOCV"),
+                                                   selected = "cv"),
+                                       conditionalPanel(
+                                         condition = "input.mod_cv_method != 'LOOCV'",
+                                         numericInput("mod_k", "Number of folds (k):",
+                                                      value = 10, min = 2, max = 30, step = 1)
+                                       ),
+                                       conditionalPanel(
+                                         condition = "input.mod_cv_method == 'repeatedcv'",
+                                         numericInput("mod_repeats", "Number of repeats:",
+                                                      value = 3, min = 1, max = 10, step = 1)
+                                       ),
+                                       numericInput("mod_seed", "Random seed:",
+                                                    value = 2026, min = 1, step = 1),
+                                       hr(),
+                                       
+                                       tags$b("Regularisation"),
+                                       radioButtons("mod_type", "Model type:",
+                                                    choices = c("Ridge"      = "ridge",
+                                                                "Lasso"      = "lasso",
+                                                                "ElasticNet" = "elasticnet"),
+                                                    selected = "elasticnet"),
+                                       conditionalPanel(
+                                         condition = "input.mod_type == 'elasticnet'",
+                                         sliderInput("mod_alpha_step", "Alpha grid step:",
+                                                     min = 0.1, max = 0.5, value = 0.1, step = 0.1,
+                                                     width = "100%"),
+                                         helpText("Searches alpha from 0 to 1 in steps. Smaller = finer search.")
+                                       ),
+                                       radioButtons("mod_lambda_rule", "Lambda selection:",
+                                                    choices = c("lambda.min (best CV score)"           = "min",
+                                                                "lambda.1se (simplest within 1 SE)"    = "1se"),
+                                                    selected = "min"),
+                                       hr(),
+                                       tags$b("Manual Override (optional)"),
+                                       helpText("After running, you can fix alpha and lambda manually and re-run."),
+                                       checkboxInput("mod_manual_override", "Use manual alpha and lambda", value = FALSE),
+                                       conditionalPanel(
+                                         condition = "input.mod_manual_override == true",
+                                         numericInput("mod_manual_alpha", "Manual alpha (0=Ridge, 1=Lasso):",
+                                                      value = 0.5, min = 0, max = 1, step = 0.05),
+                                         numericInput("mod_manual_lambda", "Manual lambda:",
+                                                      value = 0.01, min = 0.000001, step = 0.001)
+                                       ),
+                                       hr(),
+                                       
+                                       tags$b("Response family"),
+                                       selectInput("mod_family", "Family:",
+                                                   choices  = c("Gaussian (continuous)" = "gaussian",
+                                                                "Binomial (binary)"     = "binomial",
+                                                                "Poisson (counts)"      = "poisson"),
+                                                   selected = "gaussian"),
+                                       hr(),
+                                       
+                                       actionButton("mod_run", "Run Model",
+                                                    icon  = icon("play"),
+                                                    width = "100%",
+                                                    style = "background-color:#2a9d8f; color:white;
+                                                         border:none; border-radius:6px;
+                                                         font-weight:600; padding:8px;"),
+                                       helpText("Model training may take a moment.")
+                          ),
+                          mainPanel(width = 9,
+                                    tabsetPanel(
+                                      tabPanel("CV Error Curve",
+                                               plotOutput("mod_cv_plot", height = "60vh"),
+                                               hr(),
+                                               verbatimTextOutput("mod_cv_summary")
+                                      ),
+                                      tabPanel("Coefficients",
+                                               plotOutput("mod_coef_path", height = "50vh"),
+                                               hr(),
+                                               h5("Non-zero Coefficients at Selected Lambda"),
+                                               DT::dataTableOutput("mod_coef_table")
+                                      ),
+                                      tabPanel("Test Set Evaluation",
+                                               plotOutput("mod_pred_plot", height = "50vh"),
+                                               hr(),
+                                               verbatimTextOutput("mod_test_metrics")
+                                      ),
+                                      tabPanel("Model Comparison",
+                                               h5("Cumulative Model Runs"),
+                                               DT::dataTableOutput("mod_comparison_table"),
+                                               hr(),
+                                               actionButton("mod_clear_comparison", "Clear History",
+                                                            icon  = icon("trash"),
+                                                            class = "btn-sm btn-outline-danger")
+                                      )
+                                    )
+                          )
+                        )
+               ), # end MOD tab
+               
                tabPanel("Coming Soon", p("Under development."))
+               
              ) # end model tabsetPanel
     ), # end model
     
@@ -1789,6 +2579,8 @@ server <- function(input, output, session) {
   
   get_data <- reactive({
     get_raw()                                                    |>
+      
+      # missingness strategies
       apply_missingness_strategy(input$strat_na_vals)            |>
       apply_col_missingness_strategy(get_col_na_rules())         |>
       apply_shadow_variables(input$strat_shadow_cols)            |>
@@ -1798,17 +2590,23 @@ server <- function(input, output, session) {
       apply_knn_imputation(
         knn_response = input$strat_knn_response,
         knn_cols     = input$strat_knn_cols,
-        knn_k        = input$strat_knn_k
+        knn_k        = input$strat_knn_k,
+        method       = input$strat_knn_method
       )                                                          |>
       apply_mmm_imputation(
         mean_cols   = input$strat_mmm_mean_cols,
         median_cols = input$strat_mmm_median_cols,
         mode_cols   = input$strat_mmm_mode_cols
       )                                                          |>
+      
+      # power transforms before centre/scale
       apply_centre_scale(
         centre_cols = input$strat_centre_cols,
         scale_cols  = input$strat_scale_cols
-      )
+      )                                                          |>
+      apply_power_transform_strategy(input$strat_boxcox_cols, "boxcox")      |>
+      apply_power_transform_strategy(input$strat_yj_cols,     "yeojohnson")
+      
   })
   
   get_ms_data_plot <- reactive({
@@ -1829,6 +2627,18 @@ server <- function(input, output, session) {
   })
   
   
+  # ── DOWNLOAD DF ANY TIME ───────────────────────────────────────────────────
+  
+  output$download_csv <- downloadHandler(
+    filename = function() {
+      paste0("strategised_data_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    },
+    content = function(file) {
+      write.csv(get_data(), file, row.names = FALSE)
+    }
+  )
+  
+  
   # ── SERVER EDA DATA ROLES ──────────────────────────────────────────────────
   
   role_choices <- c("Predictor", "Outcome", "Observation ID",
@@ -1847,6 +2657,24 @@ server <- function(input, output, session) {
   )
   
   roles_rv <- reactiveVal(NULL)
+  
+  model_comparison_rv <- reactiveVal(data.frame(
+    Run         = integer(),
+    Model       = character(),
+    Family      = character(),
+    CV_Method   = character(),
+    Folds       = integer(),
+    Best_Alpha  = numeric(),
+    Best_Lambda = numeric(),
+    Lambda_Rule = character(),
+    Predictors  = integer(),
+    RMSE        = numeric(),
+    MAE         = numeric(),
+    R2          = numeric(),
+    Time_sec    = numeric(),
+    stringsAsFactors = FALSE
+  ))
+  
   
   observe({
     df      <- get_data()
@@ -2142,7 +2970,7 @@ server <- function(input, output, session) {
   # Little's MCAR test
   output$ms_mcar_output <- renderPrint({
     req(input$ms_mcar)
-    df     <- get_ms_data_full()
+    df     <- get_data()
     df_num <- df[, sapply(df, is.numeric), drop = FALSE]
     if (ncol(df_num) < 2) {
       cat("Need at least 2 numeric variables for Little's MCAR test.\n")
@@ -2323,11 +3151,21 @@ server <- function(input, output, session) {
     if (isTRUE(input$hist_tolerate_na)) {
       df <- df[!is.na(df[[input$hist_var]]), , drop = FALSE]
     }
-    ggplot(data = df) +
-      geom_histogram(mapping = aes(x = .data[[input$hist_var]]),
-                     bins = input$hist_bins) +
-      labs(title = paste("Histogram for", input$hist_var),
-           x     = "value",
+    
+    x      <- df[[input$hist_var]]
+    x_plot <- apply_power_transform(x, input$hist_transform)
+    
+    x_label <- if (input$hist_transform == "none") {
+      input$hist_var
+    } else {
+      paste0(input$hist_var, " [", input$hist_transform, "]")
+    }
+    
+    plot_df <- data.frame(x = x_plot)
+    ggplot(plot_df, aes(x = x)) +
+      geom_histogram(bins = input$hist_bins) +
+      labs(title = paste("Histogram for", x_label),
+           x     = x_label,
            y     = "Count") +
       theme_minimal(base_size = 13)
   })
@@ -2351,7 +3189,27 @@ server <- function(input, output, session) {
     if (isTRUE(input$bp_tolerate_na)) {
       df <- df[!is.na(df[[input$bp_var]]), , drop = FALSE]
     }
-    plot_boxplot(df, input$bp_var, input$bp_label_col, input$bp_iqr_k)
+    
+    if (input$bp_transform != "none") {
+      x_trans <- apply_power_transform(df[[input$bp_var]], input$bp_transform)
+      df[[input$bp_var]] <- x_trans
+      # relabel for plot title
+      attr(df[[input$bp_var]], "transform_label") <- paste0(
+        input$bp_var, " [", input$bp_transform, "]"
+      )
+    }
+    
+    var_label <- if (input$bp_transform != "none") {
+      paste0(input$bp_var, " [", input$bp_transform, "]")
+    } else {
+      input$bp_var
+    }
+    
+    # reuse plot_boxplot but override the var column name for labelling
+    df_plot <- df
+    names(df_plot)[names(df_plot) == input$bp_var] <- var_label
+    
+    plot_boxplot(df_plot, var_label, input$bp_label_col, input$bp_iqr_k)
   })
   
   output$bp_outliers_table <- renderDT({
@@ -2488,7 +3346,22 @@ server <- function(input, output, session) {
     if (isTRUE(input$bag_tolerate_na)) {
       df <- df[!is.na(df[[input$bag_x_var]]) & !is.na(df[[input$bag_y_var]]), , drop = FALSE]
     }
-    plot_bagplot(df, input$bag_x_var, input$bag_y_var, input$bag_label_col, input$bag_k)
+    
+    x_label <- input$bag_x_var
+    y_label <- input$bag_y_var
+    
+    if (input$bag_transform != "none") {
+      df[[input$bag_x_var]] <- apply_power_transform(df[[input$bag_x_var]], input$bag_transform)
+      df[[input$bag_y_var]] <- apply_power_transform(df[[input$bag_y_var]], input$bag_transform)
+      x_label <- paste0(input$bag_x_var, " [", input$bag_transform, "]")
+      y_label <- paste0(input$bag_y_var, " [", input$bag_transform, "]")
+    }
+    
+    # rename cols so plot_bagplot uses the right labels
+    names(df)[names(df) == input$bag_x_var] <- x_label
+    names(df)[names(df) == input$bag_y_var] <- y_label
+    
+    plot_bagplot(df, x_label, y_label, input$bag_label_col, input$bag_k)
   })
   
   output$bag_outliers_table <- renderDT({
@@ -2799,6 +3672,7 @@ server <- function(input, output, session) {
     resp <- input$strat_knn_response
     cols <- input$strat_knn_cols
     k    <- input$strat_knn_k
+    method <- input$strat_knn_method
     
     if (is.null(resp) || resp == "(none)" || resp == "") {
       cat("No response variable selected — KNN imputation not applied.\n")
@@ -2832,38 +3706,1475 @@ server <- function(input, output, session) {
   })
   
   
-  # ── SERVER STRATEGY CENTRE / SCALE ────────────────────────────────────────────
+  # ── SERVER STRATEGY TRANSFORMS ─────────────────────────────────────────────────
   
   observe({
     df       <- get_raw()
     num_cols <- names(df)[sapply(df, is.numeric)]
-    updateSelectizeInput(session, "strat_centre_cols", choices = num_cols, server = TRUE)
-    updateSelectizeInput(session, "strat_scale_cols",  choices = num_cols, server = TRUE)
+    
+    updateSelectizeInput(session, "strat_boxcox_cols",  choices = num_cols, server = TRUE)
+    updateSelectizeInput(session, "strat_yj_cols",      choices = num_cols, server = TRUE)
+    updateSelectizeInput(session, "strat_centre_cols",  choices = num_cols, server = TRUE)
+    updateSelectizeInput(session, "strat_scale_cols",   choices = num_cols, server = TRUE)
   })
   
   output$transform_summary <- renderPrint({
-    centre <- input$strat_centre_cols
-    scale  <- input$strat_scale_cols
+    boxcox  <- input$strat_boxcox_cols
+    yj      <- input$strat_yj_cols
+    centre  <- input$strat_centre_cols
+    scale   <- input$strat_scale_cols
     
-    if ((is.null(centre) || length(centre) == 0) &&
-        (is.null(scale)  || length(scale)  == 0)) {
+    nothing <- all(sapply(list(boxcox, yj, centre, scale), 
+                          function(x) is.null(x) || length(x) == 0))
+    if (nothing) {
       cat("No transformations applied.\n")
       return(invisible(NULL))
     }
     
+    df <- get_raw()
+    
+    if (!is.null(boxcox) && length(boxcox) > 0) {
+      pos_cols  <- boxcox[sapply(boxcox, function(v) 
+        v %in% names(df) && all(df[[v]] > 0, na.rm = TRUE))]
+      skip_cols <- setdiff(boxcox, pos_cols)
+      cat(sprintf("Box-Cox (%d column(s)):\n", length(pos_cols)))
+      for (col in pos_cols)  cat(sprintf("  ✓ %s\n", col))
+      for (col in skip_cols) cat(sprintf("  ✗ %s  [skipped — contains values ≤ 0]\n", col))
+      cat("\n")
+    }
+    
+    if (!is.null(yj) && length(yj) > 0) {
+      cat(sprintf("Yeo-Johnson (%d column(s)):\n", length(yj)))
+      for (col in yj) cat(sprintf("  ✓ %s\n", col))
+      cat("\n")
+    }
+    
     if (!is.null(centre) && length(centre) > 0) {
-      cat(sprintf("Centred (%d column(s)):\n", length(centre)))
+      cat(sprintf("Centre (%d column(s)):\n", length(centre)))
       for (col in centre) cat(sprintf("  %s  →  %s - mean(%s)\n", col, col, col))
       cat("\n")
     }
     
     if (!is.null(scale) && length(scale) > 0) {
-      cat(sprintf("Scaled (%d column(s)):\n", length(scale)))
+      cat(sprintf("Scale (%d column(s)):\n", length(scale)))
       for (col in scale) cat(sprintf("  %s  →  %s / sd(%s)\n", col, col, col))
     }
   })
   
+  # ── SERVER OUTLIER MAHALANOBIS ─────────────────────────────────────────────────
+  
+  # keep power transform selectize inputs in sync with the radio button choice
+  observeEvent(input$transform_power_choice, {
+    choice <- input$transform_power_choice
+    # clear both first, then re-enable the chosen one's current selection
+    if (choice == "none") {
+      updateSelectizeInput(session, "strat_boxcox_cols", selected = character(0))
+      updateSelectizeInput(session, "strat_yj_cols",     selected = character(0))
+    } else if (choice == "boxcox") {
+      updateSelectizeInput(session, "strat_yj_cols", selected = character(0))
+    } else if (choice == "yeojohnson") {
+      updateSelectizeInput(session, "strat_boxcox_cols", selected = character(0))
+    }
+  })
+  
+  # "Select All Vars" for whichever power transform is active
+  observeEvent(input$transform_power_select_all, {
+    df       <- get_data()
+    num_cols <- names(df)[sapply(df, is.numeric)]
+    choice   <- input$transform_power_choice
+    if (choice == "boxcox") {
+      pos_cols <- num_cols[sapply(num_cols, function(v) all(df[[v]] > 0, na.rm = TRUE))]
+      updateSelectizeInput(session, "strat_boxcox_cols", selected = pos_cols)
+    } else if (choice == "yeojohnson") {
+      updateSelectizeInput(session, "strat_yj_cols", selected = num_cols)
+    }
+  })
+  
+  # "All → Centre" button
+  observeEvent(input$transform_centre_select_all, {
+    df       <- get_data()
+    num_cols <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "strat_centre_cols", selected = num_cols)
+  })
+  
+  # "All → Scale" button
+  observeEvent(input$transform_scale_select_all, {
+    df       <- get_data()
+    num_cols <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "strat_scale_cols", selected = num_cols)
+  })
+  
+  # "All → Centre + Scale" button
+  observeEvent(input$transform_centre_scale_select_all, {
+    df       <- get_data()
+    num_cols <- names(df)[sapply(df, is.numeric)]
+    updateSelectizeInput(session, "strat_centre_cols", selected = num_cols)
+    updateSelectizeInput(session, "strat_scale_cols",  selected = num_cols)
+  })
+  
+  # "Clear All" button
+  observeEvent(input$transform_clear_all, {
+    updateSelectizeInput(session, "strat_boxcox_cols",  selected = character(0))
+    updateSelectizeInput(session, "strat_yj_cols",      selected = character(0))
+    updateSelectizeInput(session, "strat_centre_cols",  selected = character(0))
+    updateSelectizeInput(session, "strat_scale_cols",   selected = character(0))
+    updateRadioButtons(session, "transform_power_choice", selected = "none")
+  })
+  
+  observe({
+    df      <- get_data()
+    id_col  <- get_id_col()
+    roles   <- get_roles()
+    
+    pred_cols <- names(roles[roles == "Predictor"])
+    pred_cols <- intersect(pred_cols, names(df))
+    
+    # auto-exclude shadow columns and non-numeric from default selection
+    num_pred_cols <- pred_cols[sapply(pred_cols, function(v) {
+      is.numeric(df[[v]]) && !grepl("_shadow$", v)
+    })]
+    
+    updateSelectInput(session, "mah_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col) > 0) id_col[1] else names(df)[1])
+    
+    updateSelectizeInput(session, "mah_pred_cols",
+                         choices  = names(df),
+                         selected = num_pred_cols,   # ← only numeric, no shadows
+                         server   = TRUE)
+  })
+  
+  output$mah_output <- renderPlot({
+    req(input$mah_id_col, input$mah_pred_cols)
+    plot_mahalanobis(
+      df             = get_data(),
+      predictor_cols = input$mah_pred_cols,
+      id_col         = input$mah_id_col,
+      threshold_p    = input$mah_threshold_p
+    )
+  })
+  
+  output$mah_outliers_table <- renderDT({
+    req(input$mah_id_col, input$mah_pred_cols)
+    outliers <- get_mahalanobis_outliers(
+      df             = get_data(),
+      predictor_cols = input$mah_pred_cols,
+      id_col         = input$mah_id_col,
+      threshold_p    = input$mah_threshold_p
+    )
+    make_hints_dt(get_raw(), outliers)
+  }, server = FALSE)
+  
+  
+  # ── SERVER OUTLIER COOK'S DISTANCE ────────────────────────────────────────────
+  
+  observe({
+    df       <- get_data()
+    id_col   <- get_id_col()
+    resp_col <- get_outcome_col()
+    roles    <- get_roles()
+    
+    pred_cols <- names(roles[roles == "Predictor"])
+    pred_cols <- intersect(pred_cols, names(df))
+    num_pred_cols <- pred_cols[sapply(pred_cols, function(v) {
+      is.numeric(df[[v]]) && !grepl("_shadow$", v)
+    })]
+    
+    updateSelectInput(session, "cook_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col)   > 0) id_col[1]   else names(df)[1])
+    updateSelectInput(session, "cook_response_col",
+                      choices  = names(df),
+                      selected = if (length(resp_col) > 0) resp_col[1] else names(df)[1])
+    updateSelectizeInput(session, "cook_pred_cols",
+                         choices  = names(df),
+                         selected = num_pred_cols,
+                         server   = TRUE)
+  })
+  
+  get_cook_processed <- reactive({
+    req(input$cook_response_col, input$cook_pred_cols)
+    df       <- get_data()
+    response <- input$cook_response_col
+    preds    <- setdiff(input$cook_pred_cols, response)
+    
+    if (length(preds) < 1) return(NULL)
+    
+    cols_needed <- union(preds, response)
+    cols_needed <- intersect(cols_needed, names(df))
+    df_sub      <- df[, cols_needed, drop = FALSE]
+    
+    # keep only numeric predictors
+    num_preds <- preds[sapply(preds, function(v) v %in% names(df_sub) && is.numeric(df_sub[[v]]))]
+    if (length(num_preds) < 1) return(NULL)
+    
+    df_sub <- df_sub[, c(num_preds, response), drop = FALSE]
+    
+    # ── FIX: remove NAs manually first so orig_rows stays aligned with baked ──
+    complete_mask <- complete.cases(df_sub)
+    orig_rows     <- which(complete_mask)          # indices into get_data()
+    df_complete   <- df_sub[complete_mask, , drop = FALSE]
+    
+    if (nrow(df_complete) < 3) return(NULL)
+    
+    tryCatch({
+      rec <- recipes::recipe(as.formula(paste(response, "~ .")), data = df_complete) |>
+        recipes::step_nzv(recipes::all_predictors())                |>
+        recipes::step_lincomb(recipes::all_numeric_predictors())    |>
+        recipes::step_corr(recipes::all_numeric_predictors(), threshold = 0.9) |>
+        recipes::prep(training = df_complete)
+      
+      baked <- recipes::bake(rec, new_data = NULL)
+      
+      # after nzv/lincomb/corr some rows are never dropped, so baked rows == df_complete rows
+      list(baked = baked, orig_rows = orig_rows)
+    }, error = function(e) {
+      message("Cook's recipe error: ", conditionMessage(e))
+      NULL
+    })
+  })
+  
+  output$cook_output <- renderPlot({
+    req(input$cook_id_col, input$cook_response_col, input$cook_pred_cols)
+    result <- get_cook_processed()
+    
+    if (is.null(result)) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "Could not prepare data.\nCheck response and predictor selections.",
+                 colour = "#C41E3A", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    baked     <- result$baked
+    orig_rows <- result$orig_rows
+    response  <- input$cook_response_col
+    df        <- get_data()
+    
+    if (ncol(baked) < 2 || nrow(baked) < 3) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "Not enough complete rows or columns after preprocessing.",
+                 colour = "#C41E3A", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    tryCatch({
+      lmod      <- glm(formula = as.formula(paste(response, "~ .")),
+                       data    = baked, family = gaussian)
+      dc        <- cooks.distance(lmod)
+      threshold <- input$cook_threshold_mult * mean(dc, na.rm = TRUE)
+      id        <- seq_along(dc) / length(dc)
+      id_labels <- as.character(df[[input$cook_id_col]])[orig_rows]
+      label     <- ifelse(dc > threshold, id_labels, NA_character_)
+      Observations <- ifelse(dc > threshold, "outlier", "non-outlier")
+      n_out     <- sum(dc > threshold, na.rm = TRUE)
+      
+      plot_df <- data.frame(dc, id, label, Observations)
+      
+      ggplot(plot_df, aes(y = dc, x = id)) +
+        geom_point(aes(colour = Observations), size = 2) +
+        ggrepel::geom_text_repel(aes(label = label), max.overlaps = 50,
+                                 size = 3.2, na.rm = TRUE) +
+        scale_colour_manual(values = c("non-outlier" = "#4a80d4",
+                                       "outlier"     = "#C41E3A")) +
+        geom_hline(yintercept = threshold, colour = "black", linetype = "dashed") +
+        scale_x_continuous(breaks = c(0, 0.5, 1),
+                           labels = c("0%", "50%", "100%")) +
+        annotate("text", x = 0.01, y = threshold * 1.05,
+                 label = sprintf("threshold=%.4f  (%d outliers)", threshold, n_out),
+                 hjust = 0, size = 3.5, colour = "#333333") +
+        labs(
+          title = paste0("Cook's Distance | threshold = ",
+                         input$cook_threshold_mult, " × mean(D_c) = ",
+                         round(threshold, 4),
+                         " | n = ", nrow(baked), " complete rows"),
+          y = "Cook's distance",
+          x = "Complete Observations"
+        ) +
+        theme_minimal(base_size = 13) +
+        theme(
+          plot.title   = element_text(size = 12, face = "bold", hjust = 0.5),
+          legend.title = element_text(face = "bold"),
+          legend.text  = element_text(size = 12)
+        )
+    }, error = function(e) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = paste0("Model error: ", conditionMessage(e)),
+                 colour = "#C41E3A", size = 4) +
+        theme_void()
+    })
+  })
+  
+  output$cook_outliers_table <- renderDT({
+    req(input$cook_id_col, input$cook_response_col, input$cook_pred_cols)
+    result <- get_cook_processed()
+    if (is.null(result)) return(data.frame(Message = "No data."))
+    
+    baked     <- result$baked
+    orig_rows <- result$orig_rows
+    response  <- input$cook_response_col
+    df        <- get_data()
+    
+    tryCatch({
+      lmod      <- glm(formula = as.formula(paste(response, "~ .")),
+                       data    = baked, family = gaussian)
+      dc        <- cooks.distance(lmod)
+      threshold <- input$cook_threshold_mult * mean(dc, na.rm = TRUE)
+      outlier_orig_rows <- orig_rows[dc > threshold]
+      make_hints_dt(get_raw(), df[outlier_orig_rows, , drop = FALSE])
+    }, error = function(e) {
+      data.frame(Message = paste0("Error: ", conditionMessage(e)))
+    })
+  }, server = FALSE)
+  
+  
+  # ── SERVER OUTLIER LOF ────────────────────────────────────────────────────────
+  
+  observe({
+    df     <- get_data()
+    id_col <- get_id_col()
+    roles  <- get_roles()
+    
+    pred_cols <- names(roles[roles == "Predictor"])
+    pred_cols <- intersect(pred_cols, names(df))
+    num_pred_cols <- pred_cols[sapply(pred_cols, function(v) {
+      is.numeric(df[[v]]) && !grepl("_shadow$", v)
+    })]
+    
+    updateSelectInput(session, "lof_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col) > 0) id_col[1] else names(df)[1])
+    updateSelectizeInput(session, "lof_pred_cols",
+                         choices  = names(df),
+                         selected = num_pred_cols,
+                         server   = TRUE)
+  })
+  
+  get_lof_result <- reactive({
+    req(input$lof_id_col, input$lof_pred_cols)
+    df        <- get_data()
+    preds     <- input$lof_pred_cols
+    num_preds <- preds[sapply(preds, function(v) v %in% names(df) && is.numeric(df[[v]]))]
+    if (length(num_preds) < 2) return(NULL)
+    
+    df_sub <- df[, num_preds, drop = FALSE]
+    
+    # remove NAs manually to track orig_rows
+    complete_mask <- complete.cases(df_sub)
+    orig_rows     <- which(complete_mask)
+    df_complete   <- df_sub[complete_mask, , drop = FALSE]
+    if (nrow(df_complete) < 5) return(NULL)
+    
+    tryCatch({
+      rec <- recipes::recipe(~ ., data = df_complete) |>
+        recipes::step_nzv(recipes::all_predictors()) |>
+        recipes::step_lincomb(recipes::all_numeric_predictors())
+      
+      if (isTRUE(input$lof_scale)) {
+        rec <- rec |> recipes::step_scale(recipes::all_numeric_predictors())
+      }
+      
+      baked <- rec |>
+        recipes::prep(training = df_complete) |>
+        recipes::bake(new_data = NULL)
+      
+      if (ncol(baked) < 1) return(NULL)
+      
+      mat <- as.matrix(baked)
+      lof_scores <- dbscan::lof(mat, minPts = input$lof_min_pts)
+      
+      list(lof = lof_scores, orig_rows = orig_rows)
+    }, error = function(e) {
+      message("LOF error: ", conditionMessage(e))
+      NULL
+    })
+  })
+  
+  output$lof_output <- renderPlot({
+    req(input$lof_id_col, input$lof_pred_cols)
+    result <- get_lof_result()
+    
+    if (is.null(result)) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "Could not compute LOF.\nCheck predictor selections and ensure dbscan is installed.",
+                 colour = "#C41E3A", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    df        <- get_data()
+    lof       <- result$lof
+    orig_rows <- result$orig_rows
+    threshold <- input$lof_threshold
+    id_labels <- as.character(df[[input$lof_id_col]])[orig_rows]
+    
+    id           <- seq_along(lof) / length(lof)
+    label        <- ifelse(lof > threshold, id_labels, NA_character_)
+    Observations <- ifelse(lof > threshold, "outlier", "non-outlier")
+    n_out        <- sum(lof > threshold)
+    
+    plot_df <- data.frame(lof, id, label, Observations)
+    
+    ggplot(plot_df, aes(y = lof, x = id)) +
+      geom_point(aes(colour = Observations), size = 2) +
+      ggrepel::geom_text_repel(aes(label = label), max.overlaps = 50,
+                               size = 3.2, na.rm = TRUE) +
+      scale_colour_manual(values = c("non-outlier" = "#4a80d4",
+                                     "outlier"     = "#C41E3A")) +
+      geom_hline(yintercept = threshold, colour = "black", linetype = "dashed") +
+      scale_x_continuous(breaks = c(0, 0.5, 1),
+                         labels = c("0%", "50%", "100%")) +
+      scale_y_continuous(limits = c(0, NA)) +
+      annotate("text", x = 0.01, y = threshold * 1.05,
+               label = sprintf("threshold=%.1f  (%d outliers)", threshold, n_out),
+               hjust = 0, size = 3.5, colour = "#333333") +
+      labs(
+        title = paste0("LOF | minPts = ", input$lof_min_pts,
+                       " | threshold = ", threshold,
+                       if (isTRUE(input$lof_scale)) " | scaled" else " | unscaled",
+                       " | n = ", length(lof), " complete rows"),
+        y = "LOF",
+        x = "Complete Observations"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        plot.title   = element_text(size = 12, face = "bold", hjust = 0.5),
+        legend.title = element_text(face = "bold"),
+        legend.text  = element_text(size = 12)
+      )
+  })
+  
+  output$lof_outliers_table <- renderDT({
+    req(input$lof_id_col, input$lof_pred_cols)
+    result <- get_lof_result()
+    if (is.null(result)) return(data.frame(Message = "No data."))
+    
+    df        <- get_data()
+    lof       <- result$lof
+    orig_rows <- result$orig_rows
+    threshold <- input$lof_threshold
+    outlier_orig_rows <- orig_rows[lof > threshold]
+    make_hints_dt(get_raw(), df[outlier_orig_rows, , drop = FALSE])
+  }, server = FALSE)
+  
+  
+  # ── SERVER OUTLIER SVM ────────────────────────────────────────────────────────
+  
+  observe({
+    df     <- get_data()
+    id_col <- get_id_col()
+    roles  <- get_roles()
+    
+    pred_cols <- names(roles[roles == "Predictor"])
+    pred_cols <- intersect(pred_cols, names(df))
+    num_pred_cols <- pred_cols[sapply(pred_cols, function(v) {
+      is.numeric(df[[v]]) && !grepl("_shadow$", v)
+    })]
+    
+    updateSelectInput(session, "svm_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col) > 0) id_col[1] else names(df)[1])
+    updateSelectizeInput(session, "svm_pred_cols",
+                         choices  = names(df),
+                         selected = num_pred_cols,
+                         server   = TRUE)
+  })
+  
+  get_svm_result <- reactive({
+    req(input$svm_id_col, input$svm_pred_cols)
+    df        <- get_data()
+    preds     <- input$svm_pred_cols
+    num_preds <- preds[sapply(preds, function(v) v %in% names(df) && is.numeric(df[[v]]))]
+    if (length(num_preds) < 1) return(NULL)
+    
+    df_sub <- df[, num_preds, drop = FALSE]
+    
+    # remove NAs manually to track orig_rows
+    complete_mask <- complete.cases(df_sub)
+    orig_rows     <- which(complete_mask)
+    df_complete   <- df_sub[complete_mask, , drop = FALSE]
+    if (nrow(df_complete) < 5) return(NULL)
+    
+    tryCatch({
+      rec <- recipes::recipe(~ ., data = df_complete) |>
+        recipes::step_nzv(recipes::all_predictors()) |>
+        recipes::step_lincomb(recipes::all_numeric_predictors()) |>
+        recipes::prep(training = df_complete)
+      
+      baked <- recipes::bake(rec, new_data = NULL)
+      if (ncol(baked) < 1) return(NULL)
+      
+      mat   <- as.matrix(baked)
+      model <- e1071::svm(mat, y = NULL,
+                          type   = "one-classification",
+                          nu     = input$svm_nu,
+                          scale  = isTRUE(input$svm_scale),
+                          kernel = input$svm_kernel)
+      
+      svm_outlier <- !predict(model, mat)   # TRUE = outlier
+      list(svm_outlier = svm_outlier, orig_rows = orig_rows, n_total = nrow(mat))
+    }, error = function(e) {
+      message("SVM error: ", conditionMessage(e))
+      NULL
+    })
+  })
+  
+  output$svm_summary <- renderPrint({
+    req(input$svm_id_col, input$svm_pred_cols)
+    result <- get_svm_result()
+    
+    if (is.null(result)) {
+      cat("Could not fit SVM.\nCheck predictor selections and ensure e1071 is installed.\n")
+      return(invisible(NULL))
+    }
+    
+    df          <- get_data()
+    svm_outlier <- result$svm_outlier
+    orig_rows   <- result$orig_rows
+    n_out       <- sum(svm_outlier)
+    n_total     <- result$n_total
+    out_ids     <- as.character(df[[input$svm_id_col]])[orig_rows[svm_outlier]]
+    
+    cat(sprintf("One-Class SVM | kernel = %s | nu = %.4f | scale = %s\n",
+                input$svm_kernel, input$svm_nu,
+                if (isTRUE(input$svm_scale)) "TRUE" else "FALSE"))
+    cat(sprintf("Complete rows : %d\n", n_total))
+    cat(sprintf("Outliers      : %d  (%.1f%%)\n", n_out, 100 * n_out / n_total))
+    cat("──────────────────────────────\n")
+    if (n_out == 0) {
+      cat("No outliers flagged.\n")
+    } else {
+      cat("Flagged IDs:\n")
+      cat(paste(out_ids, collapse = "  "), "\n")
+    }
+  })
+  
+  output$svm_outliers_table <- renderDT({
+    req(input$svm_id_col, input$svm_pred_cols)
+    result <- get_svm_result()
+    if (is.null(result)) return(data.frame(Message = "No data."))
+    
+    df          <- get_data()
+    svm_outlier <- result$svm_outlier
+    orig_rows   <- result$orig_rows
+    outlier_orig_rows <- orig_rows[svm_outlier]
+    
+    if (length(outlier_orig_rows) == 0) return(data.frame(Message = "No outliers flagged."))
+    make_hints_dt(get_raw(), df[outlier_orig_rows, , drop = FALSE])
+  }, server = FALSE)
+  
+  
+  # ── SERVER OUTLIER RANDOM FOREST ──────────────────────────────────────────────
+  
+  observe({
+    df       <- get_data()
+    id_col   <- get_id_col()
+    resp_col <- get_outcome_col()
+    roles    <- get_roles()
+    
+    pred_cols <- names(roles[roles == "Predictor"])
+    pred_cols <- intersect(pred_cols, names(df))
+    # RF handles low-cardinality factors — exclude shadow cols only
+    rf_pred_cols <- pred_cols[!grepl("_shadow$", pred_cols)]
+    
+    updateSelectInput(session, "rf_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col)   > 0) id_col[1]   else names(df)[1])
+    updateSelectInput(session, "rf_response_col",
+                      choices  = names(df),
+                      selected = if (length(resp_col) > 0) resp_col[1] else names(df)[1])
+    updateSelectizeInput(session, "rf_pred_cols",
+                         choices  = names(df),
+                         selected = rf_pred_cols,
+                         server   = TRUE)
+  })
+  
+  get_rf_result <- reactive({
+    req(input$rf_id_col, input$rf_response_col, input$rf_pred_cols)
+    df       <- get_data()
+    response <- input$rf_response_col
+    preds    <- setdiff(input$rf_pred_cols, response)
+    if (length(preds) < 1) return(NULL)
+    if (!is.numeric(df[[response]])) return(NULL)
+    
+    cols_needed  <- union(preds, response)
+    cols_needed  <- intersect(cols_needed, names(df))
+    df_sub       <- df[, cols_needed, drop = FALSE]
+    
+    # remove rows with any NA
+    complete_mask <- complete.cases(df_sub)
+    orig_rows     <- which(complete_mask)
+    df_complete   <- df_sub[complete_mask, , drop = FALSE]
+    if (nrow(df_complete) < 10) return(NULL)
+    
+    tryCatch({
+      # remove near-zero variance and linear combos from numeric preds only
+      num_preds <- preds[sapply(preds, function(v) v %in% names(df_complete) &&
+                                  is.numeric(df_complete[[v]]))]
+      if (length(num_preds) > 0) {
+        rec <- recipes::recipe(as.formula(paste(response, "~ .")),
+                               data = df_complete) |>
+          recipes::step_nzv(recipes::all_predictors()) |>
+          recipes::step_lincomb(recipes::all_numeric_predictors()) |>
+          recipes::prep(training = df_complete)
+        df_model <- recipes::bake(rec, new_data = NULL)
+      } else {
+        df_model <- df_complete
+      }
+      
+      if (ncol(df_model) < 2) return(NULL)
+      
+      gen_model <- randomForest::randomForest(
+        as.formula(paste(response, "~ .")),
+        data = df_model
+      )
+      
+      residuals      <- df_complete[[response]] - predict(gen_model, newdata = df_complete)
+      names(residuals) <- as.character(df[[input$rf_id_col]])[orig_rows]
+      
+      # IQR-based outlier detection on residuals
+      k      <- input$rf_iqr_k
+      limits <- boxplot.stats(x = residuals, coef = k)$stats
+      is_out <- residuals < limits[1] | residuals > limits[5]
+      
+      list(
+        residuals = residuals,
+        is_out    = is_out,
+        limits    = limits,
+        orig_rows = orig_rows,
+        k         = k
+      )
+    }, error = function(e) {
+      message("RF error: ", conditionMessage(e))
+      NULL
+    })
+  })
+  
+  output$rf_output <- renderPlot({
+    req(input$rf_id_col, input$rf_response_col, input$rf_pred_cols)
+    result <- get_rf_result()
+    
+    if (is.null(result)) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "Could not fit Random Forest.\nCheck selections, ensure no NAs remain,\nand that randomForest is installed.",
+                 colour = "#C41E3A", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    residuals <- result$residuals
+    is_out    <- result$is_out
+    k         <- result$k
+    label     <- ifelse(is_out, names(residuals), NA_character_)
+    
+    plot_df <- data.frame(
+      residuals    = residuals,
+      Observations = ifelse(is_out, "outlier", "non-outlier"),
+      label        = label
+    )
+    
+    ggplot(plot_df, aes(x = residuals, y = 0)) +
+      geom_boxplot(coef = k, outlier.colour = "#C41E3A") +
+      ggrepel::geom_text_repel(aes(label = label), max.overlaps = 50,
+                               na.rm = TRUE, size = 3.2) +
+      labs(
+        title = paste0("Random Forest Residuals | IQR multiplier k = ", k,
+                       " | n = ", length(residuals), " complete rows"),
+        x = "residuals"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        plot.title   = element_text(size = 12, face = "bold", hjust = 0.5),
+        axis.title.y = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.ticks.y = element_blank()
+      )
+  })
+  
+  output$rf_summary <- renderPrint({
+    req(input$rf_id_col, input$rf_response_col, input$rf_pred_cols)
+    result <- get_rf_result()
+    if (is.null(result)) {
+      cat("No result available.\n")
+      return(invisible(NULL))
+    }
+    residuals <- result$residuals
+    is_out    <- result$is_out
+    limits    <- result$limits
+    n_out     <- sum(is_out)
+    
+    cat(sprintf("Random Forest Residual Outliers | k = %.1f\n", result$k))
+    cat(sprintf("SD of residuals : %.4f\n", sd(residuals)))
+    cat(sprintf("Whisker limits  : [%.4f,  %.4f]\n", limits[1], limits[5]))
+    cat(sprintf("Complete rows   : %d\n", length(residuals)))
+    cat(sprintf("Outliers        : %d\n", n_out))
+    cat("──────────────────────────────\n")
+    if (n_out == 0) {
+      cat("No outliers flagged.\n")
+    } else {
+      cat("Flagged IDs:\n")
+      cat(paste(names(residuals)[is_out], collapse = "  "), "\n")
+    }
+  })
+  
+  output$rf_outliers_table <- renderDT({
+    req(input$rf_id_col, input$rf_response_col, input$rf_pred_cols)
+    result <- get_rf_result()
+    if (is.null(result)) return(data.frame(Message = "No data."))
+    
+    is_out    <- result$is_out
+    orig_rows <- result$orig_rows
+    df        <- get_data()
+    
+    outlier_orig_rows <- orig_rows[is_out]
+    if (length(outlier_orig_rows) == 0) return(data.frame(Message = "No outliers flagged."))
+    make_hints_dt(get_raw(), df[outlier_orig_rows, , drop = FALSE])
+  }, server = FALSE)
+  
+  
+  # ── SERVER OUTLIER ISOLATION FOREST ──────────────────────────────────────────
+  
+  observe({
+    df     <- get_data()
+    id_col <- get_id_col()
+    roles  <- get_roles()
+    
+    pred_cols <- names(roles[roles == "Predictor"])
+    pred_cols <- intersect(pred_cols, names(df))
+    iforest_pred_cols <- pred_cols[!grepl("_shadow$", pred_cols)]
+    
+    updateSelectInput(session, "iforest_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col) > 0) id_col[1] else names(df)[1])
+    updateSelectizeInput(session, "iforest_pred_cols",
+                         choices  = names(df),
+                         selected = iforest_pred_cols,
+                         server   = TRUE)
+  })
+  
+  get_iforest_result <- reactive({
+    req(input$iforest_id_col, input$iforest_pred_cols)
+    df    <- get_data()
+    preds <- input$iforest_pred_cols
+    preds <- intersect(preds, names(df))
+    if (length(preds) < 1) return(NULL)
+    
+    df_sub <- df[, preds, drop = FALSE]
+    if (nrow(df_sub) < 5) return(NULL)
+    
+    tryCatch({
+      itree  <- isotree::isolation.forest(df_sub)
+      scores <- predict(itree, newdata = df_sub)
+      names(scores) <- as.character(df[[input$iforest_id_col]])
+      
+      list(scores = scores, orig_rows = seq_len(nrow(df)))
+    }, error = function(e) {
+      message("Isolation Forest error: ", conditionMessage(e))
+      NULL
+    })
+  })
+  
+  output$iforest_output <- renderPlot({
+    req(input$iforest_id_col, input$iforest_pred_cols)
+    result <- get_iforest_result()
+    
+    if (is.null(result)) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "Could not fit Isolation Forest.\nCheck selections and ensure isotree is installed.",
+                 colour = "#C41E3A", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    scores    <- result$scores
+    threshold <- input$iforest_threshold
+    n         <- length(scores)
+    id        <- seq_len(n) / n
+    is_out    <- scores > threshold
+    n_out     <- sum(is_out)
+    label     <- ifelse(is_out, names(scores), NA_character_)
+    Observations <- ifelse(is_out, "outlier", "non-outlier")
+    
+    plot_df <- data.frame(scores, id, label, Observations)
+    
+    ggplot(plot_df, aes(y = scores, x = id)) +
+      geom_point(aes(colour = Observations), size = 2) +
+      ggrepel::geom_text_repel(aes(label = label), max.overlaps = 50,
+                               size = 3.2, na.rm = TRUE) +
+      scale_colour_manual(values = c("non-outlier" = "#4a80d4",
+                                     "outlier"     = "#C41E3A")) +
+      geom_hline(yintercept = threshold, colour = "black", linetype = "dashed") +
+      scale_x_continuous(breaks = c(0, 0.5, 1),
+                         labels = c("0%", "50%", "100%")) +
+      scale_y_continuous(limits = c(0, NA)) +
+      annotate("text", x = 0.01, y = threshold * 1.02,
+               label = sprintf("threshold=%.2f  (%d outliers)", threshold, n_out),
+               hjust = 0, size = 3.5, colour = "#333333") +
+      labs(
+        title = paste0("Isolation Forest | threshold = ", threshold,
+                       " | n = ", n, " observations"),
+        y = "Iso Score",
+        x = "Complete Observations"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        plot.title   = element_text(size = 12, face = "bold", hjust = 0.5),
+        legend.title = element_text(face = "bold"),
+        legend.text  = element_text(size = 12)
+      )
+  })
+  
+  output$iforest_summary <- renderPrint({
+    req(input$iforest_id_col, input$iforest_pred_cols)
+    result <- get_iforest_result()
+    
+    if (is.null(result)) {
+      cat("No result available.\n")
+      return(invisible(NULL))
+    }
+    
+    scores    <- result$scores
+    threshold <- input$iforest_threshold
+    is_out    <- scores > threshold
+    n_out     <- sum(is_out)
+    n_total   <- length(scores)
+    
+    cat(sprintf("Isolation Forest | threshold = %.2f\n", threshold))
+    cat(sprintf("Observations  : %d\n", n_total))
+    cat(sprintf("Outliers      : %d  (%.1f%%)\n", n_out, 100 * n_out / n_total))
+    cat("──────────────────────────────\n")
+    if (n_out == 0) {
+      cat("No outliers flagged.\n")
+    } else {
+      cat("Flagged IDs:\n")
+      cat(paste(names(scores)[is_out], collapse = "  "), "\n")
+    }
+  })
+  
+  output$iforest_outliers_table <- renderDT({
+    req(input$iforest_id_col, input$iforest_pred_cols)
+    result <- get_iforest_result()
+    if (is.null(result)) return(data.frame(Message = "No data."))
+    
+    scores    <- result$scores
+    threshold <- input$iforest_threshold
+    is_out    <- scores > threshold
+    orig_rows <- result$orig_rows
+    outlier_orig_rows <- orig_rows[is_out]
+    
+    if (length(outlier_orig_rows) == 0) return(data.frame(Message = "No outliers flagged."))
+    make_hints_dt(get_raw(), get_data()[outlier_orig_rows, , drop = FALSE])
+  }, server = FALSE)
+  
+  
+  # ── SERVER OUTLIER SUMMARY ─────────────────────────────────────────────────────
+  
+  observe({
+    df     <- get_data()
+    id_col <- get_id_col()
+    updateSelectInput(session, "os_id_col",
+                      choices  = names(df),
+                      selected = if (length(id_col) > 0) id_col[1] else names(df)[1])
+  })
+  
+  get_outlier_summary <- reactive({
+    req(input$os_id_col)
+    df <- get_data()
+    
+    id_labels <- as.character(df[[input$os_id_col]])
+    flags     <- list()
+    
+    # ── Mahalanobis ──
+    if (!is.null(input$mah_pred_cols) && length(input$mah_pred_cols) > 0 &&
+        !is.null(input$mah_id_col)) {
+      tryCatch({
+        out_rows <- get_mahalanobis_outliers(
+          df             = df,
+          predictor_cols = input$mah_pred_cols,
+          id_col         = input$mah_id_col,
+          threshold_p    = input$mah_threshold_p
+        )
+        if (nrow(out_rows) > 0) {
+          flags[["mahalanobis"]] <- as.character(out_rows[[input$os_id_col]])
+        }
+      }, error = function(e) NULL)
+    }
+    
+    # ── Cook's Distance ──
+    if (!is.null(input$cook_response_col) && !is.null(input$cook_pred_cols) &&
+        length(input$cook_pred_cols) > 0) {
+      tryCatch({
+        result <- get_cook_processed()
+        if (!is.null(result)) {
+          baked     <- result$baked
+          orig_rows <- result$orig_rows
+          response  <- input$cook_response_col
+          
+          if (ncol(baked) >= 2 && nrow(baked) >= 3) {
+            lmod      <- glm(as.formula(paste(response, "~ .")), data = baked, family = gaussian)
+            dc        <- cooks.distance(lmod)
+            threshold <- input$cook_threshold_mult * mean(dc, na.rm = TRUE)
+            cook_out  <- orig_rows[dc > threshold]
+            if (length(cook_out) > 0) {
+              flags[["cooks"]] <- as.character(df[[input$os_id_col]])[cook_out]
+            }
+          }
+        }
+      }, error = function(e) NULL)
+    }
+    
+    # ── LOF ──
+    if (!is.null(input$lof_pred_cols) && length(input$lof_pred_cols) > 0 &&
+        !is.null(input$lof_id_col)) {
+      tryCatch({
+        result <- get_lof_result()
+        if (!is.null(result)) {
+          lof       <- result$lof
+          orig_rows <- result$orig_rows
+          threshold <- input$lof_threshold
+          lof_out   <- orig_rows[lof > threshold]
+          if (length(lof_out) > 0) {
+            flags[["lof"]] <- as.character(df[[input$os_id_col]])[lof_out]
+          }
+        }
+      }, error = function(e) NULL)
+    }
+    
+    # ── SVM ──
+    if (!is.null(input$svm_pred_cols) && length(input$svm_pred_cols) > 0 &&
+        !is.null(input$svm_id_col)) {
+      tryCatch({
+        result <- get_svm_result()
+        if (!is.null(result)) {
+          svm_outlier <- result$svm_outlier
+          orig_rows   <- result$orig_rows
+          svm_out     <- orig_rows[svm_outlier]
+          if (length(svm_out) > 0) {
+            flags[["svm"]] <- as.character(df[[input$os_id_col]])[svm_out]
+          }
+        }
+      }, error = function(e) NULL)
+    }
+    
+    # ── Random Forest ──
+    if (!is.null(input$rf_pred_cols) && length(input$rf_pred_cols) > 0 &&
+        !is.null(input$rf_response_col) && !is.null(input$rf_id_col)) {
+      tryCatch({
+        result <- get_rf_result()
+        if (!is.null(result)) {
+          is_out    <- result$is_out
+          orig_rows <- result$orig_rows
+          rf_out    <- orig_rows[is_out]
+          if (length(rf_out) > 0) {
+            flags[["rf"]] <- as.character(df[[input$os_id_col]])[rf_out]
+          }
+        }
+      }, error = function(e) NULL)
+    }
+    
+    # ── Isolation Forest ──
+    if (!is.null(input$iforest_pred_cols) && length(input$iforest_pred_cols) > 0 &&
+        !is.null(input$iforest_id_col)) {
+      tryCatch({
+        result <- get_iforest_result()
+        if (!is.null(result)) {
+          scores    <- result$scores
+          threshold <- input$iforest_threshold
+          is_out    <- scores > threshold
+          orig_rows <- result$orig_rows
+          iforest_out <- orig_rows[is_out]
+          if (length(iforest_out) > 0) {
+            flags[["iforest"]] <- as.character(df[[input$os_id_col]])[iforest_out]
+          }
+        }
+      }, error = function(e) NULL)
+    }
+    
+    # before plotting
+    if (length(flags) == 0) return(NULL)
+    
+    # build long-format data frame
+    long_df <- do.call(rbind, lapply(names(flags), function(method) {
+      data.frame(id = flags[[method]], Type = method, stringsAsFactors = FALSE)
+    }))
+    
+    long_df
+  })
+  
+  output$os_output <- renderPlot({
+    long_df <- get_outlier_summary()
+    
+    if (is.null(long_df) || nrow(long_df) == 0) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = "No outliers flagged yet.\nRun Mahalanobis and/or Cook's Distance first.",
+                 colour = "#495057", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    # filter by min count
+    counts   <- table(long_df$id)
+    keep_ids <- names(counts[counts >= input$os_min_count])
+    plot_df  <- long_df[long_df$id %in% keep_ids, ]
+    
+    if (nrow(plot_df) == 0) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = paste0("No observations flagged by ≥ ", input$os_min_count, " methods."),
+                 colour = "#495057", size = 5) +
+        theme_void()
+      return()
+    }
+    
+    # order x-axis by total count descending
+    id_order <- names(sort(table(plot_df$id), decreasing = TRUE))
+    plot_df$id <- factor(plot_df$id, levels = id_order)
+    
+    method_colors <- c(
+      "mahalanobis" = "#2ab7ca",
+      "cooks"       = "#fe4a49",
+      "lof"         = "#27ae60",
+      "svm"         = "#e056fd",
+      "rf"          = "#4a80d4",
+      "iforest"     = "#f39c12"
+    )
+    
+    ggplot(plot_df, aes(x = id, fill = Type)) +
+      geom_bar(position = "stack") +
+      scale_fill_manual(values = method_colors) +
+      labs(
+        title = "Observation Novelty (cumulative outlier scores)",
+        x     = "id",
+        y     = "Count",
+        fill  = "Type"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        axis.text.x  = element_text(angle = 45, hjust = 1, size = 11),
+        axis.text.y  = element_text(size = 11),
+        plot.title   = element_text(size = 15, face = "bold", hjust = 0.5),
+        legend.title = element_text(face = "bold"),
+        legend.text  = element_text(size = 12)
+      )
+  })
+  
+  output$os_table <- renderDT({
+    long_df <- get_outlier_summary()
+    if (is.null(long_df) || nrow(long_df) == 0) {
+      return(data.frame(Message = "No outliers flagged yet."))
+    }
+    
+    counts   <- table(long_df$id)
+    keep_ids <- names(counts[counts >= input$os_min_count])
+    plot_df  <- long_df[long_df$id %in% keep_ids, ]
+    
+    if (nrow(plot_df) == 0) return(data.frame(Message = "No observations meet threshold."))
+    
+    # pivot to wide: one row per id, one col per method
+    summary_df <- as.data.frame.matrix(
+      table(plot_df$id, plot_df$Type)
+    )
+    summary_df$id          <- rownames(summary_df)
+    summary_df$total_flags <- rowSums(summary_df[, setdiff(names(summary_df), "id"), drop = FALSE])
+    summary_df <- summary_df[order(-summary_df$total_flags), ]
+    rownames(summary_df) <- NULL
+    
+    # reorder cols: id first, total_flags second, then methods
+    method_cols <- setdiff(names(summary_df), c("id", "total_flags"))
+    summary_df  <- summary_df[, c("id", "total_flags", method_cols)]
+    
+    datatable(summary_df,
+              options = list(pageLength = 15, scrollX = TRUE),
+              rownames = FALSE)
+  }, server = FALSE)
+  
+  
+  # ── SERVER MODEL REGULARISED REGRESSION ───────────────────────────────────────
+  
+  # populate dropdowns from roles
+  observe({
+    df        <- get_data()
+    resp_col  <- get_outcome_col()
+    pred_cols <- get_predictor_cols()
+    split_col <- get_split_col()
+    id_col    <- get_id_col()
+    
+    # filter predictor cols — exclude ID, split, shadow cols
+    exclude <- c(
+      if (length(id_col)    > 0) id_col,
+      if (length(split_col) > 0) split_col
+    )
+    pred_cols <- setdiff(pred_cols, exclude)
+    pred_cols <- pred_cols[!grepl("_shadow$", pred_cols)]
+    pred_cols <- intersect(pred_cols, names(df))
+    
+    updateSelectInput(session, "mod_response",
+                      choices  = names(df),
+                      selected = if (length(resp_col)  > 0) resp_col[1]  else names(df)[1])
+    updateSelectizeInput(session, "mod_pred_cols",
+                         choices  = names(df),
+                         selected = pred_cols,
+                         server   = TRUE)
+    updateSelectInput(session, "mod_split_col",
+                      choices  = names(df),
+                      selected = if (length(split_col) > 0) split_col[1] else names(df)[1])
+  })
+  
+  # main model reactive — triggered by Run button only
+  get_model_result <- eventReactive(input$mod_run, {
+    req(input$mod_response, input$mod_pred_cols, input$mod_split_col)
+    
+    df        <- get_data()
+    response  <- input$mod_response
+    split_col <- input$mod_split_col
+    id_cols   <- get_id_col()
+    
+    # ── validate split column ──
+    split_vals <- unique(as.character(df[[split_col]]))
+    if (!all(c("Train", "Test") %in% split_vals)) {
+      return(list(error = paste0(
+        "Split column '", split_col,
+        "' must contain both 'Train' and 'Test' values.\n",
+        "Found: ", paste(split_vals, collapse = ", ")
+      )))
+    }
+    
+    # ── predictor cols — exclude response, split, id ──
+    preds <- setdiff(input$mod_pred_cols, c(response, split_col, id_cols))
+    preds <- intersect(preds, names(df))
+    if (length(preds) < 1) return(list(error = "No predictor columns available."))
+    
+    # ── split ──
+    train <- df[as.character(df[[split_col]]) == "Train", , drop = FALSE]
+    test  <- df[as.character(df[[split_col]]) == "Test",  , drop = FALSE]
+    
+    if (nrow(train) < 5) return(list(error = "Training set has fewer than 5 rows."))
+    if (nrow(test)  < 1) return(list(error = "Test set is empty."))
+    
+    # ── recipe ──
+    keep_cols <- union(preds, c(response, split_col, id_cols))
+    keep_cols <- intersect(keep_cols, names(train))
+    train_sub <- train[, keep_cols, drop = FALSE]
+    test_sub  <- test[,  keep_cols, drop = FALSE]
+    
+    tryCatch({
+      
+      rec <- recipes::recipe(
+        as.formula(paste(response, "~ .")),
+        data = train_sub
+      )
+      
+      # update roles for non-predictor columns
+      if (length(id_cols) > 0) {
+        id_in_data <- intersect(id_cols, names(train_sub))
+        if (length(id_in_data) > 0)
+          rec <- rec |> recipes::update_role(
+            tidyselect::all_of(id_in_data), new_role = "id"
+          )
+      }
+      if (split_col %in% names(train_sub)) {
+        rec <- rec |> recipes::update_role(
+          tidyselect::all_of(split_col), new_role = "split"
+        )
+      }
+      
+      rec <- rec |>
+        recipes::step_impute_knn(
+          recipes::all_predictors(), neighbors = input$mod_knn_k
+        ) |>
+        recipes::step_center(recipes::all_numeric_predictors())  |>
+        recipes::step_scale(recipes::all_numeric_predictors())   |>
+        recipes::step_dummy(recipes::all_nominal_predictors())
+      
+      # ── alpha grid ──
+      # if manual override, skip grid search entirely
+      if (isTRUE(input$mod_manual_override)) {
+        alpha_grid <- input$mod_manual_alpha
+      } else {
+        alpha_grid <- switch(input$mod_type,
+                             "ridge"      = 0,
+                             "lasso"      = 1,
+                             "elasticnet" = seq(0, 1, by = input$mod_alpha_step)
+        )
+      }
+      
+      # ── trainControl ──
+      nfolds <- if (input$mod_cv_method == "LOOCV") nrow(train) else input$mod_k
+      
+      ctrl <- caret::trainControl(
+        method  = input$mod_cv_method,
+        number  = nfolds,
+        repeats = if (input$mod_cv_method == "repeatedcv") input$mod_repeats else 1,
+        seeds   = NULL
+      )
+      
+      # ── train ──
+      set.seed(input$mod_seed)
+      t_start <- proc.time()
+      
+      mod <- caret::train(
+        rec,
+        data      = train_sub,
+        method    = "glmnet",
+        trControl = ctrl,
+        tuneGrid  = expand.grid(
+          alpha  = alpha_grid,
+          lambda = 10^seq(3, -4, length = 100)
+        ),
+        family = input$mod_family
+      )
+      
+      elapsed <- (proc.time() - t_start)[["elapsed"]]
+      
+      # ── extract best alpha and cv object ──
+      best_alpha  <- mod$bestTune$alpha
+      best_lambda <- mod$bestTune$lambda
+      
+      # refit glmnet directly to get cv object for plotting
+      baked_train <- recipes::prep(rec, training = train_sub) |>
+        recipes::bake(new_data = NULL)
+      
+      x_train <- baked_train |>
+        dplyr::select(-tidyselect::all_of(response)) |>
+        as.matrix()
+      y_train <- baked_train[[response]]
+      
+      set.seed(input$mod_seed)
+      cv_fit <- glmnet::cv.glmnet(
+        x_train, y_train,
+        alpha       = best_alpha,
+        nfolds      = nfolds,
+        family      = input$mod_family,
+        standardize = FALSE
+      )
+      
+      # ── lambda selection ──
+      chosen_lambda <- if (isTRUE(input$mod_manual_override)) {
+        input$mod_manual_lambda
+      } else if (input$mod_lambda_rule == "min") {
+        cv_fit$lambda.min
+      } else {
+        cv_fit$lambda.1se
+      }
+      
+      final_fit <- glmnet::glmnet(
+        x_train, y_train,
+        alpha       = best_alpha,
+        lambda      = chosen_lambda,
+        family      = input$mod_family,
+        standardize = FALSE
+      )
+      
+      # ── bake test set ──
+      baked_test <- recipes::prep(rec, training = train_sub) |>
+        recipes::bake(new_data = test_sub)
+      
+      x_test <- baked_test |>
+        dplyr::select(-tidyselect::all_of(response)) |>
+        as.matrix()
+      y_test <- baked_test[[response]]
+      
+      # ── predictions ──
+      preds_raw <- predict(final_fit, newx = x_test, type = "response")
+      y_hat     <- as.numeric(preds_raw)
+      
+      # ── metrics ──
+      rmse <- sqrt(mean((y_test - y_hat)^2))
+      mae  <- mean(abs(y_test - y_hat))
+      ss_res <- sum((y_test - y_hat)^2)
+      ss_tot <- sum((y_test - mean(y_test))^2)
+      r2   <- if (ss_tot > 0) 1 - ss_res / ss_tot else NA_real_
+      
+      # ── non-zero coefficients ──
+      coef_mat   <- as.matrix(coef(final_fit))
+      coef_df    <- data.frame(
+        Predictor   = rownames(coef_mat),
+        Coefficient = round(coef_mat[, 1], 6),
+        stringsAsFactors = FALSE
+      )
+      coef_df <- coef_df[coef_df$Predictor != "(Intercept)" & coef_df$Coefficient != 0, ]
+      coef_df <- coef_df[order(-abs(coef_df$Coefficient)), ]
+      
+      list(
+        error        = NULL,
+        cv_fit       = cv_fit,
+        final_fit    = final_fit,
+        best_alpha   = best_alpha,
+        best_lambda  = best_lambda,
+        chosen_lambda = chosen_lambda,
+        lambda_rule  = input$mod_lambda_rule,
+        coef_df      = coef_df,
+        y_test       = y_test,
+        y_hat        = y_hat,
+        rmse         = rmse,
+        mae          = mae,
+        r2           = r2,
+        elapsed      = elapsed,
+        n_train      = nrow(train),
+        n_test       = nrow(test),
+        cv_method    = input$mod_cv_method,
+        nfolds       = nfolds,
+        model_type   = input$mod_type,
+        family       = input$mod_family
+      )
+      
+    }, error = function(e) {
+      list(error = conditionMessage(e))
+    })
+  })
+  
+  # ── CV error curve ──
+  output$mod_cv_plot <- renderPlot({
+    result <- get_model_result()
+    if (is.null(result)) {
+      ggplot() + annotate("text", x=0.5, y=0.5,
+                          label="Press 'Run Model' to train.", colour="#495057", size=5) + theme_void()
+      return()
+    }
+    if (!is.null(result$error)) {
+      ggplot() + annotate("text", x=0.5, y=0.5,
+                          label=result$error, colour="#C41E3A", size=4) + theme_void()
+      return()
+    }
+    par(mar = c(5, 4, 6, 2))
+    plot(result$cv_fit,
+         main = paste0("CV Error vs log(Lambda) | alpha = ", result$best_alpha))
+  })
+  
+  output$mod_cv_summary <- renderPrint({
+    result <- get_model_result()
+    if (is.null(result) || !is.null(result$error)) return(invisible(NULL))
+    
+    cat("── Optimised Parameters ──────────────────\n")
+    cat(sprintf("Best alpha    : %.4f\n", result$best_alpha))
+    cat(sprintf("lambda.min    : %.6f\n", result$cv_fit$lambda.min))
+    cat(sprintf("lambda.1se    : %.6f\n", result$cv_fit$lambda.1se))
+    cat(sprintf("Chosen lambda : %.6f  (%s)\n", result$chosen_lambda,
+                if (isTRUE(input$mod_manual_override)) "manual" else result$lambda_rule))
+    if (isTRUE(input$mod_manual_override)) {
+      cat("⚠ Manual override active — CV values above are for reference only.\n")
+    }
+    cat("\n── Model Settings ────────────────────────\n")
+    cat(sprintf("Model type    : %s\n",   toupper(result$model_type)))
+    cat(sprintf("Family        : %s\n",   result$family))
+    cat(sprintf("CV method     : %s\n",   result$cv_method))
+    cat(sprintf("Folds         : %d\n",   result$nfolds))
+    cat(sprintf("Training rows : %d\n",   result$n_train))
+    cat(sprintf("Test rows     : %d\n",   result$n_test))
+    cat(sprintf("Time elapsed  : %.2f s\n", result$elapsed))
+  })
+  
+  # ── coefficient path + table ──
+  output$mod_coef_path <- renderPlot({
+    result <- get_model_result()
+    if (is.null(result) || !is.null(result$error)) return(invisible(NULL))
+    par(mar = c(5, 4, 6, 8))
+    plot(result$final_fit,
+         xvar  = "lambda",
+         label = TRUE,
+         main  = paste0("Coefficient Path | alpha = ", result$best_alpha))
+    abline(v = log(result$chosen_lambda), lty = 2, col = "red")
+  })
+  
+  output$mod_coef_table <- renderDT({
+    result <- get_model_result()
+    if (is.null(result) || !is.null(result$error)) {
+      return(data.frame(Message = "Run model first."))
+    }
+    datatable(result$coef_df,
+              options  = list(pageLength = 15, scrollX = TRUE),
+              rownames = FALSE)
+  }, server = FALSE)
+  
+  # ── test set evaluation ──
+  output$mod_pred_plot <- renderPlot({
+    result <- get_model_result()
+    if (is.null(result) || !is.null(result$error)) return(invisible(NULL))
+    
+    plot_df <- data.frame(Actual = result$y_test, Predicted = result$y_hat)
+    lim     <- range(c(plot_df$Actual, plot_df$Predicted), na.rm = TRUE)
+    
+    ggplot(plot_df, aes(x = Actual, y = Predicted)) +
+      geom_point(alpha = 0.6, colour = "#4a80d4", size = 2) +
+      geom_abline(slope = 1, intercept = 0, colour = "#C41E3A",
+                  linetype = "dashed", linewidth = 0.8) +
+      coord_fixed(xlim = lim, ylim = lim) +
+      labs(
+        title = paste0("Predicted vs Actual | Test Set | RMSE = ",
+                       round(result$rmse, 4)),
+        x = "Actual", y = "Predicted"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(plot.title = element_text(size = 12, face = "bold", hjust = 0.5))
+  })
+  
+  output$mod_test_metrics <- renderPrint({
+    result <- get_model_result()
+    if (is.null(result) || !is.null(result$error)) return(invisible(NULL))
+    
+    cat("── Test Set Performance ──────────────────\n")
+    cat(sprintf("RMSE : %.6f\n", result$rmse))
+    cat(sprintf("MAE  : %.6f\n", result$mae))
+    cat(sprintf("R²   : %.6f\n", result$r2))
+    cat(sprintf("n    : %d observations\n", length(result$y_test)))
+    cat(sprintf("Predictors used : %d\n", nrow(result$coef_df)))
+  })
+  
+  # ── model comparison table ──
+  observeEvent(get_model_result(), {
+    result <- get_model_result()
+    if (is.null(result) || !is.null(result$error)) return()
+    
+    current <- model_comparison_rv()
+    new_run <- nrow(current) + 1
+    
+    new_row <- data.frame(
+      Run         = new_run,
+      Model       = toupper(result$model_type),
+      Family      = result$family,
+      CV_Method   = result$cv_method,
+      Folds       = result$nfolds,
+      Best_Alpha  = round(result$best_alpha,   4),
+      Best_Lambda = round(result$chosen_lambda, 6),
+      Lambda_Rule = if (isTRUE(input$mod_manual_override)) "manual" else result$lambda_rule,
+      Predictors  = nrow(result$coef_df),
+      RMSE        = round(result$rmse, 6),
+      MAE         = round(result$mae,  6),
+      R2          = round(result$r2,   6),
+      Time_sec    = round(result$elapsed, 3),
+      stringsAsFactors = FALSE
+    )
+    
+    model_comparison_rv(rbind(current, new_row))
+  })
+  
+  output$mod_comparison_table <- renderDT({
+    df <- model_comparison_rv()
+    if (nrow(df) == 0) return(data.frame(Message = "No model runs yet."))
+    datatable(df, options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE)
+  }, server = FALSE)
+  
+  observeEvent(input$mod_clear_comparison, {
+    model_comparison_rv(data.frame(
+      Run=integer(), Model=character(), Family=character(),
+      CV_Method=character(), Folds=integer(), Best_Alpha=numeric(),
+      Best_Lambda=numeric(), Lambda_Rule=character(), Predictors=integer(),
+      RMSE=numeric(), MAE=numeric(), R2=numeric(), Time_sec=numeric(),
+      stringsAsFactors=FALSE
+    ))
+  })
+  
+  
 } # end server
+
 
 
 

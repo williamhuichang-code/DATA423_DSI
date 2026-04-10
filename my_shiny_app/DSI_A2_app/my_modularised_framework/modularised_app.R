@@ -1,0 +1,216 @@
+# =================================================================================
+# global.R
+# =================================================================================
+
+# ── LIBRARY ──────────────────────────────────────────────────────────────────
+
+library(shiny)
+library(bs4Dash)
+library(dplyr)
+library(summarytools)
+library(plotly)
+library(visdat)
+library(naniar)
+library(gridExtra)
+
+
+# ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
+
+##### change global configs when needed
+
+# file of interest
+FILE_OF_INTEREST <- "Ass20Data.csv"
+
+# explicit data folder
+DATA_WD <- "."
+
+
+# ── FILES IN THE WORK DIRECTORY ──────────────────────────────────────────────
+
+csv_files <- list.files(DATA_WD, pattern = "\\.csv$", full.names = FALSE)
+file_choices <- if (length(csv_files) == 0) c("(none)") else csv_files
+default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "(none)"
+
+
+# ── LOAD MODULE ──────────────────────────────────────────────────────────────
+list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
+  lapply(source)
+print(getwd())
+print(csv_files)
+
+
+
+
+# =================================================================================
+# ui.R
+# =================================================================================
+
+ui <- dashboardPage(
+  
+  # ── HEADER ─────────────────────────────────────────────────────────────────
+  
+  header = dashboardHeader(
+    title = "My App",
+    selectInput(
+      inputId  = "selected_file",
+      label    = NULL,
+      choices  = file_choices,
+      selected = default_selected,
+      width    = "200px"
+    )
+  ),
+  
+  
+  # ── SIDEBAR NAV ────────────────────────────────────────────────────────────
+  
+  sidebar = dashboardSidebar(
+    sidebarMenu(
+      id = "sidebar",
+      
+      menuItem("EDA", tabName = "eda", icon = icon("chart-bar"),
+               menuSubItem("Summary",      tabName = "eda_summary"),
+               menuSubItem("Vis Miss",     tabName = "eda_vis_miss"),
+               menuSubItem("Rising Value", tabName = "eda_rising"),
+               menuSubItem("Boxplot",      tabName = "eda_boxplot"),
+               menuSubItem("Barchart",     tabName = "eda_barchart")
+               # add more subtabs here
+      ),
+      
+      menuItem("Config", tabName = "config", icon = icon("sliders"),
+               menuSubItem("Data Roles", tabName = "data_roles"),
+               menuSubItem("Download Data", tabName = "data_download", icon = icon("download"))
+               # add more subtabs here
+      ),
+      
+      menuItem("Miss Strategy", tabName = "miss", icon = icon("circle-question"),
+               menuSubItem("Variants",    tabName = "miss_variants"),
+               menuSubItem("Shadow Vars", tabName = "miss_shadow"),
+               menuSubItem("Not Applicable", tabName = "miss_napp")
+               # add more subtabs here
+      ),
+      
+      menuItem("Out Strategy", tabName = "out", icon = icon("triangle-exclamation"),
+               menuSubItem("Mahalanobis", tabName = "out_mah"),
+               menuSubItem("iForest",     tabName = "out_iforest")
+               # add more subtabs here
+      ),
+      
+      menuItem("Model", tabName = "model", icon = icon("brain"),
+               menuSubItem("Regularised", tabName = "model_reg")
+               # add more subtabs here
+      ),
+      
+      menuItem("Hyper Tuning", tabName = "hyper", icon = icon("gauge"),
+               menuSubItem("Grid Search", tabName = "hyper_grid")
+               # add more subtabs here
+      ),
+      
+      menuItem("Evaluation", tabName = "eval", icon = icon("square-check"),
+               menuSubItem("Metrics",     tabName = "eval_metrics")
+               # add more subtabs here
+      )
+    )
+  ),
+  
+  
+  # ── BODY ───────────────────────────────────────────────────────────────────
+  
+  body = dashboardBody(
+    tabItems(
+      
+      # EDA
+      tabItem(tabName = "eda_summary",  summary_ui("summary")),
+      tabItem(tabName = "eda_vis_miss", vis_miss_ui("vis_miss")),
+      tabItem(tabName = "eda_rising",   rising_value_ui("rising_value")),
+      tabItem(tabName = "eda_boxplot",  box(title = "Boxplot",  width = 12, "coming soon")),
+      tabItem(tabName = "eda_barchart", box(title = "Barchart", width = 12, "coming soon")),
+      
+      # Config
+      tabItem(tabName = "data_roles", data_roles_ui("data_roles")),
+      tabItem(tabName = "data_download", data_download_ui("data_download")),
+      
+      # Miss Strategy
+      tabItem(tabName = "miss_variants", miss_variants_ui("miss_variants")),
+      tabItem(tabName = "miss_shadow",   miss_shadow_ui("miss_shadow")),
+      tabItem(tabName = "miss_napp", miss_napp_ui("miss_napp")),
+      
+      # Out Strategy
+      tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
+      tabItem(tabName = "out_iforest", box(title = "iForest",     width = 12, "coming soon")),
+      
+      # Model
+      tabItem(tabName = "model_reg",   box(title = "Regularised", width = 12, "coming soon")),
+      
+      # Hyper Tuning
+      tabItem(tabName = "hyper_grid",  box(title = "Grid Search", width = 12, "coming soon")),
+      
+      # Evaluation
+      tabItem(tabName = "eval_metrics", box(title = "Metrics",    width = 12, "coming soon"))
+      
+    )
+  ),
+  
+  controlbar = NULL,
+  footer     = NULL
+)
+
+
+
+
+
+# =================================================================================
+# server.R
+# =================================================================================
+
+server <- function(input, output, session) {
+  
+  # ── RAW DATA ─────────────────────────────────────────────────────────────
+  
+  get_raw <- reactive({
+    req(input$selected_file)
+    read.csv(file.path(DATA_WD, input$selected_file), 
+             header = TRUE, 
+             na.strings = c('NA', 'N/A'), 
+             stringsAsFactors = TRUE)
+  }) |> bindCache(input$selected_file)
+  
+  
+  # ── PIPELINE ──────────────────────────────────────────────────────────────
+  
+  variant <- miss_variants_server("miss_variants", get_raw)
+  shadow <- miss_shadow_server("miss_shadow", variant$data)
+  napp <- miss_napp_server("miss_napp", shadow$data)
+  # outlier <- outlier_server("outlier", miss$data)   # next step when ready
+  # model   <- model_server("model",     outlier$data)
+  
+  get_data <- napp$data   # current end of pipeline, single source of truth
+  
+  
+  # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────
+  
+  data_download_server("data_download", stages = list(
+    "Raw"       = get_raw,
+    "Processed" = get_data
+  ))
+  
+  # ── MODULE CALL ───────────────────────────────────────────────────────────
+  
+  roles <- data_roles_server("data_roles", get_data)
+  
+  summary_server("summary",   get_data)
+  vis_miss_server("vis_miss", get_data, roles)
+  rising_value_server("rising_value", get_data)
+  
+}
+
+
+
+
+
+
+
+# =================================================================================
+# Run
+# =================================================================================
+
+shinyApp(ui, server)
