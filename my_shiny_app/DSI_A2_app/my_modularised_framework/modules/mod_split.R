@@ -135,20 +135,23 @@ split_server <- function(id, get_data, get_roles = NULL) {
         col_chr <- tolower(trimws(as.character(col)))
         train_mask <- col_chr %in% c("train", "1", "true")
         test_mask  <- col_chr %in% c("test",  "0", "false")
-        list(
-          train = df[train_mask, , drop = FALSE],
-          test  = df[test_mask,  , drop = FALSE],
-          method = "column"
-        )
         
-      } else {
-        ratio      <- (input$train_ratio %||% 80) / 100
-        n          <- nrow(df)
-        train_idx  <- sample(seq_len(n), floor(n * ratio))
+        # if column doesn't yield valid splits, warn but don't error
+        if (sum(train_mask) == 0 && sum(test_mask) == 0) {
+          # fall back to ratio so UI still renders
+          n         <- nrow(df)
+          train_idx <- sample(seq_len(n), floor(n * 0.8))
+          return(list(
+            train  = df[ train_idx, , drop = FALSE],
+            test   = df[-train_idx, , drop = FALSE],
+            method = "column_fallback"
+          ))
+        }
+        
         list(
-          train  = df[ train_idx, , drop = FALSE],
-          test   = df[-train_idx, , drop = FALSE],
-          method = "ratio"
+          train  = df[train_mask, , drop = FALSE],
+          test   = df[test_mask,  , drop = FALSE],
+          method = "column"
         )
       }
     })
@@ -235,7 +238,17 @@ split_server <- function(id, get_data, get_roles = NULL) {
         
       } else NULL
       
-      tagList(cards, imbalance_section)
+      fallback_warn <- if (res$method == "column_fallback") {
+        tags$div(
+          style = "background:#fff3cd; border:0.5px solid #ffc107; border-radius:8px;
+             padding:10px 14px; margin-bottom:16px; font-size:13px; color:#856404;",
+          icon("triangle-exclamation"),
+          " Selected split column has no recognised Train/Test values.
+      Expected: 'Train'/'Test', '1'/'0', or 'TRUE'/'FALSE'. Showing 80/20 fallback."
+        )
+      } else NULL
+      
+      tagList(fallback_warn, cards, imbalance_section)
     })
     
     # ── imbalance table render ────────────────────────────────────────────
