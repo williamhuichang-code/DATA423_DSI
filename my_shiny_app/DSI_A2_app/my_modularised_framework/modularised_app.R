@@ -95,6 +95,10 @@ ui <- dashboardPage(
                # add more subtabs here
       ),
       
+      menuItem("Pre-Processing", tabName = "preproc", icon = icon("wand-magic-sparkles"),
+               menuSubItem("Split Strategy", tabName = "preproc_split")
+      ),
+      
       menuItem("Model", tabName = "model", icon = icon("brain"),
                menuSubItem("Regularised", tabName = "model_reg")
                # add more subtabs here
@@ -138,6 +142,9 @@ ui <- dashboardPage(
       tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
       tabItem(tabName = "out_iforest", box(title = "iForest",     width = 12, "coming soon")),
       
+      # Pre-P Strategy
+      tabItem(tabName = "preproc_split", split_ui("split")),
+      
       # Model
       tabItem(tabName = "model_reg",   box(title = "Regularised", width = 12, "coming soon")),
       
@@ -173,7 +180,7 @@ server <- function(input, output, session) {
              na.strings = c('NA', 'N/A'), 
              stringsAsFactors = TRUE)
   }) |> bindCache(input$selected_file)
-  
+
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
@@ -186,6 +193,12 @@ server <- function(input, output, session) {
   get_data <- napp$data   # current end of pipeline, single source of truth
   
   
+  # ── NECESSARY VARS  ──────────────────────────────────────────────────────
+  
+  roles <- data_roles_server("data_roles", get_data)
+  split <- split_server("split", get_data, roles)
+  
+  
   # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────
   
   data_download_server("data_download", stages = list(
@@ -193,9 +206,8 @@ server <- function(input, output, session) {
     "Processed" = get_data
   ))
   
-  # ── MODULE CALL ───────────────────────────────────────────────────────────
   
-  roles <- data_roles_server("data_roles", get_data)
+  # ── MODULE CALL ───────────────────────────────────────────────────────────
   
   summary_server("summary",   get_data)
   vis_miss_server("vis_miss", get_data, roles)
