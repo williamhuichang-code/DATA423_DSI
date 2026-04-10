@@ -80,6 +80,7 @@ ui <- dashboardPage(
                menuSubItem("Data Roles",     tabName = "data_roles"),
                menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Global Seed",    tabName = "config_seed"),
+               menuSubItem("Split Setting", tabName = "preproc_split"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
                # add more subtabs here
       ),
@@ -98,7 +99,8 @@ ui <- dashboardPage(
       ),
       
       menuItem("Pre-Processing", tabName = "preproc", icon = icon("wand-magic-sparkles"),
-               menuSubItem("Split Strategy", tabName = "preproc_split")
+               menuSubItem("Boxplot",      tabName = "eda_boxplot")
+               # add more subtabs here
       ),
       
       menuItem("Model", tabName = "model", icon = icon("brain"),
