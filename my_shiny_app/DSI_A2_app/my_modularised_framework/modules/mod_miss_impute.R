@@ -13,180 +13,142 @@ miss_impute_ui <- function(id) {
       style = "background-color: #e8f0fe; border-left: 2px solid #a8c0fd;
                min-height: 100vh; padding-left: 20px;",
       
-      # ── tab note ──────────────────────────────────────────────────────
+      # ── Tab note ──────────────────────────────────────────────────────────
       div(
         style = "font-size: 13px; color: #343a40; background-color: white;
                  padding: 10px; border-left: 4px solid #0d6efd; border-radius: 6px;
                  margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);",
         icon("info-circle", style = "color:#0d6efd;"),
-        HTML("&nbsp; <strong>Tab Note:</strong><br><br>
-          Choose a training <em>mode</em>, pick an algorithm, configure its
-          parameters, then click <strong>Run Imputation</strong>.
-          The recipe is trained on the appropriate data slice and applied
-          to the target rows. The imputed data flows downstream.")
+        HTML("&nbsp; <b>Imputation Strategy</b><br><br>
+              Imputer is <b>fitted on train only</b> and applied to both
+              train and test splits. This prevents data leakage while
+              ensuring no NAs reach the model.")
       ),
       hr(),
       
-      # ── training mode ─────────────────────────────────────────────────
-      tags$label("Training Mode:",
-                 style = "font-weight:600; font-size:13px; color:#343a40;"),
-      radioButtons(
-        ns("mode"), label = NULL,
-        choices = c(
-          "All observations (diagnose)"          = "all",
-          "Train on trainset, predict on testset" = "split",
-          "Predict on future unseen data"         = "unseen"
-        ),
-        selected = "all"
+      # ── Response variable ─────────────────────────────────────────────────
+      tags$div(
+        style = "margin-bottom: 10px;",
+        tags$label("Response (Y) variable:",
+                   style = "font-weight:600; font-size:13px; color:#343a40;"),
+        selectInput(ns("y_var"), label = NULL, choices = c("(none)"), width = "100%")
       ),
       
-      # ── split-mode extras ─────────────────────────────────────────────
+      # ── Split variable ────────────────────────────────────────────────────
+      tags$div(
+        style = "margin-bottom: 4px;",
+        tags$label("Split variable:",
+                   style = "font-weight:600; font-size:13px; color:#343a40;"),
+        selectInput(ns("split_var"), label = NULL, choices = c("(none)"), width = "100%")
+      ),
+      
+      # Train / Test level selectors
       conditionalPanel(
-        condition = paste0("input['", ns("mode"), "'] == 'split'"),
-        hr(),
-        tags$div(
-          style = "margin-bottom:10px;",
-          tags$label("Response Variable:",
-                     style = "font-weight:600; font-size:13px; color:#343a40;
-                               display:block; margin-bottom:4px;"),
-          selectInput(ns("response_var"), label = NULL,
-                      choices = "(loading...)", width = "100%")
-        ),
-        tags$div(
-          tags$label("Split Column:",
-                     style = "font-weight:600; font-size:13px; color:#343a40;
-                               display:block; margin-bottom:4px;"),
-          selectInput(ns("split_col"), label = NULL,
-                      choices = "(loading...)", width = "100%"),
-          tags$div(
-            style = "font-size:11px; color:#6c757d; margin-top:2px;",
-            "Expected values: 'Train'/'Test', '1'/'0', or 'TRUE'/'FALSE'."
+        condition = sprintf("input['%s'] != '(none)'", ns("split_var")),
+        fluidRow(
+          column(6,
+                 tags$label("Train level:", style = "font-size:12px; font-weight:600; color:#343a40;"),
+                 selectInput(ns("train_level"), label = NULL, choices = c("(none)"), width = "100%")
+          ),
+          column(6,
+                 tags$label("Test level:", style = "font-size:12px; font-weight:600; color:#343a40;"),
+                 selectInput(ns("test_level"), label = NULL, choices = c("(none)"), width = "100%")
           )
         )
       ),
-      
-      # ── unseen-mode extras ────────────────────────────────────────────
-      conditionalPanel(
-        condition = paste0("input['", ns("mode"), "'] == 'unseen'"),
-        hr(),
-        tags$div(
-          style = "margin-bottom:10px;",
-          tags$label("Unseen Indicator Column:",
-                     style = "font-weight:600; font-size:13px; color:#343a40;
-                               display:block; margin-bottom:4px;"),
-          selectInput(ns("unseen_col"), label = NULL,
-                      choices = "(loading...)", width = "100%")
-        ),
-        tags$div(
-          tags$label("Level that represents unseen data:",
-                     style = "font-weight:600; font-size:13px; color:#343a40;
-                               display:block; margin-bottom:4px;"),
-          selectInput(ns("unseen_level"), label = NULL,
-                      choices = "(loading...)", width = "100%")
-        )
-      ),
-      
       hr(),
       
-      # ── algorithm ─────────────────────────────────────────────────────
-      tags$label("Algorithm:",
+      # ── Algorithm choice ──────────────────────────────────────────────────
+      tags$label("Imputation algorithm:",
                  style = "font-weight:600; font-size:13px; color:#343a40;"),
       radioButtons(
-        ns("algorithm"), label = NULL,
-        choices = c(
-          "Mean / Median / Mode (MMM)" = "mmm",
-          "KNN Imputation"             = "knn",
-          "Bagged Trees Imputation"    = "bag"
+        ns("algorithm"),
+        label    = NULL,
+        choices  = c(
+          "KNN (step_impute_knn)"         = "knn",
+          "Bagged Tree (step_impute_bag)" = "bag",
+          "Mean / Median / Mode"          = "mmm"
         ),
-        selected = "knn"
+        selected = "mmm"
       ),
-      
-      # ── mmm params ────────────────────────────────────────────────────
-      conditionalPanel(
-        condition = paste0("input['", ns("algorithm"), "'] == 'mmm'"),
-        hr(),
-        tags$label("MMM Parameters:",
-                   style = "font-weight:600; font-size:13px; color:#343a40;
-                             display:block; margin-bottom:6px;"),
-        tags$div(
-          style = "font-size:12px; color:#6c757d; margin-bottom:8px;",
-          "Numeric → mean or median. Factor / character → mode."
-        ),
-        radioButtons(
-          ns("mmm_num_fn"), label = "Numeric strategy:",
-          choices  = c("Mean" = "mean", "Median" = "median"),
-          selected = "mean"
-        )
-      ),
-      
-      # ── knn params ────────────────────────────────────────────────────
-      conditionalPanel(
-        condition = paste0("input['", ns("algorithm"), "'] == 'knn'"),
-        hr(),
-        tags$label("KNN Parameters:",
-                   style = "font-weight:600; font-size:13px; color:#343a40;
-                             display:block; margin-bottom:6px;"),
-        tags$div(
-          style = "margin-bottom:8px;",
-          tags$label("Neighbours (K):",
-                     style = "font-size:12px; color:#343a40;"),
-          sliderInput(ns("knn_k"), label = NULL,
-                      min = 1, max = 25, value = 5, step = 1, width = "100%")
-        )
-      ),
-      
-      # ── bag params ────────────────────────────────────────────────────
-      conditionalPanel(
-        condition = paste0("input['", ns("algorithm"), "'] == 'bag'"),
-        hr(),
-        tags$label("Bag Parameters:",
-                   style = "font-weight:600; font-size:13px; color:#343a40;
-                             display:block; margin-bottom:6px;"),
-        tags$div(
-          style = "margin-bottom:8px;",
-          tags$label("Trees per imputation model:",
-                     style = "font-size:12px; color:#343a40;"),
-          sliderInput(ns("bag_trees"), label = NULL,
-                      min = 5, max = 50, value = 25, step = 5, width = "100%")
-        ),
-        tags$div(
-          style = "margin-bottom:8px;",
-          tags$label("Random seed (optional):",
-                     style = "font-size:12px; color:#343a40;"),
-          numericInput(ns("bag_seed"), label = NULL,
-                       value = NA, min = 0, step = 1, width = "100%")
-        ),
-        tags$div(
-          style = "font-size:11px; color:#856404; background:#fff3cd;
-                   border:0.5px solid #ffc107; border-radius:4px;
-                   padding:6px 8px; margin-top:2px;",
-          icon("triangle-exclamation"),
-          " Bagged imputation can be slow on large datasets."
-        )
-      ),
-      
       hr(),
       
-      # ── action buttons ────────────────────────────────────────────────
+      # ── KNN parameters ────────────────────────────────────────────────────
+      conditionalPanel(
+        condition = sprintf("input['%s'] == 'knn'", ns("algorithm")),
+        tags$label("KNN parameters:", style = "font-weight:600; font-size:13px; color:#343a40;"),
+        sliderInput(ns("knn_neighbors"), "Neighbours (k):",
+                    min = 1, max = 25, value = 5, step = 1, width = "100%")
+      ),
+      
+      # ── Bag parameters ────────────────────────────────────────────────────
+      conditionalPanel(
+        condition = sprintf("input['%s'] == 'bag'", ns("algorithm")),
+        tags$label("Bag parameters:", style = "font-weight:600; font-size:13px; color:#343a40;"),
+        sliderInput(ns("bag_trees"), "Number of trees:",
+                    min = 5, max = 50, value = 25, step = 5, width = "100%"),
+        sliderInput(ns("bag_neighbors"), "Imputation neighbours:",
+                    min = 1, max = 10, value = 5, step = 1, width = "100%")
+      ),
+      
+      # ── MMM parameters ────────────────────────────────────────────────────
+      conditionalPanel(
+        condition = sprintf("input['%s'] == 'mmm'", ns("algorithm")),
+        tags$label("MMM parameters:",
+                   style = "font-weight:600; font-size:13px; color:#343a40;"),
+        div(style = "font-size:12px; color:#6c757d; margin-bottom:8px;",
+            "Categorical columns are always imputed with mode."),
+        
+        tags$label("Impute with Mean:",
+                   style = "font-size:12px; font-weight:600; color:#343a40; display:block; margin-bottom:2px;"),
+        selectizeInput(ns("mmm_mean_cols"), label = NULL,
+                       choices = NULL, multiple = TRUE,
+                       options = list(placeholder = "Select numeric columns..."),
+                       width = "100%"),
+        
+        tags$label("Impute with Median:",
+                   style = "font-size:12px; font-weight:600; color:#343a40; display:block; margin-top:6px; margin-bottom:2px;"),
+        selectizeInput(ns("mmm_median_cols"), label = NULL,
+                       choices = NULL, multiple = TRUE,
+                       options = list(placeholder = "Select numeric columns..."),
+                       width = "100%")
+      ),
+      hr(),
+      
+      # ── Bag warning ───────────────────────────────────────────────────────
+      conditionalPanel(
+        condition = sprintf("input['%s'] == 'bag'", ns("algorithm")),
+        div(
+          style = "background:#fff3cd; border:1px solid #ffc107; border-radius:6px;
+                   padding:8px 10px; font-size:12px; color:#856404; margin-bottom:10px;",
+          icon("triangle-exclamation", style = "color:#ffc107;"),
+          HTML("&nbsp; Bagged tree imputation can be slow on large datasets.
+                Click <b>Run Imputation</b> when ready.")
+        )
+      ),
+      
+      # ── Run button ────────────────────────────────────────────────────────
       actionButton(
-        ns("run"), "Run Imputation",
+        ns("run"),
+        label = "Run Imputation",
         icon  = icon("play"),
         width = "100%",
-        style = "background-color:#185FA5; color:white; font-weight:600;
-                 border:none; border-radius:6px; margin-bottom:8px;
-                 padding:8px 0;"
+        style = "background-color:#185FA5; color:white; border:none; margin-bottom:8px;"
       ),
+      
+      # ── Reset button ──────────────────────────────────────────────────────
       actionButton(
-        ns("reset"), "Reset",
+        ns("reset"),
+        label = "Reset",
         icon  = icon("rotate-left"),
         width = "100%"
       )
     ),
     
-    # ── main panel ────────────────────────────────────────────────────────
+    # ── Main panel ────────────────────────────────────────────────────────────
     mainPanel(
       width = 9,
-      uiOutput(ns("main_ui"))
+      uiOutput(ns("result_ui"))
     )
   )
 }
@@ -194,329 +156,375 @@ miss_impute_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-miss_impute_server <- function(id, get_data, split = NULL, roles = NULL) {
+miss_impute_server <- function(id, get_data, split, roles) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
     
-    # ── populate selectors ──────────────────────────────────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────────
     
-    # fires when data changes (roles may or may not be ready)
-    observe({
-      df       <- get_data()
-      req(df)
-      all_vars <- names(df)
-      
-      updateSelectInput(session, "split_col",
-                        choices  = c("(none)", all_vars),
-                        selected = "(none)")
-      updateSelectInput(session, "response_var",
-                        choices  = c("(none)", all_vars),
-                        selected = "(none)")
-      updateSelectInput(session, "unseen_col",
-                        choices  = c("(none)", all_vars),
-                        selected = "(none)")
-    }) |> bindEvent(get_data())
+    make_card <- function(..., bg = "white", border_color = "#dee2e6") {
+      div(style = paste0(
+        "background:", bg, "; border:1px solid ", border_color, ";",
+        "border-radius:10px; padding:16px 20px; margin-bottom:12px;",
+        "box-shadow:0 1px 3px rgba(0,0,0,0.06);"
+      ), ...)
+    }
     
-    # fires when roles change — overrides defaults above with role-aware selections
-    # uses observe() + req() guard instead of bindEvent(roles()) to avoid
-    # crashing when roles is NULL (not passed in)
+    stat_box <- function(label, value, icon_name, color = "#0d6efd") {
+      div(
+        style = paste0(
+          "display:flex; align-items:center; gap:14px;",
+          "background:white; border:1px solid #dee2e6; border-radius:10px;",
+          "padding:14px 18px; flex:1; min-width:160px;",
+          "box-shadow:0 1px 2px rgba(0,0,0,0.05);"
+        ),
+        div(
+          style = paste0(
+            "width:42px; height:42px; border-radius:50%;",
+            "background:", color, "22;",
+            "display:flex; align-items:center; justify-content:center;",
+            "flex-shrink:0;"
+          ),
+          icon(icon_name, style = paste0("color:", color, "; font-size:18px;"))
+        ),
+        div(
+          div(style = "font-size:22px; font-weight:700; color:#212529; line-height:1.1;", value),
+          div(style = "font-size:12px; color:#6c757d; margin-top:2px;", label)
+        )
+      )
+    }
+    
+    # ── Populate selectors from roles ────────────────────────────────────────
+    
     observe({
-      if (is.null(roles)) return()
-      role_vals <- roles()
-      req(!is.null(role_vals), length(role_vals) > 0)
-      df       <- get_data()
-      req(df)
-      all_vars <- names(df)
-      
-      default_resp <- {
-        v <- names(role_vals[role_vals == "outcome"])
-        if (length(v) > 0) v[1] else "(none)"
-      }
-      default_split <- {
-        v <- names(role_vals[role_vals == "split"])
-        if (length(v) > 0) v[1] else "(none)"
-      }
-      
-      updateSelectInput(session, "response_var",
-                        choices  = c("(none)", all_vars),
-                        selected = default_resp)
-      updateSelectInput(session, "split_col",
-                        choices  = c("(none)", all_vars),
-                        selected = default_split)
+      req(get_data(), roles())
+      r    <- roles()
+      vars <- names(get_data())
+      updateSelectInput(session, "y_var",
+                        choices  = c("(none)", vars),
+                        selected = {
+                          v <- names(r)[r == "outcome"]
+                          if (length(v)) v[1] else "(none)"
+                        })
+      updateSelectInput(session, "split_var",
+                        choices  = c("(none)", vars),
+                        selected = {
+                          v <- names(r)[r == "split"]
+                          if (length(v)) v[1] else "(none)"
+                        })
     })
     
-    # populate unseen level choices when unseen_col changes
+    # ── Train / Test level selectors ─────────────────────────────────────────
+    
     observe({
-      df  <- get_data()
-      col <- input$unseen_col
-      req(df, col, col != "(none)", col %in% names(df))
-      lvls <- sort(unique(as.character(df[[col]])))
+      req(input$split_var, input$split_var != "(none)")
+      df   <- get_data(); req(df)
+      lvls <- as.character(unique(df[[input$split_var]]))
       lvls <- lvls[!is.na(lvls)]
-      updateSelectInput(session, "unseen_level",
-                        choices  = lvls,
-                        selected = if (length(lvls) > 0) lvls[1] else NULL)
-    }) |> bindEvent(input$unseen_col, get_data())
-    
-    # ── reset ────────────────────────────────────────────────────────────
-    
-    observeEvent(input$reset, {
-      updateRadioButtons(session,  "mode",        selected = "all")
-      updateRadioButtons(session,  "algorithm",   selected = "knn")
-      updateSliderInput(session,   "knn_k",       value    = 5)
-      updateSliderInput(session,   "bag_trees",   value    = 25)
-      updateNumericInput(session,  "bag_seed",    value    = NA)
-      updateRadioButtons(session,  "mmm_num_fn",  selected = "mean")
-      impute_result(NULL)
+      train_sel <- if ("Train" %in% lvls) "Train" else if ("train" %in% lvls) "train" else lvls[1]
+      test_sel  <- if ("Test"  %in% lvls) "Test"  else if ("test"  %in% lvls) "test"  else
+        if (length(lvls) >= 2) lvls[2] else lvls[1]
+      updateSelectInput(session, "train_level", choices = c("(none)", lvls), selected = train_sel)
+      updateSelectInput(session, "test_level",  choices = c("(none)", lvls), selected = test_sel)
     })
     
-    # ── impute result store ──────────────────────────────────────────────
+    # ── Populate MMM selectize boxes ─────────────────────────────────────────
+    
+    observe({
+      req(get_data())
+      df       <- get_data()
+      excl     <- c(input$y_var, input$split_var)
+      num_cols <- setdiff(names(df)[sapply(df, is.numeric)], excl)
+      updateSelectizeInput(session, "mmm_mean_cols",
+                           choices  = num_cols,
+                           selected = num_cols,
+                           server   = TRUE)
+      updateSelectizeInput(session, "mmm_median_cols",
+                           choices  = num_cols,
+                           selected = NULL,
+                           server   = TRUE)
+    }) |> bindEvent(get_data(), input$y_var, input$split_var)
+    
+    # ── State ─────────────────────────────────────────────────────────────────
     
     impute_result <- reactiveVal(NULL)
     
-    # ── run imputation ───────────────────────────────────────────────────
+    # ── Run ───────────────────────────────────────────────────────────────────
     
     observeEvent(input$run, {
+      df   <- get_data(); req(df)
+      algo <- input$algorithm
       
-      df <- get_data()
-      req(df)
+      start_time <- proc.time()[["elapsed"]]
       
       tryCatch({
         
-        mode <- input$mode
+        # excluded columns
+        excl <- c(
+          if (!is.null(input$y_var)     && input$y_var     != "(none)") input$y_var,
+          if (!is.null(input$split_var) && input$split_var != "(none)") input$split_var
+        )
+        pred_cols <- setdiff(names(df), excl)
         
-        # ── slice train / apply sets ───────────────────────────────────
+        # train / test subsets
+        sv        <- input$split_var
+        tl        <- input$train_level
+        ts        <- input$test_level
+        splits_ok <- !is.null(sv) && sv != "(none)" &&
+          !is.null(tl) && tl != "(none)" &&
+          !is.null(ts) && ts != "(none)"
         
-        if (mode == "all") {
-          train_df <- df
-          apply_df <- df
+        train_df  <- if (splits_ok) df[as.character(df[[sv]]) == tl, , drop = FALSE] else df
+        test_df   <- if (splits_ok) df[as.character(df[[sv]]) == ts, , drop = FALSE] else NULL
+        
+        train_pred <- train_df[, pred_cols, drop = FALSE]
+        test_pred  <- if (!is.null(test_df)) test_df[, pred_cols, drop = FALSE] else NULL
+        
+        # ── algorithms ────────────────────────────────────────────────────
+        
+        if (algo == "mmm") {
           
-        } else if (mode == "split") {
-          req(input$split_col,
-              input$split_col != "(none)",
-              input$split_col %in% names(df))
+          library(recipes)
           
-          col_chr  <- tolower(trimws(as.character(df[[input$split_col]])))
-          tr_mask  <- col_chr %in% c("train", "1", "true")
-          te_mask  <- col_chr %in% c("test",  "0", "false")
+          num_cols <- names(train_pred)[sapply(train_pred, is.numeric)]
+          fac_cols <- setdiff(pred_cols, num_cols)
           
-          if (sum(tr_mask) == 0) {
-            showNotification(
-              "No Train rows found in split column. Expected 'Train'/'Test', '1'/'0', or 'TRUE'/'FALSE'.",
-              type = "error", duration = 8
-            )
-            return()
-          }
-          train_df <- df[tr_mask, , drop = FALSE]
-          apply_df <- df[te_mask, , drop = FALSE]
+          mean_cols   <- intersect(input$mmm_mean_cols,   num_cols)
+          median_cols <- intersect(input$mmm_median_cols, num_cols)
           
-        } else {   # unseen
-          req(input$unseen_col,
-              input$unseen_col != "(none)",
-              input$unseen_col %in% names(df),
-              input$unseen_level)
+          rec <- recipe(~ ., data = train_pred)
+          if (length(mean_cols)   > 0) rec <- rec |> step_impute_mean(all_of(mean_cols))
+          if (length(median_cols) > 0) rec <- rec |> step_impute_median(all_of(median_cols))
+          if (length(fac_cols)    > 0) rec <- rec |> step_impute_mode(all_of(fac_cols))
           
-          col_chr  <- as.character(df[[input$unseen_col]])
-          seen_mask <- col_chr != input$unseen_level | is.na(col_chr)
-          train_df  <- df[seen_mask,  , drop = FALSE]
-          apply_df  <- df[!seen_mask, , drop = FALSE]
+          trained     <- prep(rec, training = train_pred, verbose = FALSE)
+          train_baked <- bake(trained, new_data = NULL)
+          test_baked  <- if (!is.null(test_pred)) bake(trained, new_data = test_pred) else NULL
           
-          if (nrow(train_df) == 0 || nrow(apply_df) == 0) {
-            showNotification(
-              "Unseen indicator produced an empty train or apply set. Check column / level selection.",
-              type = "error", duration = 8
-            )
-            return()
-          }
+        } else if (algo == "knn") {
+          stop("KNN imputation: coming soon.")   # placeholder
+          
+        } else {
+          stop("Bag imputation: coming soon.")   # placeholder
         }
         
-        # ── build recipe & impute ──────────────────────────────────────
-        
-        alg     <- input$algorithm
-        t_start <- proc.time()[["elapsed"]]
-        
-        rec <- recipes::recipe(~ ., data = train_df)
-        
-        if (alg == "mmm") {
-          num_cols <- names(train_df)[sapply(train_df, is.numeric)]
-          fac_cols <- names(train_df)[sapply(train_df,
-                                             function(x) is.factor(x) || is.character(x))]
-          
-          if (input$mmm_num_fn == "mean") {
-            if (length(num_cols) > 0)
-              rec <- rec |> recipes::step_impute_mean(recipes::all_of(num_cols))
-          } else {
-            if (length(num_cols) > 0)
-              rec <- rec |> recipes::step_impute_median(recipes::all_of(num_cols))
-          }
-          if (length(fac_cols) > 0)
-            rec <- rec |> recipes::step_impute_mode(recipes::all_of(fac_cols))
-          
-        } else if (alg == "knn") {
-          rec <- rec |> recipes::step_impute_knn(
-            recipes::all_predictors(),
-            neighbors = as.integer(input$knn_k)
-          )
-          
-        } else if (alg == "bag") {
-          seed_val <- input$bag_seed
-          if (!is.null(seed_val) && !is.na(seed_val))
-            set.seed(as.integer(seed_val))
-          rec <- rec |> recipes::step_impute_bag(
-            recipes::all_predictors(),
-            trees = as.integer(input$bag_trees)
-          )
+        # rebuild: put imputed pred cols back into original full-row frames
+        rebuild <- function(original, baked, p_cols) {
+          out <- original
+          for (col in intersect(p_cols, names(baked))) out[[col]] <- baked[[col]]
+          out
         }
         
-        prep_rec <- recipes::prep(rec, training = train_df)
-        baked    <- recipes::bake(prep_rec, new_data = apply_df)
+        train_out <- rebuild(train_df, train_baked, pred_cols)
+        test_out  <- if (!is.null(test_baked)) rebuild(test_df, test_baked, pred_cols) else NULL
         
-        t_elapsed <- round(proc.time()[["elapsed"]] - t_start, 2)
-        
-        # ── per-column summary ─────────────────────────────────────────
-        
-        col_summary <- do.call(rbind, lapply(names(apply_df), function(cn) {
-          before <- sum(is.na(apply_df[[cn]]))
-          after  <- if (cn %in% names(baked)) sum(is.na(baked[[cn]])) else NA_integer_
-          data.frame(
-            Column         = cn,
-            Type           = class(apply_df[[cn]])[1],
-            Missing_Before = before,
-            Missing_After  = as.integer(after),
-            Imputed        = as.integer(before - after),
-            stringsAsFactors = FALSE
-          )
-        }))
+        elapsed <- round(proc.time()[["elapsed"]] - start_time, 2)
         
         impute_result(list(
-          baked       = baked,
-          col_summary = col_summary,
-          n_imputed   = sum(col_summary$Imputed, na.rm = TRUE),
-          elapsed     = t_elapsed,
-          alg         = alg,
-          mode        = mode,
-          n_train     = nrow(train_df),
-          n_apply     = nrow(apply_df),
-          knn_k       = if (alg == "knn") input$knn_k       else NULL,
-          bag_trees   = if (alg == "bag") input$bag_trees   else NULL,
-          mmm_fn      = if (alg == "mmm") input$mmm_num_fn  else NULL
+          train_out     = train_out,
+          test_out      = test_out,
+          algo          = algo,
+          elapsed       = elapsed,
+          pred_cols     = pred_cols,
+          excl          = excl,
+          na_before     = list(
+            train = sum(is.na(train_pred)),
+            test  = if (!is.null(test_pred)) sum(is.na(test_pred)) else NA
+          ),
+          na_after      = list(
+            train = sum(is.na(train_out[, pred_cols, drop = FALSE])),
+            test  = if (!is.null(test_out))
+              sum(is.na(test_out[, pred_cols, drop = FALSE])) else NA
+          ),
+          col_na_before = colSums(is.na(train_pred)),
+          col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE]))
         ))
         
       }, error = function(e) {
-        showNotification(
-          paste("Imputation error:", conditionMessage(e)),
-          type = "error", duration = 10
-        )
+        impute_result(list(error = conditionMessage(e)))
       })
     })
     
-    # ── main UI ──────────────────────────────────────────────────────────
+    # ── Reset ─────────────────────────────────────────────────────────────────
     
-    output$main_ui <- renderUI({
-      
-      res <- impute_result()
-      
-      # idle placeholder
-      if (is.null(res)) {
-        return(
-          tags$div(
-            style = "display:flex; flex-direction:column; align-items:center;
-                     justify-content:center; min-height:340px;",
-            tags$div(
-              style = "font-size:52px; color:#dee2e6; margin-bottom:16px;",
-              HTML("&#9654;")   # plain HTML play symbol — no FA dependency needed
-            ),
-            tags$div(
-              style = "font-size:14px; color:#6c757d;",
-              "Configure options on the right, then click ",
-              tags$strong("Run Imputation", style = "color:#185FA5;"), "."
-            )
-          )
-        )
-      }
-      
-      # stat-card helper
-      card <- function(label, value, color) {
-        tags$div(
-          style = paste0(
-            "flex:1; min-width:130px; background:white; border-radius:10px;",
-            "border:0.5px solid #dee2e6; padding:14px 18px;",
-            "box-shadow:0 1px 3px rgba(0,0,0,0.06);"
-          ),
-          tags$div(style = "font-size:11px; color:#6c757d; font-weight:500;
-                            text-transform:uppercase; letter-spacing:.5px;", label),
-          tags$div(style = paste0("font-size:26px; font-weight:700; color:", color, ";"),
-                   value)
-        )
-      }
-      
-      alg_label <- switch(res$alg,
-                          mmm = paste0("MMM (", toupper(res$mmm_fn), ")"),
-                          knn = paste0("KNN (K = ", res$knn_k, ")"),
-                          bag = paste0("Bagged Trees (", res$bag_trees, " trees)")
-      )
-      
-      mode_label <- switch(res$mode,
-                           all    = "All observations\n(diagnose)",
-                           split  = "Train \u2192 Testset",
-                           unseen = "Train \u2192 Unseen rows"
-      )
-      mode_color <- switch(res$mode,
-                           all    = "#534AB7",
-                           split  = "#185FA5",
-                           unseen = "#0F6E56"
-      )
-      
-      cards <- tags$div(
-        style = "display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;",
-        card("Cells Imputed",  format(res$n_imputed, big.mark = ","), "#185FA5"),
-        card("Algorithm",      alg_label,                              "#0F6E56"),
-        card("Mode",           mode_label,                             mode_color),
-        card("Time (sec)",     res$elapsed,                            "#BA7517")
-      )
-      
-      tbl_section <- tags$div(
-        style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
-                 padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
-        tags$h5(
-          icon("table-cells", style = "color:#185FA5; margin-right:6px;"),
-          "Per-Column Imputation Summary",
-          style = "font-weight:600; color:#343a40; margin-bottom:14px;"
-        ),
-        DT::dataTableOutput(ns("col_tbl"))
-      )
-      
-      tagList(cards, tbl_section)
+    observeEvent(input$reset, {
+      impute_result(NULL)
+      updateRadioButtons(session, "algorithm",     selected = "mmm")
+      updateSliderInput(session,  "knn_neighbors",  value = 5)
+      updateSliderInput(session,  "bag_trees",      value = 25)
+      updateSliderInput(session,  "bag_neighbors",  value = 5)
     })
     
-    # ── column table ──────────────────────────────────────────────────────
+    # ── Result UI ─────────────────────────────────────────────────────────────
+    
+    output$result_ui <- renderUI({
+      res <- impute_result()
+      
+      # idle
+      if (is.null(res)) {
+        return(make_card(
+          div(style = "text-align:center; color:#6c757d; padding:30px 0;",
+              icon("circle-info", style = "font-size:32px; margin-bottom:10px; color:#adb5bd;"),
+              br(),
+              tags$span("No imputation run yet.", style = "font-size:15px;"),
+              br(),
+              tags$span("Configure settings and click Run Imputation.",
+                        style = "font-size:12px; color:#adb5bd;")
+          )
+        ))
+      }
+      
+      # error
+      if (!is.null(res$error)) {
+        return(make_card(
+          bg = "#fff5f5", border_color = "#f5c2c7",
+          div(
+            icon("circle-xmark", style = "color:#dc3545; font-size:20px;"),
+            tags$span(" Imputation error", style = "font-weight:600; color:#dc3545;"),
+            br(), br(),
+            tags$code(res$error, style = "font-size:12px;")
+          )
+        ))
+      }
+      
+      # success
+      algo_label <- switch(res$algo,
+                           "knn" = paste0("KNN (k = ", input$knn_neighbors, ")"),
+                           "bag" = paste0("Bagged Trees (", input$bag_trees,
+                                          " trees, k = ", input$bag_neighbors, ")"),
+                           "mmm" = "Mean / Median / Mode"
+      )
+      
+      total_imputed <- (res$na_before$train - res$na_after$train) +
+        ifelse(!is.na(res$na_before$test),
+               res$na_before$test - res$na_after$test, 0)
+      cols_affected <- sum(res$col_na_before > 0)
+      
+      tagList(
+        
+        # stat boxes
+        div(
+          style = "display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px;",
+          stat_box("Cells Imputed",   format(total_imputed, big.mark = ","), "fill-drip",     "#0d6efd"),
+          stat_box("Cols Affected",   cols_affected,                         "table-columns", "#6610f2"),
+          stat_box("Train NAs After", res$na_after$train,                    "check-circle",  "#198754"),
+          stat_box("Test NAs After",
+                   if (is.na(res$na_after$test)) "—" else res$na_after$test, "check-circle",  "#198754"),
+          stat_box("Time (s)",        res$elapsed,                           "stopwatch",     "#fd7e14")
+        ),
+        
+        # train / test summary table
+        make_card(
+          tags$h6("Imputation Summary",
+                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
+          tags$table(
+            class = "table table-sm table-bordered",
+            style = "font-size:13px; margin-bottom:0;",
+            tags$thead(tags$tr(
+              tags$th(""), tags$th("NAs Before"), tags$th("NAs After"), tags$th("Imputed")
+            )),
+            tags$tbody(
+              tags$tr(
+                tags$td(tags$b("Train")),
+                tags$td(format(res$na_before$train, big.mark = ",")),
+                tags$td(res$na_after$train),
+                tags$td(style = "color:#198754; font-weight:600;",
+                        format(res$na_before$train - res$na_after$train, big.mark = ","))
+              ),
+              tags$tr(
+                tags$td(tags$b("Test")),
+                tags$td(if (is.na(res$na_before$test)) "—"
+                        else format(res$na_before$test, big.mark = ",")),
+                tags$td(if (is.na(res$na_after$test)) "—" else res$na_after$test),
+                tags$td(style = "color:#198754; font-weight:600;",
+                        if (is.na(res$na_before$test)) "—"
+                        else format(res$na_before$test - res$na_after$test, big.mark = ","))
+              )
+            )
+          )
+        ),
+        
+        # settings recap pills
+        make_card(
+          bg = "#f8f9fa",
+          tags$h6("Settings Used",
+                  style = "font-weight:600; margin-bottom:10px; color:#343a40;"),
+          div(style = "display:flex; gap:8px; flex-wrap:wrap; font-size:12px;",
+              span(style = "background:#e7f0ff; color:#0d6efd; padding:3px 10px; border-radius:999px;",
+                   icon("wand-magic-sparkles"), paste0(" ", algo_label)),
+              span(style = "background:#e8f5e9; color:#198754; padding:3px 10px; border-radius:999px;",
+                   icon("circle-check"), " Fitted on train only"),
+              if (length(res$excl) > 0)
+                span(style = "background:#fff3e0; color:#e65100; padding:3px 10px; border-radius:999px;",
+                     icon("eye-slash"),
+                     paste0(" Excluded: ", paste(res$excl, collapse = ", ")))
+          )
+        ),
+        
+        # per-column DT
+        make_card(
+          tags$h6(icon("table", style = "color:#185FA5; margin-right:6px;"),
+                  "Per-Column Imputation Detail",
+                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
+          DT::dataTableOutput(ns("col_tbl"))
+        )
+      )
+    })
+    
+    # ── Per-column DT ─────────────────────────────────────────────────────────
     
     output$col_tbl <- DT::renderDataTable({
       res <- impute_result()
-      req(res)
+      req(res, is.null(res$error))
       
-      DT::datatable(
-        res$col_summary,
-        options  = list(pageLength = 15, dom = "tip"),
-        rownames = FALSE
-      ) |>
-        DT::formatStyle(
-          "Imputed",
-          color      = DT::styleInterval(0, c("#adb5bd", "#185FA5")),
-          fontWeight = DT::styleInterval(0, c("normal", "bold"))
-        ) |>
-        DT::formatStyle(
-          "Missing_Before",
-          color = DT::styleInterval(0, c("#adb5bd", "#343a40"))
-        )
+      tbl <- data.frame(
+        Column         = names(res$col_na_before),
+        Type           = sapply(get_data()[, names(res$col_na_before), drop = FALSE],
+                                function(x) class(x)[1]),
+        Missing_Before = as.integer(res$col_na_before),
+        Missing_After  = as.integer(res$col_na_after),
+        Imputed        = as.integer(res$col_na_before - res$col_na_after),
+        stringsAsFactors = FALSE
+      )
+      tbl <- tbl[order(-tbl$Imputed), ]
+      
+      DT::datatable(tbl,
+                    options  = list(pageLength = 15, dom = "tip"),
+                    rownames = FALSE) |>
+        DT::formatStyle("Imputed",
+                        color      = DT::styleInterval(0, c("#adb5bd", "#185FA5")),
+                        fontWeight = "bold")
     })
     
-    # ── return ────────────────────────────────────────────────────────────
+    # ── Return ────────────────────────────────────────────────────────────────
     
     return(list(
       data = reactive({
         res <- impute_result()
-        if (is.null(res)) get_data() else res$baked
+        if (is.null(res) || !is.null(res$error)) return(get_data())
+        
+        df  <- get_data()
+        sv  <- input$split_var
+        tl  <- input$train_level
+        ts  <- input$test_level
+        out <- df
+        
+        if (!is.null(sv) && sv != "(none)" && !is.null(tl) && tl != "(none)") {
+          train_rows <- which(as.character(df[[sv]]) == tl)
+          for (col in intersect(names(res$train_out), names(out)))
+            if (length(train_rows) == nrow(res$train_out))
+              out[train_rows, col] <- res$train_out[[col]]
+        }
+        
+        if (!is.null(res$test_out) && !is.null(ts) && ts != "(none)") {
+          test_rows <- which(as.character(df[[sv]]) == ts)
+          for (col in intersect(names(res$test_out), names(out)))
+            if (length(test_rows) == nrow(res$test_out))
+              out[test_rows, col] <- res$test_out[[col]]
+        }
+        
+        out
       })
     ))
     

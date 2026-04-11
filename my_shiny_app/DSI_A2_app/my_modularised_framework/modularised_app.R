@@ -211,11 +211,12 @@ server <- function(input, output, session) {
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
-  variant   <- miss_variants_server("miss_variants", get_raw)
-  shadow    <- miss_shadow_server("miss_shadow",    variant$data)
-  napp      <- miss_napp_server("miss_napp",        shadow$data)
+  variant   <- miss_variants_server("miss_variants",   get_raw)
+  shadow    <- miss_shadow_server("miss_shadow",       variant$data)
+  napp      <- miss_napp_server("miss_napp",           shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  impute   <- miss_impute_server("miss_impute", excessive$data, split, roles)
+  impute    <- miss_impute_server("miss_impute",       excessive$data, split, roles)
+  # impute    <- 
   
   get_data <- impute$data   # current end of pipeline
   
