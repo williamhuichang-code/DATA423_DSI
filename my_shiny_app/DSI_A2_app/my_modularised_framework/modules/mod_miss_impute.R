@@ -281,6 +281,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
     # ── State ─────────────────────────────────────────────────────────────────
     
     impute_result <- reactiveVal(NULL)
+    run_history   <- reactiveVal(list())   # accumulates across runs
     
     # ── Run ───────────────────────────────────────────────────────────────────
     
@@ -412,7 +413,22 @@ miss_impute_server <- function(id, get_data, split, roles) {
         
         elapsed <- round(proc.time()[["elapsed"]] - start_time, 2)
         
-        impute_result(list(
+        # snapshot of imputed values (NA cells only) per column, for KDE
+        imputed_vals <- lapply(pred_cols, function(col) {
+          was_na <- is.na(train_pred[[col]])
+          if (sum(was_na) == 0 || !is.numeric(train_out[[col]])) return(NULL)
+          train_out[[col]][was_na]
+        })
+        names(imputed_vals) <- pred_cols
+        
+        # observed (non-NA) values per column, for KDE ground truth
+        observed_vals <- lapply(pred_cols, function(col) {
+          if (!is.numeric(train_pred[[col]])) return(NULL)
+          train_pred[[col]][!is.na(train_pred[[col]])]
+        })
+        names(observed_vals) <- pred_cols
+        
+        res_obj <- list(
           train_out     = train_out,
           test_out      = test_out,
           algo          = algo,
@@ -428,14 +444,36 @@ miss_impute_server <- function(id, get_data, split, roles) {
             test  = if (!is.null(test_out))
               sum(is.na(test_out[, pred_cols, drop = FALSE])) else NA
           ),
-          col_na_before = colSums(is.na(train_pred)),
-          col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE])),
-          params        = list(
+          col_na_before  = colSums(is.na(train_pred)),
+          col_na_after   = colSums(is.na(train_out[, pred_cols, drop = FALSE])),
+          params         = list(
             knn_neighbors = input$knn_neighbors,
             bag_trees     = input$bag_trees,
             bag_neighbors = input$bag_neighbors
-          )
-        ))
+          ),
+          imputed_vals   = imputed_vals,
+          observed_vals  = observed_vals
+        )
+        impute_result(res_obj)
+        
+        # append to run history
+        hist <- run_history()
+        run_n <- length(hist) + 1
+        algo_label_h <- switch(algo,
+                               "knn" = paste0("KNN (k=", input$knn_neighbors, ")"),
+                               "bag" = paste0("Bag (", input$bag_trees, "t, k=", input$bag_neighbors, ")"),
+                               "mmm" = "MMM"
+        )
+        hist[[run_n]] <- list(
+          run         = run_n,
+          label       = algo_label_h,
+          algo        = algo,
+          imputed_vals  = imputed_vals,
+          observed_vals = observed_vals,
+          total_imputed = (sum(is.na(train_pred)) - sum(is.na(train_out[, pred_cols, drop = FALSE]))),
+          elapsed       = elapsed
+        )
+        run_history(hist)
         
       }, error = function(e) {
         impute_result(list(error = conditionMessage(e)))
@@ -446,6 +484,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
     
     observeEvent(input$reset, {
       impute_result(NULL)
+      run_history(list())
       updateRadioButtons(session, "algorithm",     selected = "knn")
       updateSliderInput(session,  "knn_neighbors",  value = 5)
       updateSliderInput(session,  "bag_trees",      value = 25)
@@ -567,6 +606,31 @@ miss_impute_server <- function(id, get_data, split, roles) {
           )
         ),
         
+        # run history table
+        make_card(
+          tags$h6(icon("clock-rotate-left", style = "color:#185FA5; margin-right:6px;"),
+                  "Run History",
+                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
+          DT::dataTableOutput(ns("history_tbl"))
+        ),
+        
+        # KDE comparison
+        make_card(
+          tags$h6(icon("chart-area", style = "color:#185FA5; margin-right:6px;"),
+                  "Imputed Value Distribution (KDE)",
+                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
+          div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
+              "Observed (grey) = non-missing train values. Coloured lines = imputed values per run."),
+          fluidRow(
+            column(4,
+                   selectInput(ns("kde_col"), "Select column:",
+                               choices  = NULL,
+                               width    = "100%")
+            )
+          ),
+          plotly::plotlyOutput(ns("kde_plot"), height = "320px")
+        ),
+        
         # per-column DT
         make_card(
           tags$h6(icon("table", style = "color:#185FA5; margin-right:6px;"),
@@ -574,6 +638,105 @@ miss_impute_server <- function(id, get_data, split, roles) {
                   style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
           DT::dataTableOutput(ns("col_tbl"))
         )
+      )
+    })
+    
+    # ── Run history DT ─────────────────────────────────────────────────────────────────────────────
+    
+    output$history_tbl <- DT::renderDataTable({
+      hist <- run_history()
+      req(length(hist) > 0)
+      
+      tbl <- do.call(rbind, lapply(hist, function(h) {
+        data.frame(
+          Run           = h$run,
+          Algorithm     = h$label,
+          Cells_Imputed = h$total_imputed,
+          Time_s        = h$elapsed,
+          stringsAsFactors = FALSE
+        )
+      }))
+      
+      DT::datatable(tbl,
+                    options  = list(pageLength = 10, dom = "tip"),
+                    rownames = FALSE) |>
+        DT::formatStyle("Run", fontWeight = "bold")
+    })
+    
+    # ── KDE column selector ──────────────────────────────────────────────────────────────────────
+    
+    observe({
+      hist <- run_history()
+      req(length(hist) > 0)
+      # columns that had at least one imputed value across any run
+      all_cols <- unique(unlist(lapply(hist, function(h) {
+        names(Filter(function(v) !is.null(v) && length(v) > 0, h$imputed_vals))
+      })))
+      # order by most imputed in latest run
+      latest <- hist[[length(hist)]]
+      counts <- sapply(all_cols, function(col) {
+        v <- latest$imputed_vals[[col]]
+        if (is.null(v)) 0L else length(v)
+      })
+      all_cols <- all_cols[order(-counts)]
+      updateSelectInput(session, "kde_col", choices = all_cols,
+                        selected = if (length(all_cols) > 0) all_cols[1] else NULL)
+    })
+    
+    # ── KDE plot ──────────────────────────────────────────────────────────────────────────────────
+    
+    output$kde_plot <- plotly::renderPlotly({
+      hist <- run_history()
+      col  <- input$kde_col
+      req(length(hist) > 0, nzchar(col))
+      
+      # run colours (skip grey which is reserved for observed)
+      run_colours <- c("#1f77b4","#ff7f0e","#2ca02c","#d62728",
+                       "#9467bd","#8c564b","#e377c2","#17becf")
+      
+      fig <- plotly::plot_ly()
+      
+      # observed (grey) — from the latest run that has this col
+      for (i in rev(seq_along(hist))) {
+        obs <- hist[[i]]$observed_vals[[col]]
+        if (!is.null(obs) && length(obs) >= 2) {
+          d <- density(obs, na.rm = TRUE)
+          fig <- plotly::add_trace(fig,
+                                   x = d$x, y = d$y, type = "scatter", mode = "lines",
+                                   fill = "tozeroy", fillcolor = "rgba(180,180,180,0.25)",
+                                   line = list(color = "rgba(120,120,120,0.8)", width = 2),
+                                   name = "Observed", legendgroup = "obs",
+                                   showlegend = TRUE
+          )
+          break
+        }
+      }
+      
+      # one line per run
+      for (i in seq_along(hist)) {
+        h   <- hist[[i]]
+        imp <- h$imputed_vals[[col]]
+        if (is.null(imp) || length(imp) < 2) next
+        d   <- density(imp, na.rm = TRUE)
+        clr <- run_colours[((i - 1) %% length(run_colours)) + 1]
+        fig <- plotly::add_trace(fig,
+                                 x = d$x, y = d$y, type = "scatter", mode = "lines",
+                                 fill = "tozeroy",
+                                 fillcolor = {
+                                   rgb_vals <- paste(col2rgb(clr), collapse = ",")
+                                   paste0("rgba(", rgb_vals, ",0.15)")
+                                 },
+                                 line = list(color = clr, width = 2),
+                                 name = paste0("Run ", h$run, ": ", h$label)
+        )
+      }
+      
+      plotly::layout(fig,
+                     xaxis = list(title = col),
+                     yaxis = list(title = "Density"),
+                     legend = list(orientation = "h", y = -0.2),
+                     hovermode = "x unified",
+                     margin = list(t = 10)
       )
     })
     
