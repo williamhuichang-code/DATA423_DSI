@@ -205,8 +205,9 @@ server <- function(input, output, session) {
   # ── NECESSARY VARS (need get_raw, before pipeline) ───────────────────────
   
   important_vars <- config_important_server("config_important", get_raw)
+  roles     <- data_roles_server("data_roles", get_raw)
   global_seed    <- config_seed_server("config_seed")
-  
+  split <- split_server("split", get_raw, roles, global_seed)
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
@@ -214,19 +215,10 @@ server <- function(input, output, session) {
   shadow    <- miss_shadow_server("miss_shadow",    variant$data)
   napp      <- miss_napp_server("miss_napp",        shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  
-  
-  # ── ROLES + SPLIT (need excessive$data) ──────────────────────────────────
-  
-  roles <- data_roles_server("data_roles", excessive$data)
-  split <- split_server("split", excessive$data, roles, global_seed)
-  
-  
-  # ── CONTINUE PIPELINE ─────────────────────────────────────────────────────
-  
   impute   <- miss_impute_server("miss_impute", excessive$data, split, roles)
   
   get_data <- impute$data   # current end of pipeline
+  
   
   
   # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────
