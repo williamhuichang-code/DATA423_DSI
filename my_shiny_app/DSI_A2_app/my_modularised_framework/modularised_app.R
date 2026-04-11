@@ -19,7 +19,7 @@ library(gridExtra)
 ##### change global configs when needed
 
 # file of interest
-FILE_OF_INTEREST <- "Ass20Data.csv"
+FILE_OF_INTEREST <- "Ass21Data.csv"
 
 # explicit data folder
 DATA_WD <- "."

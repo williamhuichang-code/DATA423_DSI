@@ -80,6 +80,16 @@ miss_transform_ui <- function(id) {
       ),
       hr(),
       
+      # ── SHIFT THRESHOLD ───────────────────────────────────────────────────
+      tags$label("Shift warning threshold:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      div(style = "font-size:11px; color:#6c757d; margin-bottom:4px;",
+          "Flag columns where test mean or SD deviates by more than this % from train."),
+      sliderInput(ns("shift_thresh"), label = NULL,
+                  min = 5, max = 100, value = 25, step = 5,
+                  post = "%", width = "100%"),
+      hr(),
+      
       # ── Reset ─────────────────────────────────────────────────────────────
       actionButton(ns("reset"), label = "Reset", icon = icon("rotate-left"), width = "100%")
     ),
@@ -259,7 +269,8 @@ miss_transform_server <- function(id, get_data, roles) {
                            mean_dev / abs(col_stats$Train_Mean_After), 0)
         rel_sd   <- ifelse(abs(col_stats$Train_SD_After)   > 1e-6,
                            sd_dev   / abs(col_stats$Train_SD_After),   0)
-        col_stats$Shift_Warning <- (rel_mean > 0.2 | rel_sd > 0.2)
+        col_stats$Shift_Warning <- (rel_mean > input$shift_thresh / 100 | 
+                                      rel_sd   > input$shift_thresh / 100)
       }
       
       # rebuild full output df
