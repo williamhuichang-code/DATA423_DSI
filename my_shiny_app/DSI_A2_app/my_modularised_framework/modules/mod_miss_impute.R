@@ -164,7 +164,14 @@ miss_impute_ui <- function(id) {
         icon  = icon("trash-can"),
         width = "100%",
         style = "background-color:#6c757d; color:white; border:none;"
-      )
+      ),
+      hr(),
+      
+      # ── Custom plot title ──────────────────────────────────────────────────
+      tags$label("Custom plot title:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      textInput(ns("custom_title"), label = NULL,
+                placeholder = "Auto-generated if empty")
     ),
     
     # ── Main panel ────────────────────────────────────────────────────────────
@@ -449,7 +456,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
             train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
           }
           rec <- recipe(fml, data = train_with_y) |>
-            step_impute_bag(all_predictors(), trees = input$bag_trees, neighbors = input$bag_neighbors)
+            step_impute_bag(all_predictors(), trees = input$bag_trees)
           trained     <- prep(rec, training = train_with_y, verbose = FALSE)
           train_baked <- bake(trained, new_data = NULL)
           test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
@@ -660,9 +667,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
       }
       tagList(
         make_card(
-          tags$h6(icon("chart-area", style = "color:#185FA5; margin-right:6px;"),
-                  "Imputed Value Distribution (KDE)",
-                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
+          uiOutput(ns("kde_card_title")),
           div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
               "Observed (grey) = non-missing train values. Coloured lines = imputed values per run."),
           plotly::plotlyOutput(ns("kde_plot"), height = "680px")
@@ -830,11 +835,41 @@ miss_impute_server <- function(id, get_data, split, roles) {
                         fontWeight = "bold")
     })
     
+    # ── KDE card title ────────────────────────────────────────────────────────
+    
+    output$kde_card_title <- renderUI({
+      hist <- run_history()
+      
+      # build default title from latest run config
+      default_title <- if (length(hist) == 0) {
+        "Imputed Value Distribution (KDE)"
+      } else {
+        latest <- hist[[length(hist)]]
+        algo_str <- switch(latest$algo,
+                           "knn" = paste0("KNN (k=", latest$label, ")"),
+                           "bag" = paste0("Bag (", latest$label, ")"),
+                           "mmm" = "Mean/Median/Mode",
+                           latest$label
+        )
+        paste0("KDE — ", length(hist), " run", if (length(hist) > 1) "s" else "",
+               " | Latest: ", latest$label)
+      }
+      
+      title_text <- if (nzchar(trimws(input$custom_title))) input$custom_title else default_title
+      
+      tags$h6(
+        icon("chart-area", style = "color:#185FA5; margin-right:6px;"),
+        title_text,
+        style = "font-weight:600; margin-bottom:12px; color:#343a40;"
+      )
+    })
+    
     # ── outputOptions (must come after all output definitions) ───────────────
     
-    outputOptions(output, "kde_plot",      suspendWhenHidden = FALSE)
-    outputOptions(output, "comparison_ui", suspendWhenHidden = FALSE)
-    outputOptions(output, "history_tbl",   suspendWhenHidden = FALSE)
+    outputOptions(output, "kde_plot",       suspendWhenHidden = FALSE)
+    outputOptions(output, "comparison_ui",  suspendWhenHidden = FALSE)
+    outputOptions(output, "history_tbl",    suspendWhenHidden = FALSE)
+    outputOptions(output, "kde_card_title", suspendWhenHidden = FALSE)
     
     # ── Return ────────────────────────────────────────────────────────────────
     
