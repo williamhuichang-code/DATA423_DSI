@@ -69,17 +69,24 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
       imp_vars   <- if (!is.null(important_vars)) important_vars() else character(0)
       imp_vars   <- imp_vars %||% character(0)
       
-      # step 1: variable missingness
-      var_miss   <- colMeans(is.na(df))
-      excl_vars  <- names(var_miss[var_miss > input$var_thresh])
+      # identify shadow columns — exclude from all missingness calculations
+      # shadow cols are always 0/1 and never NA, so including them dilutes miss %
+      shadow_cols <- grep("_shadow$", names(df), value = TRUE)
+      df_no_shadow <- df[, !names(df) %in% shadow_cols, drop = FALSE]
+      
+      # step 1: variable missingness (shadow cols excluded)
+      var_miss   <- colMeans(is.na(df_no_shadow))
+      excl_vars  <- names(var_miss[var_miss >= input$var_thresh])
       prot_vars  <- intersect(excl_vars, imp_vars)        # would be excluded but protected
       excl_vars  <- setdiff(excl_vars, imp_vars)          # actually excluded
       
+      # remove excluded vars from FULL df (including shadow cols) for downstream
       df_after_vars <- df[, !names(df) %in% excl_vars, drop = FALSE]
       
-      # step 2: observation missingness
-      obs_miss   <- rowMeans(is.na(df_after_vars))
-      excl_rows  <- which(obs_miss > input$obs_thresh)
+      # step 2: observation missingness (shadow cols excluded from denominator)
+      df_after_vars_no_shadow <- df_after_vars[, !names(df_after_vars) %in% shadow_cols, drop = FALSE]
+      obs_miss   <- rowMeans(is.na(df_after_vars_no_shadow))
+      excl_rows  <- which(obs_miss >= input$obs_thresh)
       
       df_final   <- if (length(excl_rows) > 0) df_after_vars[-excl_rows, , drop = FALSE] else df_after_vars
       
@@ -242,4 +249,3 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
     
   })
 }
-
