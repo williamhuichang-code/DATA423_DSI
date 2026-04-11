@@ -281,7 +281,7 @@ miss_impute_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-miss_impute_server <- function(id, get_data, split, roles) {
+miss_impute_server <- function(id, get_data, roles) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
