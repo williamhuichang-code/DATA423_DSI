@@ -185,7 +185,7 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
       obs_section <- tags$div(
         style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
                  padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
-        tags$h5(icon("table-rows", style = "color:#993556; margin-right:6px;"),
+        tags$h5(icon("list", style = "color:#993556; margin-right:6px;"),
                 "Step 2 — Excluded Observations",
                 style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
         if (n_excl_rows == 0)
