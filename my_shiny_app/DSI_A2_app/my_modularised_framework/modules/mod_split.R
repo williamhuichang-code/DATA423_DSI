@@ -107,15 +107,15 @@ split_server <- function(id, get_data, get_roles = NULL, global_seed = NULL) {
       
       default_split_col <- if (!is.null(role_vals)) {
         vars <- names(role_vals[role_vals == "split"])
-        if (length(vars) > 0) vars[1] else all_vars[1]
-      } else all_vars[1]
+        if (length(vars) > 0) vars[1] else "(none)"
+      } else "(none)"
       
       updateSelectInput(session, "response_var",
                         choices  = all_vars,
                         selected = default_response)
       
       updateSelectInput(session, "split_col",
-                        choices  = all_vars,
+                        choices  = c("(none)", all_vars),
                         selected = default_split_col)
       
     }) |> bindEvent(get_data(), if (!is.null(get_roles)) get_roles() else NULL)
@@ -138,7 +138,7 @@ split_server <- function(id, get_data, get_roles = NULL, global_seed = NULL) {
       req(df, input$split_method)
       
       if (input$split_method == "column") {
-        req(input$split_col, input$split_col %in% names(df))
+        req(input$split_col, input$split_col != "(none)", input$split_col %in% names(df))
         col        <- df[[input$split_col]]
         col_chr    <- tolower(trimws(as.character(col)))
         train_mask <- col_chr %in% c("train", "1", "true")
