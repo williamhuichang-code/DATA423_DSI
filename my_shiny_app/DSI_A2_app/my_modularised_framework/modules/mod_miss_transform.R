@@ -85,7 +85,7 @@ miss_transform_ui <- function(id) {
       div(style = "font-size:11px; color:#6c757d; margin-bottom:4px;",
           "Flag columns where test mean or SD deviates by more than this % from train."),
       sliderInput(ns("shift_thresh"), label = NULL,
-                  min = 5, max = 100, value = 25, step = 5,
+                  min = 5, max = 100, value = 20, step = 5,
                   post = "%", width = "100%"),
       hr(),
       

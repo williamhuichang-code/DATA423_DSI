@@ -101,8 +101,6 @@ miss_impute_ui <- function(id) {
         tags$label("Bag parameters:", style = "font-weight:600; font-size:13px; color:#343a40;"),
         sliderInput(ns("bag_trees"), "Number of trees:",
                     min = 5, max = 50, value = 25, step = 5, width = "100%"),
-        sliderInput(ns("bag_neighbors"), "Imputation neighbours:",
-                    min = 1, max = 10, value = 5, step = 1, width = "100%")
       ),
       
       # ── MMM parameters ────────────────────────────────────────────────────
@@ -136,18 +134,6 @@ miss_impute_ui <- function(id) {
           icon("triangle-exclamation", style = "color:#ffc107;"),
           HTML("&nbsp; Bagged tree imputation can be slow on large datasets.
                 Click <b>Run Imputation</b> when ready.")
-        )
-      ),
-      
-      # ── Test run button (bag only) ────────────────────────────────────────
-      conditionalPanel(
-        condition = sprintf("input['%s'] == 'bag'", ns("algorithm")),
-        actionButton(
-          ns("test_run"),
-          label = "Test Run (5 rows)",
-          icon  = icon("flask"),
-          width = "100%",
-          style = "background-color:#e8f0fe; color:#185FA5; border:1px solid #a8c0fd; margin-bottom:8px;"
         )
       ),
       
@@ -478,7 +464,7 @@ miss_impute_server <- function(id, get_data, roles) {
               train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
             }
             rec <- recipe(fml, data = train_with_y) |>
-              step_impute_bag(all_predictors(), trees = input$bag_trees, neighbors = input$bag_neighbors)
+              step_impute_bag(all_predictors(), trees = input$bag_trees)
             withProgress(message = paste0("Fitting Bag (", input$bag_trees, " trees)..."), value = 0.2, {
               trained <- prep(rec, training = train_with_y, verbose = FALSE)
               setProgress(0.8, message = "Applying to train/test...")
@@ -527,8 +513,7 @@ miss_impute_server <- function(id, get_data, roles) {
             col_na_before = colSums(is.na(train_pred)),
             col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE])),
             params        = list(knn_neighbors = input$knn_neighbors,
-                                 bag_trees     = input$bag_trees,
-                                 bag_neighbors = input$bag_neighbors),
+                                 bag_trees     = input$bag_trees),
             imputed_vals  = imputed_vals,
             observed_vals = observed_vals
           )
@@ -538,7 +523,7 @@ miss_impute_server <- function(id, get_data, roles) {
           run_n <- length(hist) + 1
           algo_label_h <- switch(algo,
                                  "knn" = paste0("KNN (k=", input$knn_neighbors, ")"),
-                                 "bag" = paste0("Bag (", input$bag_trees, "t, k=", input$bag_neighbors, ")"),
+                                 "bag" = paste0("Bag (", input$bag_trees, " trees)"),
                                  "mmm" = "MMM"
           )
           hist[[run_n]] <- list(
@@ -564,7 +549,6 @@ miss_impute_server <- function(id, get_data, roles) {
       updateRadioButtons(session, "algorithm",    selected = "knn")
       updateSliderInput(session, "knn_neighbors",  value = 5)
       updateSliderInput(session, "bag_trees",      value = 25)
-      updateSliderInput(session, "bag_neighbors",  value = 5)
       r                 <- roles()
       vars              <- names(get_data())
       ignore_role_names <- c("sensitive", "weight", "stratifier", "ignore")
@@ -608,22 +592,9 @@ miss_impute_server <- function(id, get_data, roles) {
         ))
       }
       
-      if (isTRUE(res$test_only)) {
-        return(make_card(
-          bg = "#e8f5e9", border_color = "#a5d6a7",
-          div(
-            icon("circle-check", style = "color:#198754; font-size:20px;"),
-            tags$span(" Test run passed", style = "font-weight:600; color:#198754;"),
-            br(), br(),
-            tags$span(res$msg, style = "font-size:13px; color:#155724;")
-          )
-        ))
-      }
-      
       algo_label <- switch(res$algo,
                            "knn" = paste0("KNN (k = ", res$params$knn_neighbors, ")"),
-                           "bag" = paste0("Bagged Trees (", res$params$bag_trees,
-                                          " trees, k = ", res$params$bag_neighbors, ")"),
+                           "bag" = paste0("Bagged Trees (", res$params$bag_trees, " trees)"),
                            "mmm" = "Mean / Median / Mode"
       )
       total_imputed <- (res$na_before$train - res$na_after$train) +
@@ -711,7 +682,8 @@ miss_impute_server <- function(id, get_data, roles) {
         make_card(
           uiOutput(ns("kde_card_title")),
           div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
-              "Observed (grey) = non-missing train values. Coloured lines = imputed values per run."),
+              "Observed (grey) = non-missing train values. Coloured lines = imputed values per run. 
+              Limitation: imputation may not recover the true distribution well when missingness is high (>30%)."),
           plotly::plotlyOutput(ns("kde_plot"), height = "680px")
         ),
         make_card(
@@ -807,13 +779,15 @@ miss_impute_server <- function(id, get_data, roles) {
         n <- length(subplots)
         if (n == 1) return(
           plotly::layout(subplots[[1]],
-                         legend = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, yanchor = "bottom", font = list(size = 12)), hovermode = "x unified")
+                         legend = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, 
+                                       yanchor = "bottom", font = list(size = 12)), hovermode = "x unified")
         )
         p <- do.call(plotly::subplot, c(subplots,
                                         list(nrows = n_rows, shareY = FALSE, titleX = TRUE, titleY = TRUE,
                                              margin = 0.06)))
         plotly::layout(p,
-                       legend    = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, yanchor = "bottom", font = list(size = 12)),
+                       legend    = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, 
+                                        yanchor = "bottom", font = list(size = 12)),
                        hovermode = "closest",
                        margin    = list(t = 20, b = 80)
         )
@@ -823,7 +797,8 @@ miss_impute_server <- function(id, get_data, roles) {
         col <- input$kde_col
         req(nzchar(col), col != "(none)")
         make_kde_subplot(hist, col, run_colours, show_legend = TRUE) |>
-          plotly::layout(legend = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, yanchor = "bottom", font = list(size = 12)), hovermode = "x unified")
+          plotly::layout(legend = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, 
+                                       yanchor = "bottom", font = list(size = 12)), hovermode = "x unified")
         
       } else if (kde_mode == "grid2") {
         make_grid(c(input$kde_col1, input$kde_col2,
@@ -908,10 +883,10 @@ miss_impute_server <- function(id, get_data, roles) {
     
     # ── outputOptions (must come after all output definitions) ───────────────
     
-    outputOptions(output, "kde_plot",       suspendWhenHidden = FALSE)
-    outputOptions(output, "comparison_ui",  suspendWhenHidden = FALSE)
-    outputOptions(output, "history_tbl",    suspendWhenHidden = FALSE)
-    outputOptions(output, "kde_card_title", suspendWhenHidden = FALSE)
+    outputOptions(output, "kde_plot",        suspendWhenHidden = FALSE)
+    outputOptions(output, "comparison_ui",   suspendWhenHidden = FALSE)
+    outputOptions(output, "history_tbl",     suspendWhenHidden = FALSE)
+    outputOptions(output, "kde_card_title",  suspendWhenHidden = FALSE)
     
     # ── Return ────────────────────────────────────────────────────────────────
     
