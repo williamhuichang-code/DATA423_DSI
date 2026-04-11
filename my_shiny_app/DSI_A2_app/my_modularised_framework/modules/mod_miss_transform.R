@@ -13,7 +13,6 @@ miss_transform_ui <- function(id) {
       style = "background-color: #e8f0fe; border-left: 2px solid #a8c0fd;
                min-height: 100vh; padding-left: 20px;",
       
-      # ── Tab note ──────────────────────────────────────────────────────────
       div(
         style = "font-size: 13px; color: #343a40; background-color: white;
                  padding: 10px; border-left: 4px solid #0d6efd; border-radius: 6px;
@@ -33,7 +32,6 @@ miss_transform_ui <- function(id) {
         selectInput(ns("split_var"), label = NULL, choices = c("(none)"), width = "100%")
       ),
       
-      # Train / Test level selectors
       conditionalPanel(
         condition = sprintf("input['%s'] != '(none)'", ns("split_var")),
         fluidRow(
@@ -71,16 +69,17 @@ miss_transform_ui <- function(id) {
         ns("method"),
         label    = NULL,
         choices  = c(
+          "(none)"                                = "none",
           "Standardise — (x - mean) / sd"        = "standardise",
           "Normalise — (x - min) / (max - min)"  = "normalise",
           "Centre only — x - mean"               = "centre",
           "Scale only — x / sd"                  = "scale"
         ),
-        selected = "standardise"
+        selected = "none"
       ),
       hr(),
       
-      # ── SHIFT THRESHOLD ───────────────────────────────────────────────────
+      # ── Shift threshold ───────────────────────────────────────────────────
       tags$label("Shift warning threshold:",
                  style = "font-weight:600; font-size:13px; color:#343a40;"),
       div(style = "font-size:11px; color:#6c757d; margin-bottom:4px;",
@@ -90,11 +89,9 @@ miss_transform_ui <- function(id) {
                   post = "%", width = "100%"),
       hr(),
       
-      # ── Reset ─────────────────────────────────────────────────────────────
       actionButton(ns("reset"), label = "Reset", icon = icon("rotate-left"), width = "100%")
     ),
     
-    # ── Main panel ────────────────────────────────────────────────────────────
     mainPanel(
       width = 9,
       uiOutput(ns("main_ui"))
@@ -125,7 +122,7 @@ miss_transform_server <- function(id, get_data, roles) {
       )
     }
     
-    # ── Populate split selector from roles ───────────────────────────────────
+    # ── Populate split selector from roles ────────────────────────────────────
     
     observe({
       req(get_data(), roles())
@@ -136,7 +133,7 @@ miss_transform_server <- function(id, get_data, roles) {
                         selected = { v <- names(r)[r == "split"]; if (length(v)) v[1] else "(none)" })
     })
     
-    # ── Train / Test level selectors ─────────────────────────────────────────
+    # ── Train / Test level selectors ──────────────────────────────────────────
     
     observe({
       req(input$split_var, input$split_var != "(none)")
@@ -150,21 +147,18 @@ miss_transform_server <- function(id, get_data, roles) {
       updateSelectInput(session, "test_level",  choices = c("(none)", lvls), selected = test_sel)
     })
     
-    # ── Auto-populate columns from roles ─────────────────────────────────────
+    # ── Auto-populate columns from roles ──────────────────────────────────────
     
     observe({
       req(get_data())
       df <- get_data()
       r  <- if (!is.null(roles)) roles() else NULL
-      
       excl <- character(0)
       if (!is.null(r))
         excl <- names(r)[tolower(as.character(r)) %in%
                            c("outcome", "split", "obs_id", "sensitive",
                              "weight", "stratifier", "ignore")]
-      
       num_cols <- setdiff(names(df)[sapply(df, is.numeric)], excl)
-      
       updateSelectizeInput(session, "transform_cols",
                            choices  = num_cols,
                            selected = num_cols,
@@ -174,7 +168,8 @@ miss_transform_server <- function(id, get_data, roles) {
     # ── Reset ─────────────────────────────────────────────────────────────────
     
     observeEvent(input$reset, {
-      updateRadioButtons(session, "method", selected = "standardise")
+      updateRadioButtons(session, "method", selected = "none")
+      updateSelectInput(session, "split_var", selected = "(none)")
       df <- get_data(); req(df)
       r  <- if (!is.null(roles)) roles() else NULL
       excl <- character(0)
@@ -187,20 +182,26 @@ miss_transform_server <- function(id, get_data, roles) {
                            choices  = num_cols,
                            selected = num_cols,
                            server   = TRUE)
-      # re-populate split
-      r2 <- if (!is.null(roles)) roles() else NULL
-      updateSelectInput(session, "split_var",
-                        selected = { v <- names(r2)[r2 == "split"]; if (length(v)) v[1] else "(none)" })
     })
     
     # ── Core transform reactive ───────────────────────────────────────────────
     
     result <- reactive({
-      df   <- get_data(); req(df)
+      df     <- get_data(); req(df)
+      method <- input$method
+      
+      # passthrough when no method selected
+      if (is.null(method) || method == "none")
+        return(list(out_df  = df,
+                    col_stats = data.frame(),
+                    cols    = character(0),
+                    method  = "none",
+                    n_train = nrow(df),
+                    n_test  = NA,
+                    n_shift = 0))
+      
       cols <- input$transform_cols
       req(length(cols) > 0)
-      
-      method <- input$method
       
       sv        <- input$split_var
       tl        <- input$train_level
@@ -212,13 +213,11 @@ miss_transform_server <- function(id, get_data, roles) {
       train_df <- if (splits_ok) df[as.character(df[[sv]]) == tl, , drop = FALSE] else df
       test_df  <- if (splits_ok) df[as.character(df[[sv]]) == ts, , drop = FALSE] else NULL
       
-      # only transform cols that exist and are numeric in train
       cols <- intersect(cols, names(train_df)[sapply(train_df, is.numeric)])
       req(length(cols) > 0)
       
       library(recipes)
       rec <- recipe(~ ., data = train_df[, cols, drop = FALSE])
-      
       rec <- switch(method,
                     "standardise" = rec |> step_normalize(all_of(cols)),
                     "normalise"   = rec |> step_range(all_of(cols)),
@@ -231,7 +230,6 @@ miss_transform_server <- function(id, get_data, roles) {
       test_baked  <- if (!is.null(test_df))
         bake(trained, new_data = test_df[, cols, drop = FALSE]) else NULL
       
-      # rebuild split dfs
       train_out <- train_df
       for (col in cols) train_out[[col]] <- train_baked[[col]]
       
@@ -239,41 +237,38 @@ miss_transform_server <- function(id, get_data, roles) {
       if (!is.null(test_df) && !is.null(test_baked))
         for (col in cols) test_out[[col]] <- test_baked[[col]]
       
-      # per-column stats
       col_stats <- do.call(rbind, lapply(cols, function(col) {
         tb  <- train_df[[col]]
         ta  <- train_out[[col]]
         tea <- if (!is.null(test_out)) test_out[[col]] else NULL
         data.frame(
           Column            = col,
-          Train_Mean_Before = round(mean(tb,  na.rm = TRUE), 4),
-          Train_Mean_After  = round(mean(ta,  na.rm = TRUE), 4),
-          Train_SD_Before   = round(sd(tb,    na.rm = TRUE), 4),
-          Train_SD_After    = round(sd(ta,    na.rm = TRUE), 4),
-          Train_Min_Before  = round(min(tb,   na.rm = TRUE), 4),
-          Train_Min_After   = round(min(ta,   na.rm = TRUE), 4),
-          Train_Max_Before  = round(max(tb,   na.rm = TRUE), 4),
-          Train_Max_After   = round(max(ta,   na.rm = TRUE), 4),
+          Train_Mean_Before = round(mean(tb, na.rm = TRUE), 4),
+          Train_Mean_After  = round(mean(ta, na.rm = TRUE), 4),
+          Train_SD_Before   = round(sd(tb,   na.rm = TRUE), 4),
+          Train_SD_After    = round(sd(ta,   na.rm = TRUE), 4),
+          Train_Min_Before  = round(min(tb,  na.rm = TRUE), 4),
+          Train_Min_After   = round(min(ta,  na.rm = TRUE), 4),
+          Train_Max_Before  = round(max(tb,  na.rm = TRUE), 4),
+          Train_Max_After   = round(max(ta,  na.rm = TRUE), 4),
           Test_Mean_After   = if (!is.null(tea)) round(mean(tea, na.rm = TRUE), 4) else NA,
           Test_SD_After     = if (!is.null(tea)) round(sd(tea,   na.rm = TRUE), 4) else NA,
           stringsAsFactors  = FALSE
         )
       }))
       
-      # distribution shift flag: >20% relative deviation in mean or sd
       col_stats$Shift_Warning <- FALSE
       if (!is.null(test_df)) {
         mean_dev <- abs(col_stats$Test_Mean_After - col_stats$Train_Mean_After)
         sd_dev   <- abs(col_stats$Test_SD_After   - col_stats$Train_SD_After)
         rel_mean <- ifelse(abs(col_stats$Train_Mean_After) > 1e-6,
                            mean_dev / abs(col_stats$Train_Mean_After), 0)
-        rel_sd   <- ifelse(abs(col_stats$Train_SD_After)   > 1e-6,
-                           sd_dev   / abs(col_stats$Train_SD_After),   0)
-        col_stats$Shift_Warning <- (rel_mean > input$shift_thresh / 100 | 
+        rel_sd   <- ifelse(abs(col_stats$Train_SD_After) > 1e-6,
+                           sd_dev   / abs(col_stats$Train_SD_After), 0)
+        col_stats$Shift_Warning <- (rel_mean > input$shift_thresh / 100 |
                                       rel_sd   > input$shift_thresh / 100)
       }
       
-      # rebuild full output df
       out_df <- df
       if (splits_ok) {
         train_rows <- which(as.character(df[[sv]]) == tl)
@@ -302,8 +297,18 @@ miss_transform_server <- function(id, get_data, roles) {
     # ── Main UI ───────────────────────────────────────────────────────────────
     
     output$main_ui <- renderUI({
-      req(result())
       res <- result()
+      
+      # no method selected — show placeholder
+      if (is.null(res) || res$method == "none") {
+        return(div(
+          style = "text-align:center; color:#6c757d; padding:60px 0;",
+          icon("circle-info", style = "font-size:32px; color:#adb5bd; margin-bottom:10px;"),
+          br(),
+          tags$span("Select a transformation method on the right to begin.",
+                    style = "font-size:15px;")
+        ))
+      }
       
       method_label <- switch(res$method,
                              "standardise" = "Standardise \u2014 (x \u2212 mean) / sd",
@@ -339,7 +344,7 @@ miss_transform_server <- function(id, get_data, roles) {
             " <strong>Distribution shift detected</strong> in ",
             res$n_shift, " column(s): <strong>",
             paste(flagged, collapse = ", "),
-            "</strong>. Test mean or SD deviates &gt;20% from train after transformation."
+            "</strong>. Test mean or SD deviates more than threshold from train."
           ))
         )
       } else NULL
@@ -347,15 +352,11 @@ miss_transform_server <- function(id, get_data, roles) {
       tbl_section <- tags$div(
         style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
                  padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
-        tags$h5(
-          icon("table", style = "color:#185FA5; margin-right:6px;"),
-          "Per-Column Statistics",
-          style = "font-weight:600; color:#343a40; margin-bottom:4px;"
-        ),
-        tags$p(
-          "Train stats are the learned values used for transformation. Test stats show how well they generalise.",
-          style = "font-size:12px; color:#6c757d; margin-bottom:12px;"
-        ),
+        tags$h5(icon("table", style = "color:#185FA5; margin-right:6px;"),
+                "Per-Column Statistics",
+                style = "font-weight:600; color:#343a40; margin-bottom:4px;"),
+        tags$p("Train stats are the learned values used for transformation. Test stats show how well they generalise.",
+               style = "font-size:12px; color:#6c757d; margin-bottom:12px;"),
         DT::dataTableOutput(ns("col_stats_tbl"))
       )
       
@@ -365,8 +366,9 @@ miss_transform_server <- function(id, get_data, roles) {
     # ── Per-column DT ─────────────────────────────────────────────────────────
     
     output$col_stats_tbl <- DT::renderDataTable({
-      req(result())
-      tbl <- result()$col_stats
+      res <- result()
+      req(res, res$method != "none", nrow(res$col_stats) > 0)
+      tbl <- res$col_stats
       
       display_tbl <- data.frame(
         Column           = tbl$Column,
@@ -385,11 +387,9 @@ miss_transform_server <- function(id, get_data, roles) {
         check.names      = FALSE
       )
       
-      DT::datatable(
-        display_tbl,
-        options  = list(pageLength = 15, scrollX = TRUE, dom = "tip"),
-        rownames = FALSE
-      ) |>
+      DT::datatable(display_tbl,
+                    options  = list(pageLength = 15, scrollX = TRUE, dom = "tip"),
+                    rownames = FALSE) |>
         DT::formatStyle("Shift?",
                         color      = DT::styleEqual(c("\u26a0 Yes", ""), c("#C41E3A", "#adb5bd")),
                         fontWeight = "bold") |>
