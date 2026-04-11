@@ -9,9 +9,9 @@ miss_impute_ui <- function(id) {
   sidebarLayout(
     position = "right",
     sidebarPanel(
-      width = 3,
+      width = 4,
       style = "background-color: #e8f0fe; border-left: 2px solid #a8c0fd;
-               min-height: 100vh; padding-left: 20px;",
+               min-height: 100vh; padding-left: 20px; overflow-y: auto;",
       
       div(
         style = "font-size: 13px; color: #343a40; background-color: white;
@@ -24,19 +24,28 @@ miss_impute_ui <- function(id) {
       ),
       hr(),
       
+      # outcome variable
+      tags$label("Outcome Variable:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      tags$p("Auto-selected from Data Roles. Defines the response so KNN only uses predictors.",
+             style = "font-size:11px; color:#6c757d; margin-bottom:4px;"),
+      selectInput(ns("outcome_var"), label = NULL,
+                  choices = c("(none)"), selected = "(none)", width = "100%"),
+      hr(),
+      
       # training mode
       tags$label("Training Mode:",
                  style = "font-weight:600; font-size:13px; color:#343a40;"),
       radioButtons(ns("train_mode"), label = NULL,
                    choices = c(
-                     "All observations (diagnose)" = "all",
-                     "Train on train, predict test" = "traintest",
-                     "Predict future unseen data"   = "future"
+                     "All observations (diagnose)"    = "all",
+                     "Impute on train, apply on test" = "traintest",
+                     "Predict on future unseen data"  = "future"
                    ),
                    selected = "all"),
       hr(),
       
-      # split col selector
+      # split col (traintest only)
       conditionalPanel(
         condition = paste0("input['", ns("train_mode"), "'] == 'traintest'"),
         tags$div(
@@ -45,25 +54,25 @@ miss_impute_ui <- function(id) {
                      style = "font-weight:600; font-size:12px; color:#343a40; display:block; margin-bottom:4px;"),
           tags$p("If split module is configured, it will be used automatically.",
                  style = "font-size:11px; color:#6c757d; margin-bottom:4px;"),
-          selectInput(ns("split_col"), label = NULL, choices = NULL, width = "100%")
-        )
+          selectInput(ns("split_col"), label = NULL, choices = c("(none)"), width = "100%")
+        ),
+        hr()
       ),
       
-      # future: future data indicator col
+      # future col (future only)
       conditionalPanel(
         condition = paste0("input['", ns("train_mode"), "'] == 'future'"),
         tags$div(
           style = "margin-top:8px;",
           tags$label("Future Data Column:",
                      style = "font-weight:600; font-size:12px; color:#343a40; display:block; margin-bottom:4px;"),
-          tags$p("Select a column where a level indicates future/unseen rows (e.g. 'future', 'yes').",
+          tags$p("Select a column where a level indicates future/unseen rows.",
                  style = "font-size:11px; color:#6c757d; margin-bottom:4px;"),
-          selectInput(ns("future_col"), label = NULL, choices = NULL, width = "100%"),
-          selectInput(ns("future_level"), label = "Future level:",
-                      choices = NULL, width = "100%")
-        )
+          selectInput(ns("future_col"),   label = NULL,            choices = c("(none)"), width = "100%"),
+          selectInput(ns("future_level"), label = "Future level:", choices = NULL,        width = "100%")
+        ),
+        hr()
       ),
-      hr(),
       
       # algorithm
       tags$label("Algorithm:",
@@ -76,7 +85,6 @@ miss_impute_ui <- function(id) {
                    ),
                    selected = "mmm"),
       
-      # mmm params
       conditionalPanel(
         condition = paste0("input['", ns("algorithm"), "'] == 'mmm'"),
         tags$div(
@@ -94,7 +102,6 @@ miss_impute_ui <- function(id) {
         )
       ),
       
-      # knn params
       conditionalPanel(
         condition = paste0("input['", ns("algorithm"), "'] == 'knn'"),
         tags$div(
@@ -106,7 +113,6 @@ miss_impute_ui <- function(id) {
         )
       ),
       
-      # bag params
       conditionalPanel(
         condition = paste0("input['", ns("algorithm"), "'] == 'bag'"),
         tags$div(
@@ -119,8 +125,6 @@ miss_impute_ui <- function(id) {
       ),
       
       hr(),
-      
-      # run button
       actionButton(ns("run"),   label = "Run Imputation",
                    icon = icon("play"), width = "100%",
                    style = "background-color:#185FA5; color:white; margin-bottom:8px;"),
@@ -129,7 +133,7 @@ miss_impute_ui <- function(id) {
     ),
     
     mainPanel(
-      width = 9,
+      width = 8,
       uiOutput(ns("main_ui"))
     )
   )
@@ -142,10 +146,9 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
-    
-    # state
     impute_result <- reactiveVal(NULL)
     
+    # ── reset ─────────────────────────────────────────────────────────────
     observeEvent(input$reset, {
       impute_result(NULL)
       updateRadioButtons(session, "algorithm",   selected = "mmm")
@@ -153,47 +156,102 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
       updateRadioButtons(session, "mmm_numeric", selected = "mean")
       updateSliderInput(session,  "knn_k",       value = 5)
       updateSliderInput(session,  "bag_trees",   value = 25)
+      updateSelectInput(session,  "outcome_var", selected = "(none)")
+      updateSelectInput(session,  "split_col",   selected = "(none)")
     })
     
-    # ── populate split col selector ───────────────────────────────────────
+    # ── populate choices from data ────────────────────────────────────────
     observe({
       df <- get_data()
       req(df)
+      
+      default_outcome <- "(none)"
+      default_split   <- "(none)"
+      
+      if (!is.null(get_roles)) {
+        cur <- get_roles()
+        ov  <- names(cur)[cur == "outcome"]
+        sv  <- names(cur)[cur == "split"]
+        if (length(ov) == 1) default_outcome <- ov
+        if (length(sv) == 1) default_split   <- sv
+      }
+      
+      updateSelectInput(session, "outcome_var",
+                        choices  = c("(none)", names(df)),
+                        selected = default_outcome)
       updateSelectInput(session, "split_col",
                         choices  = c("(none)", names(df)),
-                        selected = "(none)")
+                        selected = default_split)
       updateSelectInput(session, "future_col",
                         choices  = c("(none)", names(df)),
                         selected = "(none)")
     }) |> bindEvent(get_data())
     
-    # ── auto-select split col from roles ──────────────────────────────────
-    observe({
-      req(get_roles)
-      cur <- get_roles()
-      req(cur)
-      split_var <- names(cur)[cur == "split"]
-      if (length(split_var) == 1) {
-        updateSelectInput(session, "split_col", selected = split_var)
+    # ── helper: columns to drop before recipe ────────────────────────────
+    get_drop_cols <- function() {
+      drop <- c()
+      if (!is.null(input$split_col) && input$split_col != "(none)")
+        drop <- c(drop, input$split_col)
+      if (!is.null(get_roles)) {
+        cur  <- get_roles()
+        drop <- c(drop, names(cur)[cur %in% c("obs_id", "ignore", "split")])
       }
-    }) |> bindEvent(get_roles())
+      unique(drop)
+    }
     
+    # ── helper: build recipe and bake ────────────────────────────────────
+    run_recipe <- function(train_df, predict_df = NULL) {
+      
+      # drop non-feature columns
+      drop_cols  <- get_drop_cols()
+      train_df   <- train_df[,   setdiff(names(train_df),   drop_cols), drop = FALSE]
+      if (!is.null(predict_df))
+        predict_df <- predict_df[, setdiff(names(predict_df), drop_cols), drop = FALSE]
+      
+      # align factor levels: predict must match train
+      if (!is.null(predict_df)) {
+        for (col in names(train_df)) {
+          if (is.factor(train_df[[col]]) && col %in% names(predict_df))
+            predict_df[[col]] <- factor(predict_df[[col]], levels = levels(train_df[[col]]))
+        }
+      }
+      
+      # outcome variable — defines response so KNN uses only predictors
+      ov <- input$outcome_var
+      outcome_var <- if (!is.null(ov) && ov != "(none)" && ov %in% names(train_df)) ov else NULL
+      
+      rec <- if (!is.null(outcome_var)) {
+        recipe(as.formula(paste(outcome_var, "~ .")), data = train_df)
+      } else {
+        recipe(~ ., data = train_df)
+      }
+      
+      algo <- input$algorithm
+      rec  <- if (algo == "mmm") {
+        if (input$mmm_numeric == "mean")
+          rec |> step_impute_mean(all_numeric_predictors()) |>
+          step_impute_mode(all_nominal_predictors())
+        else
+          rec |> step_impute_median(all_numeric_predictors()) |>
+          step_impute_mode(all_nominal_predictors())
+      } else if (algo == "knn") {
+        rec |> step_impute_knn(all_predictors(), neighbors = input$knn_k)
+      } else {
+        rec |> step_impute_bag(all_predictors(), trees = input$bag_trees)
+      }
+      
+      trained       <- prep(rec, training = train_df, verbose = FALSE)
+      imputed_train <- bake(trained, new_data = train_df)
+      imputed_test  <- if (!is.null(predict_df)) bake(trained, new_data = predict_df) else NULL
+      
+      list(trained = trained, imputed = imputed_train, imputed_test = imputed_test)
+    }
     
-    observeEvent(input$future_col, {
-      req(input$future_col, input$future_col != "(none)")
-      df  <- get_data()
-      req(df)
-      lvls <- as.character(unique(df[[input$future_col]]))
-      updateSelectInput(session, "future_level", choices = lvls)
-    })
-    
-    # ── run imputation ────────────────────────────────────────────────────
-    
+    # ── run ───────────────────────────────────────────────────────────────
     observeEvent(input$run, {
       
-      df        <- get_data()
-      algo      <- input$algorithm
-      mode      <- input$train_mode
+      df   <- get_data()
+      mode <- input$train_mode
       req(df)
       
       start_time <- proc.time()
@@ -202,76 +260,56 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
         
         if (!requireNamespace("recipes", quietly = TRUE))
           stop("Package 'recipes' is required. Please install it.")
-        
         library(recipes)
         
-        # helper: build recipe and bake
-        run_recipe <- function(train_df, predict_df = NULL) {
-          rec <- recipe(~ ., data = train_df)
-          
-          rec <- if (algo == "mmm") {
-            num_strategy <- input$mmm_numeric
-            if (num_strategy == "mean")
-              rec |> step_impute_mean(all_numeric_predictors()) |>
-              step_impute_mode(all_nominal_predictors())
-            else
-              rec |> step_impute_median(all_numeric_predictors()) |>
-              step_impute_mode(all_nominal_predictors())
-          } else if (algo == "knn") {
-            rec |> step_impute_knn(all_predictors(), neighbors = input$knn_k)
-          } else {
-            rec |> step_impute_bag(all_predictors(), trees = input$bag_trees)
-          }
-          
-          trained <- prep(rec, training = train_df, verbose = FALSE)
-          target  <- if (is.null(predict_df)) train_df else predict_df
-          list(trained = trained, imputed = bake(trained, new_data = target))
-        }
-        
         result <- if (mode == "all") {
+          
           r <- run_recipe(df)
           list(imputed_train = r$imputed, imputed_test = NULL, recipe = r$trained)
           
         } else if (mode == "traintest") {
-          # prefer split module if available
-          train_df <- if (!is.null(get_split) && nrow(get_split$train()) > 0) {
-            get_split$train()
-          } else {
+          
+          train_df <- tryCatch(
+            if (!is.null(get_split)) get_split$train() else NULL,
+            error = function(e) NULL
+          )
+          if (is.null(train_df) || nrow(train_df) == 0) {
             req(input$split_col, input$split_col != "(none)")
-            col_chr <- tolower(trimws(as.character(df[[input$split_col]])))
-            df[col_chr %in% c("train", "1", "true"), , drop = FALSE]
+            col_chr  <- tolower(trimws(as.character(df[[input$split_col]])))
+            train_df <- df[col_chr %in% c("train", "1", "true"), , drop = FALSE]
           }
           
-          test_df <- if (!is.null(get_split) && nrow(get_split$test()) > 0) {
-            get_split$test()
-          } else {
+          test_df <- tryCatch(
+            if (!is.null(get_split)) get_split$test() else NULL,
+            error = function(e) NULL
+          )
+          if (is.null(test_df) || nrow(test_df) == 0) {
             req(input$split_col, input$split_col != "(none)")
             col_chr <- tolower(trimws(as.character(df[[input$split_col]])))
-            df[col_chr %in% c("test", "0", "false"), , drop = FALSE]
+            test_df <- df[col_chr %in% c("test", "0", "false"), , drop = FALSE]
           }
           
-          req(nrow(train_df) > 0, nrow(test_df) > 0)
-          r_train <- run_recipe(train_df)
-          r_test  <- list(imputed = bake(r_train$trained, new_data = test_df))
-          list(imputed_train = r_train$imputed,
-               imputed_test  = r_test$imputed,
-               recipe        = r_train$trained)
+          if (nrow(train_df) == 0) stop("train set has 0 rows — check split column or Split module")
+          if (nrow(test_df)  == 0) stop("test set has 0 rows — check split column or Split module")
+          
+          r <- run_recipe(train_df, predict_df = test_df)
+          list(imputed_train = r$imputed,
+               imputed_test  = r$imputed_test,
+               recipe        = r$trained)
           
         } else {
-          # future: train on all, ready to bake new data
           r <- run_recipe(df)
           list(imputed_train = r$imputed, imputed_test = NULL, recipe = r$trained)
         }
         
-        elapsed <- (proc.time() - start_time)[["elapsed"]]
-        
-        # count imputed cells
-        n_imputed <- sum(is.na(df[, names(result$imputed_train), drop = FALSE]) &
-                           !is.na(result$imputed_train))
+        elapsed   <- (proc.time() - start_time)[["elapsed"]]
+        orig_cols <- intersect(names(df), names(result$imputed_train))
+        n_imputed <- sum(is.na(df[, orig_cols, drop = FALSE]) &
+                           !is.na(result$imputed_train[, orig_cols, drop = FALSE]))
         
         impute_result(list(
           result    = result,
-          algo      = algo,
+          algo      = input$algorithm,
           mode      = mode,
           n_imputed = n_imputed,
           elapsed   = round(elapsed, 2),
@@ -284,15 +322,13 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
     })
     
     # ── main UI ───────────────────────────────────────────────────────────
-    
     output$main_ui <- renderUI({
       
       if (is.null(impute_result())) {
         return(tags$div(
           style = "padding:40px; text-align:center; color:#adb5bd;",
           icon("play-circle", style = "font-size:48px; margin-bottom:16px; display:block;"),
-          tags$p("Configure options and click Run Imputation.",
-                 style = "font-size:15px;")
+          tags$p("Configure options and click Run Imputation.", style = "font-size:15px;")
         ))
       }
       
@@ -311,14 +347,11 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
                            knn = paste0("KNN (K = ", input$knn_k, ")"),
                            bag = paste0("Bag (trees = ", input$bag_trees, ")")
       )
-      
       mode_label <- switch(res$mode,
                            all       = "All observations (diagnose)",
-                           traintest = "Train on trainset, predict testset",
-                           future    = "Predict future unseen data"
+                           traintest = "Impute on train, apply on test",
+                           future    = "Predict on future unseen data"
       )
-      
-      # ── stat cards ───────────────────────────────────────────────────────
       
       card <- function(label, value, color) {
         tags$div(
@@ -335,13 +368,11 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
       
       cards <- tags$div(
         style = "display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;",
-        card("Cells Imputed", res$n_imputed,           "#185FA5"),
-        card("Algorithm",     algo_label,               "#0F6E56"),
-        card("Mode",          mode_label,               "#534AB7"),
-        card("Time (sec)",    res$elapsed,              "#BA7517")
+        card("Cells Imputed", res$n_imputed, "#185FA5"),
+        card("Algorithm",     algo_label,    "#0F6E56"),
+        card("Mode",          mode_label,    "#534AB7"),
+        card("Time (sec)",    res$elapsed,   "#BA7517")
       )
-      
-      # ── per-column imputation summary ─────────────────────────────────────
       
       col_section <- tags$div(
         style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
@@ -355,20 +386,21 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
       tagList(cards, col_section)
     })
     
-    # ── per-column summary table ──────────────────────────────────────────
-    
+    # ── summary table ─────────────────────────────────────────────────────
     output$col_summary_tbl <- DT::renderDataTable({
       req(impute_result(), is.null(impute_result()$error))
-      res     <- impute_result()
-      df_orig <- res$df_orig
-      df_imp  <- res$result$imputed_train
+      res         <- impute_result()
+      df_orig     <- res$df_orig
+      df_imp      <- res$result$imputed_train
+      common_cols <- intersect(names(df_orig), names(df_imp))
       
       tbl <- data.frame(
-        Column       = names(df_orig),
-        Type         = sapply(df_orig, function(x) class(x)[1]),
-        Missing_Before = colSums(is.na(df_orig)),
-        Missing_After  = colSums(is.na(df_imp[, names(df_orig), drop = FALSE])),
-        Imputed        = colSums(is.na(df_orig)) - colSums(is.na(df_imp[, names(df_orig), drop = FALSE])),
+        Column         = common_cols,
+        Type           = sapply(df_orig[, common_cols, drop = FALSE], function(x) class(x)[1]),
+        Missing_Before = colSums(is.na(df_orig[, common_cols, drop = FALSE])),
+        Missing_After  = colSums(is.na(df_imp[,  common_cols, drop = FALSE])),
+        Imputed        = colSums(is.na(df_orig[, common_cols, drop = FALSE])) -
+          colSums(is.na(df_imp[,  common_cols, drop = FALSE])),
         stringsAsFactors = FALSE
       )
       tbl <- tbl[order(-tbl$Imputed), ]
@@ -376,12 +408,11 @@ miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL)
       DT::datatable(tbl, options = list(pageLength = 15, dom = "tip"),
                     rownames = FALSE) |>
         DT::formatStyle("Imputed",
-                        color = DT::styleInterval(0, c("#adb5bd", "#185FA5")),
+                        color      = DT::styleInterval(0, c("#adb5bd", "#185FA5")),
                         fontWeight = "bold")
     })
     
     # ── return ────────────────────────────────────────────────────────────
-    
     return(list(
       data = reactive({
         res <- impute_result()
