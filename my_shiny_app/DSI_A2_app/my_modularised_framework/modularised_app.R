@@ -84,10 +84,10 @@ ui <- dashboardPage(
       ),
       
       menuItem("Config", tabName = "config", icon = icon("sliders"),
-               menuSubItem("Data Roles",     tabName = "data_roles"),
-               menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Global Seed",    tabName = "config_seed"),
                menuSubItem("Split Setting",  tabName = "config_split"),
+               menuSubItem("Data Roles",     tabName = "data_roles"),
+               menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
                # add more subtabs here
       ),
@@ -145,10 +145,10 @@ ui <- dashboardPage(
       tabItem(tabName = "eda_barchart", box(title = "Barchart", width = 12, "coming soon")),
       
       # Config
-      tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
-      tabItem(tabName = "config_important", config_important_ui("config_important")),
       tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
       tabItem(tabName = "config_split",     split_ui("split")),
+      tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
+      tabItem(tabName = "config_important", config_important_ui("config_important")),
       tabItem(tabName = "data_download",    data_download_ui("data_download")),
       
       # Miss Strategy
@@ -204,22 +204,23 @@ server <- function(input, output, session) {
   }) |> bindCache(input$selected_file)
   
   
-  # ── NECESSARY VARS (need get_raw, before pipeline) ───────────────────────
+  # ── DOMAIN CONFIGS ───────────────────────────────────────────────────────
   
-  important_vars <- config_important_server("config_important", get_raw)
-  roles     <- data_roles_server("data_roles", get_raw)
   global_seed    <- config_seed_server("config_seed")
-  split <- split_server("split", get_raw, roles, global_seed)
+  split          <- split_server("split", get_raw, global_seed = global_seed)
+  roles          <- data_roles_server("data_roles", split$data)
+  important_vars <- config_important_server("config_important", split$data)
+  
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
-  variant   <- miss_variants_server("miss_variants",   get_raw)
+  variant   <- miss_variants_server("miss_variants",   split$data)
   shadow    <- miss_shadow_server("miss_shadow",       variant$data)
   napp      <- miss_napp_server("miss_napp",           shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
   impute    <- miss_impute_server("miss_impute",       excessive$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
-  # impute    <- 
+  
   
   get_data <- transform$data   # current end of pipeline
   
