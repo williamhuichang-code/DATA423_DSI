@@ -606,14 +606,6 @@ miss_impute_server <- function(id, get_data, split, roles) {
           )
         ),
         
-        # run history table
-        make_card(
-          tags$h6(icon("clock-rotate-left", style = "color:#185FA5; margin-right:6px;"),
-                  "Run History",
-                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
-          DT::dataTableOutput(ns("history_tbl"))
-        ),
-        
         # KDE comparison
         make_card(
           tags$h6(icon("chart-area", style = "color:#185FA5; margin-right:6px;"),
@@ -622,13 +614,43 @@ miss_impute_server <- function(id, get_data, split, roles) {
           div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
               "Observed (grey) = non-missing train values. Coloured lines = imputed values per run."),
           fluidRow(
-            column(4,
-                   selectInput(ns("kde_col"), "Select column:",
-                               choices  = NULL,
-                               width    = "100%")
+            column(3,
+                   radioButtons(ns("kde_mode"), "View mode:",
+                                choices  = c("Single" = "single", "2x2 Grid" = "grid"),
+                                selected = "single", inline = TRUE)
+            ),
+            # single mode: one column selector
+            column(3,
+                   conditionalPanel(
+                     condition = sprintf("input['%s'] == 'single'", ns("kde_mode")),
+                     selectInput(ns("kde_col"), "Column:",
+                                 choices = NULL, width = "100%")
+                   )
+            ),
+            # grid mode: four column selectors
+            column(6,
+                   conditionalPanel(
+                     condition = sprintf("input['%s'] == 'grid'", ns("kde_mode")),
+                     fluidRow(
+                       column(6, selectInput(ns("kde_col1"), "Col 1:", choices = NULL, width = "100%")),
+                       column(6, selectInput(ns("kde_col2"), "Col 2:", choices = NULL, width = "100%"))
+                     ),
+                     fluidRow(
+                       column(6, selectInput(ns("kde_col3"), "Col 3:", choices = NULL, width = "100%")),
+                       column(6, selectInput(ns("kde_col4"), "Col 4:", choices = NULL, width = "100%"))
+                     )
+                   )
             )
           ),
-          plotly::plotlyOutput(ns("kde_plot"), height = "320px")
+          plotly::plotlyOutput(ns("kde_plot"), height = "680px")
+        ),
+        
+        # run history table
+        make_card(
+          tags$h6(icon("clock-rotate-left", style = "color:#185FA5; margin-right:6px;"),
+                  "Run History",
+                  style = "font-weight:600; margin-bottom:12px; color:#343a40;"),
+          DT::dataTableOutput(ns("history_tbl"))
         ),
         
         # per-column DT
@@ -663,40 +685,41 @@ miss_impute_server <- function(id, get_data, split, roles) {
         DT::formatStyle("Run", fontWeight = "bold")
     })
     
-    # ── KDE column selector ──────────────────────────────────────────────────────────────────────
+    # ── KDE column selectors ─────────────────────────────────────────────────────────────────────
     
     observe({
       hist <- run_history()
       req(length(hist) > 0)
-      # columns that had at least one imputed value across any run
       all_cols <- unique(unlist(lapply(hist, function(h) {
         names(Filter(function(v) !is.null(v) && length(v) > 0, h$imputed_vals))
       })))
-      # order by most imputed in latest run
       latest <- hist[[length(hist)]]
       counts <- sapply(all_cols, function(col) {
         v <- latest$imputed_vals[[col]]
         if (is.null(v)) 0L else length(v)
       })
       all_cols <- all_cols[order(-counts)]
-      updateSelectInput(session, "kde_col", choices = all_cols,
+      none_choice <- c("(none)" = "(none)")
+      # single mode
+      updateSelectInput(session, "kde_col",
+                        choices  = all_cols,
                         selected = if (length(all_cols) > 0) all_cols[1] else NULL)
+      # grid mode — default to top 4, fill with (none) if fewer cols
+      grid_choices <- c(all_cols, "(none)")
+      updateSelectInput(session, "kde_col1", choices = grid_choices,
+                        selected = if (length(all_cols) >= 1) all_cols[1] else "(none)")
+      updateSelectInput(session, "kde_col2", choices = grid_choices,
+                        selected = if (length(all_cols) >= 2) all_cols[2] else "(none)")
+      updateSelectInput(session, "kde_col3", choices = grid_choices,
+                        selected = if (length(all_cols) >= 3) all_cols[3] else "(none)")
+      updateSelectInput(session, "kde_col4", choices = grid_choices,
+                        selected = if (length(all_cols) >= 4) all_cols[4] else "(none)")
     })
     
-    # ── KDE plot ──────────────────────────────────────────────────────────────────────────────────
+    # ── KDE plot helper ──────────────────────────────────────────────────────────────────────
     
-    output$kde_plot <- plotly::renderPlotly({
-      hist <- run_history()
-      col  <- input$kde_col
-      req(length(hist) > 0, nzchar(col))
-      
-      # run colours (skip grey which is reserved for observed)
-      run_colours <- c("#1f77b4","#ff7f0e","#2ca02c","#d62728",
-                       "#9467bd","#8c564b","#e377c2","#17becf")
-      
+    make_kde_subplot <- function(hist, col, run_colours, show_legend = TRUE) {
       fig <- plotly::plot_ly()
-      
-      # observed (grey) — from the latest run that has this col
       for (i in rev(seq_along(hist))) {
         obs <- hist[[i]]$observed_vals[[col]]
         if (!is.null(obs) && length(obs) >= 2) {
@@ -706,38 +729,86 @@ miss_impute_server <- function(id, get_data, split, roles) {
                                    fill = "tozeroy", fillcolor = "rgba(180,180,180,0.25)",
                                    line = list(color = "rgba(120,120,120,0.8)", width = 2),
                                    name = "Observed", legendgroup = "obs",
-                                   showlegend = TRUE
+                                   showlegend = show_legend
           )
           break
         }
       }
-      
-      # one line per run
       for (i in seq_along(hist)) {
         h   <- hist[[i]]
         imp <- h$imputed_vals[[col]]
         if (is.null(imp) || length(imp) < 2) next
         d   <- density(imp, na.rm = TRUE)
         clr <- run_colours[((i - 1) %% length(run_colours)) + 1]
+        rgb_vals <- paste(col2rgb(clr), collapse = ",")
         fig <- plotly::add_trace(fig,
                                  x = d$x, y = d$y, type = "scatter", mode = "lines",
                                  fill = "tozeroy",
-                                 fillcolor = {
-                                   rgb_vals <- paste(col2rgb(clr), collapse = ",")
-                                   paste0("rgba(", rgb_vals, ",0.15)")
-                                 },
+                                 fillcolor = paste0("rgba(", rgb_vals, ",0.15)"),
                                  line = list(color = clr, width = 2),
-                                 name = paste0("Run ", h$run, ": ", h$label)
+                                 name = paste0("Run ", h$run, ": ", h$label),
+                                 legendgroup = paste0("run", i),
+                                 showlegend = show_legend
         )
       }
-      
       plotly::layout(fig,
-                     xaxis = list(title = col),
-                     yaxis = list(title = "Density"),
-                     legend = list(orientation = "h", y = -0.2),
-                     hovermode = "x unified",
-                     margin = list(t = 10)
+                     xaxis = list(title = col, titlefont = list(size = 11)),
+                     yaxis = list(title = "Density", titlefont = list(size = 11)),
+                     margin = list(t = 30, b = 40)
       )
+    }
+    
+    # ── KDE plot ──────────────────────────────────────────────────────────────────────────────────
+    
+    output$kde_plot <- plotly::renderPlotly({
+      hist <- run_history()
+      req(length(hist) > 0)
+      
+      run_colours <- c("#1f77b4","#ff7f0e","#2ca02c","#d62728",
+                       "#9467bd","#8c564b","#e377c2","#17becf")
+      
+      if (input$kde_mode == "single") {
+        col <- input$kde_col
+        req(nzchar(col))
+        make_kde_subplot(hist, col, run_colours, show_legend = TRUE) |>
+          plotly::layout(
+            legend = list(orientation = "h", y = -0.2),
+            hovermode = "x unified"
+          )
+        
+      } else {
+        # 2x2 grid
+        cols <- c(input$kde_col1, input$kde_col2,
+                  input$kde_col3, input$kde_col4)
+        cols <- cols[!is.null(cols) & cols != "(none)" & nzchar(cols)]
+        req(length(cols) > 0)
+        
+        subplots <- lapply(seq_along(cols), function(i) {
+          make_kde_subplot(hist, cols[i], run_colours,
+                           show_legend = (i == 1))  # legend only on first panel
+        })
+        
+        n <- length(subplots)
+        if (n == 1) {
+          p <- subplots[[1]]
+        } else if (n == 2) {
+          p <- plotly::subplot(subplots[[1]], subplots[[2]],
+                               nrows = 1, shareY = FALSE, titleX = TRUE, titleY = TRUE)
+        } else if (n == 3) {
+          p <- plotly::subplot(subplots[[1]], subplots[[2]], subplots[[3]],
+                               nrows = 2, shareY = FALSE, titleX = TRUE, titleY = TRUE)
+        } else {
+          p <- plotly::subplot(subplots[[1]], subplots[[2]],
+                               subplots[[3]], subplots[[4]],
+                               nrows = 2, shareY = FALSE, titleX = TRUE, titleY = TRUE)
+        }
+        
+        plotly::layout(p,
+                       legend = list(orientation = "h", y = -0.08),
+                       hovermode = "closest",
+                       margin = list(t = 20, b = 80)
+        )
+      }
     })
     
     # ── Per-column DT ─────────────────────────────────────────────────────────
