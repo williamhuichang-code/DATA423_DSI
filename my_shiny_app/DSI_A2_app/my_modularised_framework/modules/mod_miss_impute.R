@@ -24,20 +24,46 @@ miss_impute_ui <- function(id) {
       ),
       hr(),
       
-      # split col selector (shown when traintest mode needed)
+      # training mode
+      tags$label("Training Mode:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      radioButtons(ns("train_mode"), label = NULL,
+                   choices = c(
+                     "All observations (diagnose)" = "all",
+                     "Train on train, predict test" = "traintest",
+                     "Predict future unseen data"   = "future"
+                   ),
+                   selected = "all"),
+      hr(),
+      
+      # split col selector
       conditionalPanel(
         condition = paste0("input['", ns("train_mode"), "'] == 'traintest'"),
         tags$div(
-          style = "margin-top:8px; margin-bottom:8px;",
-          tags$label("Split Column (or use split module):",
+          style = "margin-top:8px;",
+          tags$label("Split Column:",
                      style = "font-weight:600; font-size:12px; color:#343a40; display:block; margin-bottom:4px;"),
           tags$p("If split module is configured, it will be used automatically.",
                  style = "font-size:11px; color:#6c757d; margin-bottom:4px;"),
-          selectInput(ns("split_col"), label = NULL,
-                      choices = NULL, width = "100%")
-        ),
-        hr()
+          selectInput(ns("split_col"), label = NULL, choices = NULL, width = "100%")
+        )
       ),
+      
+      # future: future data indicator col
+      conditionalPanel(
+        condition = paste0("input['", ns("train_mode"), "'] == 'future'"),
+        tags$div(
+          style = "margin-top:8px;",
+          tags$label("Future Data Column:",
+                     style = "font-weight:600; font-size:12px; color:#343a40; display:block; margin-bottom:4px;"),
+          tags$p("Select a column where a level indicates future/unseen rows (e.g. 'future', 'yes').",
+                 style = "font-size:11px; color:#6c757d; margin-bottom:4px;"),
+          selectInput(ns("future_col"), label = NULL, choices = NULL, width = "100%"),
+          selectInput(ns("future_level"), label = "Future level:",
+                      choices = NULL, width = "100%")
+        )
+      ),
+      hr(),
       
       # algorithm
       tags$label("Algorithm:",
@@ -94,19 +120,7 @@ miss_impute_ui <- function(id) {
       
       hr(),
       
-      # training mode
-      tags$label("Training Mode:",
-                 style = "font-weight:600; font-size:13px; color:#343a40;"),
-      radioButtons(ns("train_mode"), label = NULL,
-                   choices = c(
-                     "All observations (diagnose)" = "all",
-                     "Train on train, predict test" = "traintest",
-                     "Predict future unseen data"   = "future"
-                   ),
-                   selected = "all"),
-      
-      hr(),
-      
+      # run button
       actionButton(ns("run"),   label = "Run Imputation",
                    icon = icon("play"), width = "100%",
                    style = "background-color:#185FA5; color:white; margin-bottom:8px;"),
@@ -148,7 +162,18 @@ miss_impute_server <- function(id, get_data, get_split = NULL) {
       updateSelectInput(session, "split_col",
                         choices  = c("(none)", names(df)),
                         selected = "(none)")
+      updateSelectInput(session, "future_col",
+                        choices  = c("(none)", names(df)),
+                        selected = "(none)")
     }) |> bindEvent(get_data())
+    
+    observeEvent(input$future_col, {
+      req(input$future_col, input$future_col != "(none)")
+      df  <- get_data()
+      req(df)
+      lvls <- as.character(unique(df[[input$future_col]]))
+      updateSelectInput(session, "future_level", choices = lvls)
+    })
     
     # ── run imputation ────────────────────────────────────────────────────
     
