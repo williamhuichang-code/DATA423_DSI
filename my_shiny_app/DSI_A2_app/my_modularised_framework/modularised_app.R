@@ -96,7 +96,8 @@ ui <- dashboardPage(
                menuSubItem("Variants",    tabName = "miss_variants"),
                menuSubItem("Shadow Vars", tabName = "miss_shadow"),
                menuSubItem("Not Applicable", tabName = "miss_napp"),
-               menuSubItem("Excessive Miss", tabName = "miss_excessive")
+               menuSubItem("Excessive Miss", tabName = "miss_excessive"),
+               menuSubItem("Imputation", tabName = "miss_impute")
                # add more subtabs here
       ),
       
@@ -154,6 +155,7 @@ ui <- dashboardPage(
       tabItem(tabName = "miss_shadow",    miss_shadow_ui("miss_shadow")),
       tabItem(tabName = "miss_napp",      miss_napp_ui("miss_napp")),
       tabItem(tabName = "miss_excessive", miss_excessive_ui("miss_excessive")),
+      tabItem(tabName = "miss_impute", miss_impute_ui("miss_impute")),
       
       # Out Strategy
       tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
@@ -193,31 +195,38 @@ server <- function(input, output, session) {
   
   get_raw <- reactive({
     req(input$selected_file)
-    read.csv(file.path(DATA_WD, input$selected_file), 
-             header = TRUE, 
-             na.strings = c('NA', 'N/A'), 
+    read.csv(file.path(DATA_WD, input$selected_file),
+             header = TRUE,
+             na.strings = c('NA', 'N/A'),
              stringsAsFactors = TRUE)
   }) |> bindCache(input$selected_file)
-
+  
+  
+  # ── NECESSARY VARS (need get_raw, before pipeline) ───────────────────────
+  
+  important_vars <- config_important_server("config_important", get_raw)
+  global_seed    <- config_seed_server("config_seed")
+  
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
-  variant <- miss_variants_server("miss_variants", get_raw)
-  shadow <- miss_shadow_server("miss_shadow", variant$data)
-  napp <- miss_napp_server("miss_napp", shadow$data)
+  variant   <- miss_variants_server("miss_variants", get_raw)
+  shadow    <- miss_shadow_server("miss_shadow",    variant$data)
+  napp      <- miss_napp_server("miss_napp",        shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  # outlier <- outlier_server("outlier", miss$data)   # next step when ready
-  # model   <- model_server("model",     outlier$data)
-  
-  get_data <- excessive$data   # current end of pipeline, single source of truth
   
   
-  # ── NECESSARY VARS  ──────────────────────────────────────────────────────
+  # ── ROLES + SPLIT (need excessive$data) ──────────────────────────────────
   
-  roles <- data_roles_server("data_roles", get_data)
-  important_vars <- config_important_server("config_important", get_raw)
-  global_seed    <- config_seed_server("config_seed")
-  split <- split_server("split", get_data, roles, global_seed)
+  roles <- data_roles_server("data_roles", excessive$data)
+  split <- split_server("split", excessive$data, roles, global_seed)
+  
+  
+  # ── CONTINUE PIPELINE ─────────────────────────────────────────────────────
+  
+  impute   <- miss_impute_server("miss_impute", excessive$data, split)
+  
+  get_data <- impute$data   # current end of pipeline
   
   
   # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────
@@ -228,10 +237,10 @@ server <- function(input, output, session) {
   ))
   
   
-  # ── MODULE CALL ───────────────────────────────────────────────────────────
+  # ── MODULE CALLS ──────────────────────────────────────────────────────────
   
-  summary_server("summary",   get_data)
-  vis_miss_server("vis_miss", get_data, roles)
+  summary_server("summary",           get_data)
+  vis_miss_server("vis_miss",         get_data, roles)
   rising_value_server("rising_value", get_data)
   
 }
