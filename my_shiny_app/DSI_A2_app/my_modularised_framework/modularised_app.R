@@ -109,8 +109,9 @@ ui <- dashboardPage(
       ),
       
       menuItem("Pre-Processing", tabName = "preproc", icon = icon("wand-magic-sparkles"),
-               menuSubItem("Resampling",      tabName = "pre_resample"),
-               menuSubItem("Interaction",     tabName = "pre_interaction")
+               menuSubItem("Recipe",      tabName = "pre_recipe"),
+               menuSubItem("Resampling",  tabName = "pre_resample"),
+               menuSubItem("Interaction", tabName = "pre_interaction")
                # add more subtabs here
       ),
       
@@ -164,8 +165,10 @@ ui <- dashboardPage(
       tabItem(tabName = "out_iforest", box(title = "iForest",     width = 12, "coming soon")),
       
       # Pre-P Strategy
+      tabItem(tabName = "pre_recipe", prep_recipe_ui("prep_recipe")),
       tabItem(tabName = "pre_resample",    box(title = "Resampling",  width = 12, "coming soon")),
       tabItem(tabName = "pre_interaction", box(title = "Interaction", width = 12, "coming soon")),
+      
       
       # Model
       tabItem(tabName = "model_reg",   box(title = "Regularised", width = 12, "coming soon")),
@@ -220,7 +223,7 @@ server <- function(input, output, session) {
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
   impute    <- miss_impute_server("miss_impute",       excessive$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
-  
+  precipe    <- prep_recipe_server("prep_recipe", transform$data, roles, split)
   
   get_data <- transform$data   # current end of pipeline
   
