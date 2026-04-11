@@ -63,7 +63,7 @@ miss_impute_ui <- function(id) {
         tags$label("Ignore variables:",
                    style = "font-weight:600; font-size:13px; color:#343a40;"),
         div(style = "font-size:11px; color:#6c757d; margin-bottom:4px;",
-            "Auto-filled from roles: Sensitive, Case Weight, Stratifier, Ignore"),
+            "Auto-filled from roles: ID, Sensitive, Case Weight, Stratifier, Ignore"),
         selectizeInput(ns("ignore_vars"), label = NULL,
                        choices  = NULL,
                        multiple = TRUE,
