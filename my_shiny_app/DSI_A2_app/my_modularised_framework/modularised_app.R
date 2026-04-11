@@ -87,7 +87,7 @@ ui <- dashboardPage(
                menuSubItem("Data Roles",     tabName = "data_roles"),
                menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Global Seed",    tabName = "config_seed"),
-               menuSubItem("Split Setting", tabName = "preproc_split"),
+               menuSubItem("Split Setting", tabName = "config_split"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
                # add more subtabs here
       ),
@@ -95,7 +95,8 @@ ui <- dashboardPage(
       menuItem("Miss Strategy", tabName = "miss", icon = icon("circle-question"),
                menuSubItem("Variants",    tabName = "miss_variants"),
                menuSubItem("Shadow Vars", tabName = "miss_shadow"),
-               menuSubItem("Not Applicable", tabName = "miss_napp")
+               menuSubItem("Not Applicable", tabName = "miss_napp"),
+               menuSubItem("Excessive Miss", tabName = "miss_excessive")
                # add more subtabs here
       ),
       
@@ -106,7 +107,8 @@ ui <- dashboardPage(
       ),
       
       menuItem("Pre-Processing", tabName = "preproc", icon = icon("wand-magic-sparkles"),
-               menuSubItem("Boxplot",      tabName = "eda_boxplot")
+               menuSubItem("Resampling",      tabName = "pre_resample"),
+               menuSubItem("Interaction",     tabName = "pre_interaction")
                # add more subtabs here
       ),
       
@@ -141,22 +143,25 @@ ui <- dashboardPage(
       tabItem(tabName = "eda_barchart", box(title = "Barchart", width = 12, "coming soon")),
       
       # Config
-      tabItem(tabName = "data_roles", data_roles_ui("data_roles")),
+      tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
       tabItem(tabName = "config_important", config_important_ui("config_important")),
       tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
-      tabItem(tabName = "data_download", data_download_ui("data_download")),
+      tabItem(tabName = "config_split",     split_ui("split")),
+      tabItem(tabName = "data_download",    data_download_ui("data_download")),
       
       # Miss Strategy
-      tabItem(tabName = "miss_variants", miss_variants_ui("miss_variants")),
-      tabItem(tabName = "miss_shadow",   miss_shadow_ui("miss_shadow")),
-      tabItem(tabName = "miss_napp", miss_napp_ui("miss_napp")),
+      tabItem(tabName = "miss_variants",  miss_variants_ui("miss_variants")),
+      tabItem(tabName = "miss_shadow",    miss_shadow_ui("miss_shadow")),
+      tabItem(tabName = "miss_napp",      miss_napp_ui("miss_napp")),
+      tabItem(tabName = "miss_excessive", miss_excessive_ui("miss_excessive")),
       
       # Out Strategy
       tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
       tabItem(tabName = "out_iforest", box(title = "iForest",     width = 12, "coming soon")),
       
       # Pre-P Strategy
-      tabItem(tabName = "preproc_split", split_ui("split")),
+      tabItem(tabName = "pre_resample",    box(title = "Resampling",  width = 12, "coming soon")),
+      tabItem(tabName = "pre_interaction", box(title = "Interaction", width = 12, "coming soon")),
       
       # Model
       tabItem(tabName = "model_reg",   box(title = "Regularised", width = 12, "coming soon")),
@@ -200,16 +205,17 @@ server <- function(input, output, session) {
   variant <- miss_variants_server("miss_variants", get_raw)
   shadow <- miss_shadow_server("miss_shadow", variant$data)
   napp <- miss_napp_server("miss_napp", shadow$data)
+  excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
   # outlier <- outlier_server("outlier", miss$data)   # next step when ready
   # model   <- model_server("model",     outlier$data)
   
-  get_data <- napp$data   # current end of pipeline, single source of truth
+  get_data <- excessive$data   # current end of pipeline, single source of truth
   
   
   # ── NECESSARY VARS  ──────────────────────────────────────────────────────
   
   roles <- data_roles_server("data_roles", get_data)
-  important_vars <- config_important_server("config_important", get_data)
+  important_vars <- config_important_server("config_important", get_raw)
   global_seed    <- config_seed_server("config_seed")
   split <- split_server("split", get_data, roles, global_seed)
   
