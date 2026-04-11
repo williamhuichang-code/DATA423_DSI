@@ -11,10 +11,15 @@ parse_vals <- function(txt) {
 
 apply_missingness_strategy <- function(df, global_vals) {
   if (length(global_vals) == 0) return(df)
-  df[] <- lapply(df, function(col) {
+  df[] <- lapply(names(df), function(nm) {
+    col      <- df[[nm]]
     col_char <- as.character(col)
     col_char[col_char %in% global_vals] <- NA
-    type.convert(col_char, as.is = TRUE)
+    # restore original type
+    if (is.factor(col))  return(factor(col_char, levels = levels(col)))
+    if (is.integer(col)) return(suppressWarnings(as.integer(col_char)))
+    if (is.numeric(col)) return(suppressWarnings(as.numeric(col_char)))
+    col_char
   })
   df
 }
@@ -24,11 +29,15 @@ apply_col_missingness_strategy <- function(df, col_rules) {
   for (rule in col_rules) {
     col  <- rule$col
     vals <- rule$vals
-    if (col %in% names(df) && length(vals) > 0) {
-      col_char <- as.character(df[[col]])
-      col_char[col_char %in% vals] <- NA
-      df[[col]] <- type.convert(col_char, as.is = TRUE)
-    }
+    if (!col %in% names(df) || length(vals) == 0) next
+    orig     <- df[[col]]
+    col_char <- as.character(orig)
+    col_char[col_char %in% vals] <- NA
+    # restore original type
+    df[[col]] <- if (is.factor(orig))   factor(col_char, levels = levels(orig))
+    else if (is.integer(orig)) suppressWarnings(as.integer(col_char))
+    else if (is.numeric(orig)) suppressWarnings(as.numeric(col_char))
+    else col_char
   }
   df
 }
