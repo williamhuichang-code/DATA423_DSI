@@ -343,7 +343,7 @@ miss_impute_server <- function(id, get_data, roles) {
                         selected = { v <- names(r)[r == "outcome"]; if (length(v)) v[1] else "(none)" })
       updateSelectInput(session, "split_var",
                         choices  = c("(none)", vars),
-                        selected = "(none)")
+                        selected = { v <- names(r)[r == "split"]; if (length(v)) v[1] else "(none)" })
     })
     
     # ── Train / Test level selectors ─────────────────────────────────────────
