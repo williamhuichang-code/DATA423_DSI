@@ -36,7 +36,7 @@ summary_ui <- function(id) {
           "Glimpse"   = "glimpse",
           "dfSummary" = "dfsummary"
         ),
-        selected = "base"
+        selected = "glimpse"
       )
     ),
     mainPanel(

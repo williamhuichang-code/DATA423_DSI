@@ -467,7 +467,13 @@ miss_impute_server <- function(id, get_data, roles) {
         
         rebuild <- function(original, baked, p_cols) {
           out <- original
-          for (col in intersect(p_cols, names(baked))) out[[col]] <- baked[[col]]
+          for (col in intersect(p_cols, names(baked))) {
+            val <- baked[[col]]
+            # restore factor if baking changed it to numeric/character
+            if (is.factor(original[[col]]) && !is.factor(val))
+              val <- factor(val, levels = levels(original[[col]]))
+            out[[col]] <- val
+          }
           out
         }
         train_out <- rebuild(train_df, train_baked, pred_cols)
