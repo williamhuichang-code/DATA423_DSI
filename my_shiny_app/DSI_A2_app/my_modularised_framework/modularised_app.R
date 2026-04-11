@@ -87,17 +87,18 @@ ui <- dashboardPage(
                menuSubItem("Data Roles",     tabName = "data_roles"),
                menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Global Seed",    tabName = "config_seed"),
-               menuSubItem("Split Setting", tabName = "config_split"),
+               menuSubItem("Split Setting",  tabName = "config_split"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
                # add more subtabs here
       ),
       
       menuItem("Miss Strategy", tabName = "miss", icon = icon("circle-question"),
-               menuSubItem("Variants",    tabName = "miss_variants"),
-               menuSubItem("Shadow Vars", tabName = "miss_shadow"),
+               menuSubItem("Variants",       tabName = "miss_variants"),
+               menuSubItem("Shadow Vars",    tabName = "miss_shadow"),
                menuSubItem("Not Applicable", tabName = "miss_napp"),
                menuSubItem("Excessive Miss", tabName = "miss_excessive"),
-               menuSubItem("Imputation", tabName = "miss_impute")
+               menuSubItem("Imputation",     tabName = "miss_impute"),
+               menuSubItem("Transform",      tabName = "miss_transform")
                # add more subtabs here
       ),
       
@@ -155,7 +156,8 @@ ui <- dashboardPage(
       tabItem(tabName = "miss_shadow",    miss_shadow_ui("miss_shadow")),
       tabItem(tabName = "miss_napp",      miss_napp_ui("miss_napp")),
       tabItem(tabName = "miss_excessive", miss_excessive_ui("miss_excessive")),
-      tabItem(tabName = "miss_impute", miss_impute_ui("miss_impute")),
+      tabItem(tabName = "miss_impute",    miss_impute_ui("miss_impute")),
+      tabItem(tabName = "miss_transform",  miss_transform_ui("miss_transform")),
       
       # Out Strategy
       tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
@@ -215,10 +217,11 @@ server <- function(input, output, session) {
   shadow    <- miss_shadow_server("miss_shadow",       variant$data)
   napp      <- miss_napp_server("miss_napp",           shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  impute    <- miss_impute_server("miss_impute",       excessive$data, split, roles)
+  impute    <- miss_impute_server("miss_impute",       excessive$data, roles)
+  transform <- miss_transform_server("miss_transform", impute$data, roles)
   # impute    <- 
   
-  get_data <- impute$data   # current end of pipeline
+  get_data <- transform$data   # current end of pipeline
   
   
   
