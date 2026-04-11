@@ -56,6 +56,20 @@ miss_impute_ui <- function(id) {
           )
         )
       ),
+      
+      # ── Ignore variables ──────────────────────────────────────────────────
+      tags$div(
+        style = "margin-top: 10px; margin-bottom: 10px;",
+        tags$label("Ignore variables:",
+                   style = "font-weight:600; font-size:13px; color:#343a40;"),
+        div(style = "font-size:11px; color:#6c757d; margin-bottom:4px;",
+            "Auto-filled from roles: Sensitive, Case Weight, Stratifier, Ignore"),
+        selectizeInput(ns("ignore_vars"), label = NULL,
+                       choices  = NULL,
+                       multiple = TRUE,
+                       options  = list(placeholder = "Select vars to exclude from imputation..."),
+                       width    = "100%")
+      ),
       hr(),
       
       # ── Algorithm choice ──────────────────────────────────────────────────
@@ -69,7 +83,7 @@ miss_impute_ui <- function(id) {
           "Bagged Tree (step_impute_bag)" = "bag",
           "Mean / Median / Mode"          = "mmm"
         ),
-        selected = "mmm"
+        selected = "knn"
       ),
       hr(),
       
@@ -229,12 +243,30 @@ miss_impute_server <- function(id, get_data, split, roles) {
       updateSelectInput(session, "test_level",  choices = c("(none)", lvls), selected = test_sel)
     })
     
+    # ── Auto-populate ignore vars from roles ─────────────────────────────────
+    
+    observe({
+      req(get_data(), roles())
+      r    <- roles()
+      vars <- names(get_data())
+      
+      # roles that should be ignored by the imputer
+      # adjust these strings to match exactly what your data_roles module returns
+      ignore_role_names <- c("sensitive", "weight", "stratifier", "ignore")
+      auto_ignored      <- names(r)[tolower(as.character(r)) %in% ignore_role_names]
+      
+      updateSelectizeInput(session, "ignore_vars",
+                           choices  = vars,
+                           selected = auto_ignored,
+                           server   = TRUE)
+    })
+    
     # ── Populate MMM selectize boxes ─────────────────────────────────────────
     
     observe({
       req(get_data())
       df       <- get_data()
-      excl     <- c(input$y_var, input$split_var)
+      excl     <- unique(c(input$y_var, input$split_var, input$ignore_vars))
       num_cols <- setdiff(names(df)[sapply(df, is.numeric)], excl)
       updateSelectizeInput(session, "mmm_mean_cols",
                            choices  = num_cols,
@@ -244,7 +276,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
                            choices  = num_cols,
                            selected = NULL,
                            server   = TRUE)
-    }) |> bindEvent(get_data(), input$y_var, input$split_var)
+    }) |> bindEvent(get_data(), input$y_var, input$split_var, input$ignore_vars)
     
     # ── State ─────────────────────────────────────────────────────────────────
     
@@ -261,10 +293,15 @@ miss_impute_server <- function(id, get_data, split, roles) {
       tryCatch({
         
         # excluded columns
-        excl <- c(
-          if (!is.null(input$y_var)     && input$y_var     != "(none)") input$y_var,
-          if (!is.null(input$split_var) && input$split_var != "(none)") input$split_var
-        )
+        role_vals <- if (!is.null(roles)) roles() else NULL
+        id_cols   <- if (!is.null(role_vals)) names(role_vals[role_vals == "obs_id"]) else character(0)
+        
+        excl <- unique(c(
+          if (!is.null(input$y_var)      && input$y_var      != "(none)") input$y_var,
+          if (!is.null(input$split_var)  && input$split_var  != "(none)") input$split_var,
+          id_cols,
+          if (length(input$ignore_vars) > 0) input$ignore_vars   # ← user-selected / auto-filled ignore vars
+        ))
         pred_cols <- setdiff(names(df), excl)
         
         # train / test subsets
@@ -303,10 +340,64 @@ miss_impute_server <- function(id, get_data, split, roles) {
           test_baked  <- if (!is.null(test_pred)) bake(trained, new_data = test_pred) else NULL
           
         } else if (algo == "knn") {
-          stop("KNN imputation: coming soon.")   # placeholder
           
-        } else {
-          stop("Bag imputation: coming soon.")   # placeholder
+          library(recipes)
+          
+          y_var <- input$y_var
+          
+          # include y in the data so recipe knows the role, but only impute predictors
+          if (!is.null(y_var) && y_var != "(none)" && y_var %in% names(train_df)) {
+            train_with_y <- train_df[, c(pred_cols, y_var), drop = FALSE]
+            test_with_y  <- if (!is.null(test_df)) test_df[, c(pred_cols, y_var), drop = FALSE] else NULL
+            fml <- as.formula(paste(y_var, "~ ."))
+          } else {
+            train_with_y <- train_pred
+            test_with_y  <- test_pred
+            fml <- ~ .
+          }
+          
+          rec <- recipe(fml, data = train_with_y) |>
+            step_impute_knn(all_predictors(), neighbors = input$knn_neighbors)
+          
+          trained     <- prep(rec, training = train_with_y, verbose = FALSE)
+          train_baked <- bake(trained, new_data = NULL)
+          test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
+          
+          # strip y back out so rebuild works on pred_cols only
+          train_baked <- train_baked[, intersect(pred_cols, names(train_baked)), drop = FALSE]
+          if (!is.null(test_baked))
+            test_baked <- test_baked[, intersect(pred_cols, names(test_baked)), drop = FALSE]
+          
+        } else if (algo == "bag") {
+          
+          library(recipes)
+          
+          y_var <- input$y_var
+          
+          if (!is.null(y_var) && y_var != "(none)" && y_var %in% names(train_df)) {
+            train_with_y <- train_df[, c(pred_cols, y_var), drop = FALSE]
+            test_with_y  <- if (!is.null(test_df)) test_df[, c(pred_cols, y_var), drop = FALSE] else NULL
+            fml <- as.formula(paste(y_var, "~ ."))
+          } else {
+            train_with_y <- train_pred
+            test_with_y  <- test_pred
+            fml <- ~ .
+          }
+          
+          rec <- recipe(fml, data = train_with_y) |>
+            step_impute_bag(all_predictors(),
+                            trees     = input$bag_trees,
+                            neighbors = input$bag_neighbors)
+          
+          trained     <- prep(rec, training = train_with_y, verbose = FALSE)
+          train_baked <- bake(trained, new_data = NULL)
+          test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
+          
+          # strip y back out so rebuild works on pred_cols only
+          train_baked <- train_baked[, intersect(pred_cols, names(train_baked)), drop = FALSE]
+          if (!is.null(test_baked))
+            test_baked <- test_baked[, intersect(pred_cols, names(test_baked)), drop = FALSE]
+          
         }
         
         # rebuild: put imputed pred cols back into original full-row frames
@@ -338,7 +429,12 @@ miss_impute_server <- function(id, get_data, split, roles) {
               sum(is.na(test_out[, pred_cols, drop = FALSE])) else NA
           ),
           col_na_before = colSums(is.na(train_pred)),
-          col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE]))
+          col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE])),
+          params        = list(
+            knn_neighbors = input$knn_neighbors,
+            bag_trees     = input$bag_trees,
+            bag_neighbors = input$bag_neighbors
+          )
         ))
         
       }, error = function(e) {
@@ -350,10 +446,19 @@ miss_impute_server <- function(id, get_data, split, roles) {
     
     observeEvent(input$reset, {
       impute_result(NULL)
-      updateRadioButtons(session, "algorithm",     selected = "mmm")
+      updateRadioButtons(session, "algorithm",     selected = "knn")
       updateSliderInput(session,  "knn_neighbors",  value = 5)
       updateSliderInput(session,  "bag_trees",      value = 25)
       updateSliderInput(session,  "bag_neighbors",  value = 5)
+      # re-derive ignore vars from roles instead of clearing
+      r                 <- roles()
+      vars              <- names(get_data())
+      ignore_role_names <- c("sensitive", "weight", "stratifier", "ignore")
+      auto_ignored      <- names(r)[tolower(as.character(r)) %in% ignore_role_names]
+      updateSelectizeInput(session, "ignore_vars",
+                           choices  = vars,
+                           selected = auto_ignored,
+                           server   = TRUE)
     })
     
     # ── Result UI ─────────────────────────────────────────────────────────────
@@ -390,9 +495,9 @@ miss_impute_server <- function(id, get_data, split, roles) {
       
       # success
       algo_label <- switch(res$algo,
-                           "knn" = paste0("KNN (k = ", input$knn_neighbors, ")"),
-                           "bag" = paste0("Bagged Trees (", input$bag_trees,
-                                          " trees, k = ", input$bag_neighbors, ")"),
+                           "knn" = paste0("KNN (k = ", res$params$knn_neighbors, ")"),
+                           "bag" = paste0("Bagged Trees (", res$params$bag_trees,
+                                          " trees, k = ", res$params$bag_neighbors, ")"),
                            "mmm" = "Mean / Median / Mode"
       )
       
