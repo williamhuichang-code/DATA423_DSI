@@ -714,7 +714,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
                                    x = d$x, y = d$y, type = "scatter", mode = "lines",
                                    fill = "tozeroy", fillcolor = "rgba(180,180,180,0.25)",
                                    line = list(color = "rgba(120,120,120,0.8)", width = 2),
-                                   name = "Observed", legendgroup = "obs", showlegend = show_legend)
+                                   name = "<b>Observed</b>", legendgroup = "obs", showlegend = show_legend)
           break
         }
       }
@@ -730,11 +730,11 @@ miss_impute_server <- function(id, get_data, split, roles) {
                                  fill = "tozeroy",
                                  fillcolor = paste0("rgba(", rgb_vals, ",0.15)"),
                                  line = list(color = clr, width = 2),
-                                 name = paste0("Run ", h$run, ": ", h$label),
+                                 name = paste0("<b>Run ", h$run, ": ", h$label, "</b>"),
                                  legendgroup = paste0("run", i), showlegend = show_legend)
       }
       plotly::layout(fig,
-                     xaxis  = list(title = col, titlefont = list(size = 11)),
+                     xaxis  = list(title = paste0('<b>', col, '</b>'), titlefont = list(size = 11)),
                      yaxis  = list(title = "Density", titlefont = list(size = 11)),
                      margin = list(t = 30, b = 40))
     }
@@ -760,13 +760,13 @@ miss_impute_server <- function(id, get_data, split, roles) {
         n <- length(subplots)
         if (n == 1) return(
           plotly::layout(subplots[[1]],
-                         legend = list(orientation = "h", y = -0.2), hovermode = "x unified")
+                         legend = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, yanchor = "bottom", font = list(size = 12)), hovermode = "x unified")
         )
         p <- do.call(plotly::subplot, c(subplots,
                                         list(nrows = n_rows, shareY = FALSE, titleX = TRUE, titleY = TRUE,
                                              margin = 0.06)))
         plotly::layout(p,
-                       legend    = list(orientation = "h", y = -0.08),
+                       legend    = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, yanchor = "bottom", font = list(size = 12)),
                        hovermode = "closest",
                        margin    = list(t = 20, b = 80)
         )
@@ -776,7 +776,7 @@ miss_impute_server <- function(id, get_data, split, roles) {
         col <- input$kde_col
         req(nzchar(col), col != "(none)")
         make_kde_subplot(hist, col, run_colours, show_legend = TRUE) |>
-          plotly::layout(legend = list(orientation = "h", y = -0.2), hovermode = "x unified")
+          plotly::layout(legend = list(orientation = "h", x = 0.5, xanchor = "center", y = 1.02, yanchor = "bottom", font = list(size = 12)), hovermode = "x unified")
         
       } else if (kde_mode == "grid2") {
         make_grid(c(input$kde_col1, input$kde_col2,
