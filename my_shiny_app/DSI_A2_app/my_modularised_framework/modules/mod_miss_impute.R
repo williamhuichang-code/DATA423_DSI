@@ -177,13 +177,6 @@ miss_impute_ui <- function(id) {
         width = "100%",
         style = "background-color:#6c757d; color:white; border:none;"
       ),
-      hr(),
-      
-      # ── Custom plot title ──────────────────────────────────────────────────
-      tags$label("Custom plot title:",
-                 style = "font-weight:600; font-size:13px; color:#343a40;"),
-      textInput(ns("custom_title"), label = NULL,
-                placeholder = "Auto-generated if empty")
     ),
     
     # ── Main panel ────────────────────────────────────────────────────────────
@@ -205,6 +198,15 @@ miss_impute_ui <- function(id) {
           title = tagList(icon("chart-area"), " Comparison"),
           style = "padding-top:16px;",
           uiOutput(ns("comparison_ui")),
+          # ── Custom plot title ─────────────────────────────────────────────
+          div(
+            style = "background:#f8f9fa; border:1px solid #dee2e6; border-radius:10px;
+                     padding:12px 20px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+            tags$label("Custom plot title:",
+                       style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:6px;"),
+            textInput(ns("custom_title"), label = NULL,
+                      placeholder = "Auto-generated if empty", width = "100%")
+          ),
           # ── View Mode controls — static div so selections never reset ─────
           div(
             style = "background:#f8f9fa; border:1px solid #dee2e6; border-radius:10px;
@@ -399,151 +401,160 @@ miss_impute_server <- function(id, get_data, roles) {
       algo <- input$algorithm
       start_time <- proc.time()[["elapsed"]]
       
-      withProgress(
-        message = if (algo == "bag") "Running Bag imputation (may take a while)..."
-        else "Running imputation...",
-        value = 0, {
+      msg <- switch(algo,
+                    "bag" = paste0("Running Bag imputation (", input$bag_trees, " trees) — this may take a while..."),
+                    "knn" = paste0("Running KNN imputation (k=", input$knn_neighbors, ")..."),
+                    "mmm" = "Running Mean/Median/Mode imputation..."
+      )
+      
+      withProgress(message = msg, value = 0.1, {
+        
+        tryCatch({
           
-          tryCatch({
+          role_vals <- if (!is.null(roles)) roles() else NULL
+          id_cols   <- if (!is.null(role_vals)) names(role_vals[role_vals == "obs_id"]) else character(0)
+          
+          excl <- unique(c(
+            if (!is.null(input$y_var)     && input$y_var     != "(none)") input$y_var,
+            if (!is.null(input$split_var) && input$split_var != "(none)") input$split_var,
+            id_cols,
+            if (length(input$ignore_vars) > 0) input$ignore_vars
+          ))
+          pred_cols <- setdiff(names(df), excl)
+          
+          sv        <- input$split_var
+          tl        <- input$train_level
+          ts        <- input$test_level
+          splits_ok <- !is.null(sv) && sv != "(none)" &&
+            !is.null(tl) && tl != "(none)" &&
+            !is.null(ts) && ts != "(none)"
+          
+          train_df  <- if (splits_ok) df[as.character(df[[sv]]) == tl, , drop = FALSE] else df
+          test_df   <- if (splits_ok) df[as.character(df[[sv]]) == ts, , drop = FALSE] else NULL
+          train_pred <- train_df[, pred_cols, drop = FALSE]
+          test_pred  <- if (!is.null(test_df)) test_df[, pred_cols, drop = FALSE] else NULL
+          
+          if (algo == "mmm") {
+            library(recipes)
+            num_cols    <- names(train_pred)[sapply(train_pred, is.numeric)]
+            fac_cols    <- setdiff(pred_cols, num_cols)
+            mean_cols   <- intersect(input$mmm_mean_cols,   num_cols)
+            median_cols <- intersect(input$mmm_median_cols, num_cols)
+            rec <- recipe(~ ., data = train_pred)
+            if (length(mean_cols)   > 0) rec <- rec |> step_impute_mean(all_of(mean_cols))
+            if (length(median_cols) > 0) rec <- rec |> step_impute_median(all_of(median_cols))
+            if (length(fac_cols)    > 0) rec <- rec |> step_impute_mode(all_of(fac_cols))
+            trained     <- prep(rec, training = train_pred, verbose = FALSE)
+            train_baked <- bake(trained, new_data = NULL)
+            test_baked  <- if (!is.null(test_pred)) bake(trained, new_data = test_pred) else NULL
             
-            role_vals <- if (!is.null(roles)) roles() else NULL
-            id_cols   <- if (!is.null(role_vals)) names(role_vals[role_vals == "obs_id"]) else character(0)
+          } else if (algo == "knn") {
+            library(recipes)
+            y_var <- input$y_var
+            if (!is.null(y_var) && y_var != "(none)" && y_var %in% names(train_df)) {
+              train_with_y <- train_df[, c(pred_cols, y_var), drop = FALSE]
+              test_with_y  <- if (!is.null(test_df)) test_df[, c(pred_cols, y_var), drop = FALSE] else NULL
+              fml <- as.formula(paste(y_var, "~ ."))
+            } else {
+              train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
+            }
+            rec <- recipe(fml, data = train_with_y) |>
+              step_impute_knn(all_predictors(), neighbors = input$knn_neighbors)
+            trained     <- prep(rec, training = train_with_y, verbose = FALSE)
+            train_baked <- bake(trained, new_data = NULL)
+            test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
+            train_baked <- train_baked[, intersect(pred_cols, names(train_baked)), drop = FALSE]
+            if (!is.null(test_baked))
+              test_baked <- test_baked[, intersect(pred_cols, names(test_baked)), drop = FALSE]
             
-            excl <- unique(c(
-              if (!is.null(input$y_var)     && input$y_var     != "(none)") input$y_var,
-              if (!is.null(input$split_var) && input$split_var != "(none)") input$split_var,
-              id_cols,
-              if (length(input$ignore_vars) > 0) input$ignore_vars
-            ))
-            pred_cols <- setdiff(names(df), excl)
-            
-            sv        <- input$split_var
-            tl        <- input$train_level
-            ts        <- input$test_level
-            splits_ok <- !is.null(sv) && sv != "(none)" &&
-              !is.null(tl) && tl != "(none)" &&
-              !is.null(ts) && ts != "(none)"
-            
-            train_df  <- if (splits_ok) df[as.character(df[[sv]]) == tl, , drop = FALSE] else df
-            test_df   <- if (splits_ok) df[as.character(df[[sv]]) == ts, , drop = FALSE] else NULL
-            train_pred <- train_df[, pred_cols, drop = FALSE]
-            test_pred  <- if (!is.null(test_df)) test_df[, pred_cols, drop = FALSE] else NULL
-            
-            if (algo == "mmm") {
-              library(recipes)
-              num_cols    <- names(train_pred)[sapply(train_pred, is.numeric)]
-              fac_cols    <- setdiff(pred_cols, num_cols)
-              mean_cols   <- intersect(input$mmm_mean_cols,   num_cols)
-              median_cols <- intersect(input$mmm_median_cols, num_cols)
-              rec <- recipe(~ ., data = train_pred)
-              if (length(mean_cols)   > 0) rec <- rec |> step_impute_mean(all_of(mean_cols))
-              if (length(median_cols) > 0) rec <- rec |> step_impute_median(all_of(median_cols))
-              if (length(fac_cols)    > 0) rec <- rec |> step_impute_mode(all_of(fac_cols))
-              trained     <- prep(rec, training = train_pred, verbose = FALSE)
-              train_baked <- bake(trained, new_data = NULL)
-              test_baked  <- if (!is.null(test_pred)) bake(trained, new_data = test_pred) else NULL
-              
-            } else if (algo == "knn") {
-              library(recipes)
-              y_var <- input$y_var
-              if (!is.null(y_var) && y_var != "(none)" && y_var %in% names(train_df)) {
-                train_with_y <- train_df[, c(pred_cols, y_var), drop = FALSE]
-                test_with_y  <- if (!is.null(test_df)) test_df[, c(pred_cols, y_var), drop = FALSE] else NULL
-                fml <- as.formula(paste(y_var, "~ ."))
-              } else {
-                train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
-              }
-              rec <- recipe(fml, data = train_with_y) |>
-                step_impute_knn(all_predictors(), neighbors = input$knn_neighbors)
-              trained     <- prep(rec, training = train_with_y, verbose = FALSE)
+          } else if (algo == "bag") {
+            library(recipes)
+            y_var <- input$y_var
+            if (!is.null(y_var) && y_var != "(none)" && y_var %in% names(train_df)) {
+              train_with_y <- train_df[, c(pred_cols, y_var), drop = FALSE]
+              test_with_y  <- if (!is.null(test_df)) test_df[, c(pred_cols, y_var), drop = FALSE] else NULL
+              fml <- as.formula(paste(y_var, "~ ."))
+            } else {
+              train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
+            }
+            rec <- recipe(fml, data = train_with_y) |>
+              step_impute_bag(all_predictors(), trees = input$bag_trees, neighbors = input$bag_neighbors)
+            withProgress(message = paste0("Fitting Bag (", input$bag_trees, " trees)..."), value = 0.2, {
+              trained <- prep(rec, training = train_with_y, verbose = FALSE)
+              setProgress(0.8, message = "Applying to train/test...")
               train_baked <- bake(trained, new_data = NULL)
               test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
-              train_baked <- train_baked[, intersect(pred_cols, names(train_baked)), drop = FALSE]
-              if (!is.null(test_baked))
-                test_baked <- test_baked[, intersect(pred_cols, names(test_baked)), drop = FALSE]
-              
-            } else if (algo == "bag") {
-              library(recipes)
-              y_var <- input$y_var
-              if (!is.null(y_var) && y_var != "(none)" && y_var %in% names(train_df)) {
-                train_with_y <- train_df[, c(pred_cols, y_var), drop = FALSE]
-                test_with_y  <- if (!is.null(test_df)) test_df[, c(pred_cols, y_var), drop = FALSE] else NULL
-                fml <- as.formula(paste(y_var, "~ ."))
-              } else {
-                train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
-              }
-              rec <- recipe(fml, data = train_with_y) |>
-                step_impute_bag(all_predictors(), trees = input$bag_trees, neighbors = input$bag_neighbors)
-              trained     <- prep(rec, training = train_with_y, verbose = FALSE)
-              train_baked <- bake(trained, new_data = NULL)
-              test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
-              train_baked <- train_baked[, intersect(pred_cols, names(train_baked)), drop = FALSE]
-              if (!is.null(test_baked))
-                test_baked <- test_baked[, intersect(pred_cols, names(test_baked)), drop = FALSE]
-            }
-            
-            rebuild <- function(original, baked, p_cols) {
-              out <- original
-              for (col in intersect(p_cols, names(baked))) out[[col]] <- baked[[col]]
-              out
-            }
-            train_out <- rebuild(train_df, train_baked, pred_cols)
-            test_out  <- if (!is.null(test_baked)) rebuild(test_df, test_baked, pred_cols) else NULL
-            elapsed   <- round(proc.time()[["elapsed"]] - start_time, 2)
-            
-            # KDE snapshots
-            imputed_vals <- lapply(pred_cols, function(col) {
-              was_na <- is.na(train_pred[[col]])
-              if (sum(was_na) == 0 || !is.numeric(train_out[[col]])) return(NULL)
-              train_out[[col]][was_na]
+              setProgress(1.0)
             })
-            names(imputed_vals) <- pred_cols
-            
-            observed_vals <- lapply(pred_cols, function(col) {
-              if (!is.numeric(train_pred[[col]])) return(NULL)
-              train_pred[[col]][!is.na(train_pred[[col]])]
-            })
-            names(observed_vals) <- pred_cols
-            
-            res_obj <- list(
-              train_out    = train_out, test_out = test_out,
-              algo         = algo, elapsed = elapsed,
-              pred_cols    = pred_cols, excl = excl,
-              na_before    = list(train = sum(is.na(train_pred)),
-                                  test  = if (!is.null(test_pred)) sum(is.na(test_pred)) else NA),
-              na_after     = list(train = sum(is.na(train_out[, pred_cols, drop = FALSE])),
-                                  test  = if (!is.null(test_out))
-                                    sum(is.na(test_out[, pred_cols, drop = FALSE])) else NA),
-              col_na_before = colSums(is.na(train_pred)),
-              col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE])),
-              params        = list(knn_neighbors = input$knn_neighbors,
-                                   bag_trees     = input$bag_trees,
-                                   bag_neighbors = input$bag_neighbors),
-              imputed_vals  = imputed_vals,
-              observed_vals = observed_vals
-            )
-            impute_result(res_obj)
-            
-            hist  <- run_history()
-            run_n <- length(hist) + 1
-            algo_label_h <- switch(algo,
-                                   "knn" = paste0("KNN (k=", input$knn_neighbors, ")"),
-                                   "bag" = paste0("Bag (", input$bag_trees, "t, k=", input$bag_neighbors, ")"),
-                                   "mmm" = "MMM"
-            )
-            hist[[run_n]] <- list(
-              run           = run_n, label = algo_label_h, algo = algo,
-              imputed_vals  = imputed_vals, observed_vals = observed_vals,
-              total_imputed = sum(is.na(train_pred)) - sum(is.na(train_out[, pred_cols, drop = FALSE])),
-              elapsed       = elapsed
-            )
-            run_history(hist)
-            
-          }, error = function(e) {
-            impute_result(list(error = conditionMessage(e)))
+            train_baked <- train_baked[, intersect(pred_cols, names(train_baked)), drop = FALSE]
+            if (!is.null(test_baked))
+              test_baked <- test_baked[, intersect(pred_cols, names(test_baked)), drop = FALSE]
+          }
+          
+          rebuild <- function(original, baked, p_cols) {
+            out <- original
+            for (col in intersect(p_cols, names(baked))) out[[col]] <- baked[[col]]
+            out
+          }
+          train_out <- rebuild(train_df, train_baked, pred_cols)
+          test_out  <- if (!is.null(test_baked)) rebuild(test_df, test_baked, pred_cols) else NULL
+          incProgress(0.7, message = "Finalising results...")
+          elapsed   <- round(proc.time()[["elapsed"]] - start_time, 2)
+          
+          # KDE snapshots
+          imputed_vals <- lapply(pred_cols, function(col) {
+            was_na <- is.na(train_pred[[col]])
+            if (sum(was_na) == 0 || !is.numeric(train_out[[col]])) return(NULL)
+            train_out[[col]][was_na]
           })
+          names(imputed_vals) <- pred_cols
           
-        }) # end withProgress
+          observed_vals <- lapply(pred_cols, function(col) {
+            if (!is.numeric(train_pred[[col]])) return(NULL)
+            train_pred[[col]][!is.na(train_pred[[col]])]
+          })
+          names(observed_vals) <- pred_cols
+          
+          res_obj <- list(
+            train_out    = train_out, test_out = test_out,
+            algo         = algo, elapsed = elapsed,
+            pred_cols    = pred_cols, excl = excl,
+            na_before    = list(train = sum(is.na(train_pred)),
+                                test  = if (!is.null(test_pred)) sum(is.na(test_pred)) else NA),
+            na_after     = list(train = sum(is.na(train_out[, pred_cols, drop = FALSE])),
+                                test  = if (!is.null(test_out))
+                                  sum(is.na(test_out[, pred_cols, drop = FALSE])) else NA),
+            col_na_before = colSums(is.na(train_pred)),
+            col_na_after  = colSums(is.na(train_out[, pred_cols, drop = FALSE])),
+            params        = list(knn_neighbors = input$knn_neighbors,
+                                 bag_trees     = input$bag_trees,
+                                 bag_neighbors = input$bag_neighbors),
+            imputed_vals  = imputed_vals,
+            observed_vals = observed_vals
+          )
+          impute_result(res_obj)
+          
+          hist  <- run_history()
+          run_n <- length(hist) + 1
+          algo_label_h <- switch(algo,
+                                 "knn" = paste0("KNN (k=", input$knn_neighbors, ")"),
+                                 "bag" = paste0("Bag (", input$bag_trees, "t, k=", input$bag_neighbors, ")"),
+                                 "mmm" = "MMM"
+          )
+          hist[[run_n]] <- list(
+            run           = run_n, label = algo_label_h, algo = algo,
+            imputed_vals  = imputed_vals, observed_vals = observed_vals,
+            total_imputed = sum(is.na(train_pred)) - sum(is.na(train_out[, pred_cols, drop = FALSE])),
+            elapsed       = elapsed
+          )
+          run_history(hist)
+          
+        }, error = function(e) {
+          impute_result(list(error = conditionMessage(e)))
+        })
+        
+        setProgress(1)
+      }) # end withProgress
     })
     
     # ── Reset current run ─────────────────────────────────────────────────────
