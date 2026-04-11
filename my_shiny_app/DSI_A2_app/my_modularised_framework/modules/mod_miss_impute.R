@@ -138,7 +138,7 @@ miss_impute_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-miss_impute_server <- function(id, get_data, get_split = NULL) {
+miss_impute_server <- function(id, get_data, get_split = NULL, get_roles = NULL) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -166,6 +166,18 @@ miss_impute_server <- function(id, get_data, get_split = NULL) {
                         choices  = c("(none)", names(df)),
                         selected = "(none)")
     }) |> bindEvent(get_data())
+    
+    # ── auto-select split col from roles ──────────────────────────────────
+    observe({
+      req(get_roles)
+      cur <- get_roles()
+      req(cur)
+      split_var <- names(cur)[cur == "split"]
+      if (length(split_var) == 1) {
+        updateSelectInput(session, "split_col", selected = split_var)
+      }
+    }) |> bindEvent(get_roles())
+    
     
     observeEvent(input$future_col, {
       req(input$future_col, input$future_col != "(none)")

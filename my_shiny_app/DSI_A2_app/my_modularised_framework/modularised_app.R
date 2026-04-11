@@ -224,7 +224,7 @@ server <- function(input, output, session) {
   
   # ── CONTINUE PIPELINE ─────────────────────────────────────────────────────
   
-  impute   <- miss_impute_server("miss_impute", excessive$data, split)
+  impute   <- miss_impute_server("miss_impute", excessive$data, split, roles)
   
   get_data <- impute$data   # current end of pipeline
   
