@@ -57,6 +57,13 @@ ui <- dashboardPage(
       choices  = file_choices,
       selected = default_selected,
       width    = "200px"
+    ),
+    tags$li(
+      class = "dropdown",
+      tags$div(
+        style = "padding: 0 30px; font-size: 24px; font-weight: 700; color: #212529; line-height: 50px;",
+        "DATA423-26S1 Assignment 2 (EDA, Strategy, Model) \u2003 | \u2003 William Hui Chang (69051925)"
+      )
     )
   ),
   
