@@ -176,6 +176,19 @@ model_tune_ui <- function(id) {
                          )
                        )
                 )
+              ),
+              fluidRow(
+                column(6,
+                       tags$label("CV error measure:",
+                                  style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                       selectInput(ns("rl_type_measure"), label = NULL,
+                                   choices  = c("MSE (default)"      = "mse",
+                                                "MAE"                = "mae",
+                                                "Deviance"           = "deviance",
+                                                "Misclassification"  = "class",
+                                                "AUC"                = "auc"),
+                                   selected = "mse", width = "100%")
+                )
               )
             )
           ),
@@ -276,6 +289,19 @@ model_tune_ui <- function(id) {
                          )
                        )
                 )
+              ),
+              fluidRow(
+                column(6,
+                       tags$label("CV error measure:",
+                                  style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                       selectInput(ns("en_type_measure"), label = NULL,
+                                   choices  = c("MSE (default)"      = "mse",
+                                                "MAE"                = "mae",
+                                                "Deviance"           = "deviance",
+                                                "Misclassification"  = "class",
+                                                "AUC"                = "auc"),
+                                   selected = "mse", width = "100%")
+                )
               )
             )
           )
@@ -286,7 +312,89 @@ model_tune_ui <- function(id) {
           title = tagList(icon("chart-line"), " CV Results"),
           style = "padding-top:16px;",
           uiOutput(ns("cv_results_ui"))
-        )
+        ),
+        
+        # ── Tab 3: Set Parameters ────────────────────────────────────────────
+        tabPanel(
+          title = tagList(icon("circle-check"), " Set Parameters"),
+          style = "padding-top:16px;",
+          
+          div(
+            style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                     padding:20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+            
+            tags$h5(
+              icon("circle-check", style = "color:#185FA5; margin-right:6px;"),
+              "Set Parameters",
+              style = "font-weight:600; color:#343a40; margin-bottom:4px;"
+            ),
+            div(
+              style = "font-size:12px; color:#6c757d; background:#e8f0fe;
+                       border-left:3px solid #a8c0fd; padding:6px 10px;
+                       border-radius:4px; margin-bottom:16px;",
+              icon("circle-info", style = "color:#185FA5;"),
+              HTML(" Parameters are <b>auto-filled from CV results</b>. You can manually
+                    override them if needed before passing to the Regression module.")
+            ),
+            
+            # ElasticNet hint
+            conditionalPanel(
+              condition = sprintf("input['%s'] == 'elasticnet'", ns("mode")),
+              div(
+                style = "font-size:12px; color:#856404; background:#fff3cd;
+                         border-left:3px solid #ffc107; padding:6px 10px;
+                         border-radius:4px; margin-bottom:16px;",
+                icon("triangle-exclamation", style = "color:#ffc107;"),
+                HTML(" For ElasticNet, consider training with <b>both lambda.min and lambda.1se</b>
+                      and comparing test MSE in the comparison table to decide which generalises better.")
+              )
+            ),
+            
+            fluidRow(
+              # ── Alpha ────────────────────────────────────────────────────
+              column(4,
+                     tags$label("Alpha (α):",
+                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                     div(style = "font-size:11px; color:#6c757d; margin-bottom:6px;",
+                         "0 = Ridge · 1 = Lasso · between = ElasticNet"),
+                     sliderInput(ns("set_alpha"), label = NULL,
+                                 min = 0, max = 1, value = 0, step = 0.05, width = "100%")
+              ),
+              
+              # ── Lambda ───────────────────────────────────────────────────
+              column(4,
+                     tags$label("Lambda (λ):",
+                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                     radioButtons(ns("lambda_source"), label = NULL,
+                                  choices  = c("lambda.min" = "lambda_min",
+                                               "lambda.1se" = "lambda_1se",
+                                               "Manual"     = "manual"),
+                                  selected = "lambda_min"),
+                     conditionalPanel(
+                       condition = sprintf("input['%s'] == 'manual'", ns("lambda_source")),
+                       numericInput(ns("set_lambda_manual"), label = NULL,
+                                    value = 0.01, min = 0, step = 0.001, width = "100%")
+                     )
+              ),
+              
+              # ── Resolved value display ────────────────────────────────────
+              column(4,
+                     tags$label("Resolved values:",
+                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                     uiOutput(ns("resolved_params_ui"))
+              )
+            ),
+            
+            hr(),
+            actionButton(
+              ns("confirm_params"),
+              label = "Confirm Parameters",
+              icon  = icon("circle-check"),
+              width = "100%",
+              style = "background-color:#198754; color:white; border:none;"
+            )
+          )
+        ) # end Set Parameters tabPanel
         
       ) # end tabsetPanel
     )
@@ -401,10 +509,11 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
             set.seed(2026)
             cv_time <- system.time({
               cv_fit <- cv.glmnet(x_train, y_train,
-                                  alpha  = alpha,
-                                  lambda = lambda_grid,
-                                  nfolds = nfolds,
-                                  thresh = thresh)
+                                  alpha        = alpha,
+                                  lambda       = lambda_grid,
+                                  nfolds       = nfolds,
+                                  thresh       = thresh,
+                                  type.measure = input$rl_type_measure)
             })
             
             tune_result(list(
@@ -437,10 +546,11 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
             cv_time <- system.time({
               cv_fits <- lapply(alpha_grid, function(a) {
                 cv.glmnet(x_train, y_train,
-                          alpha  = a,
-                          lambda = lambda_grid,
-                          nfolds = nfolds,
-                          thresh = thresh)
+                          alpha        = a,
+                          lambda       = lambda_grid,
+                          nfolds       = nfolds,
+                          thresh       = thresh,
+                          type.measure = input$en_type_measure)
               })
             })
             names(cv_fits) <- as.character(alpha_grid)
@@ -476,6 +586,66 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
           tune_result(list(error = conditionMessage(e)))
         })
       })
+    })
+    
+    # ── Auto-fill Set Parameters from CV results ──────────────────────────────
+    
+    observeEvent(tune_result(), {
+      res <- tune_result()
+      if (is.null(res) || !is.null(res$error)) return()
+      
+      alpha <- if (res$mode == "elasticnet") res$best_alpha else res$alpha
+      updateSliderInput(session, "set_alpha", value = alpha)
+      updateRadioButtons(session, "lambda_source", selected = "lambda_min")
+    })
+    
+    # ── Resolved params display ───────────────────────────────────────────────
+    
+    output$resolved_params_ui <- renderUI({
+      res <- tune_result()
+      
+      lambda_val <- if (is.null(res) || !is.null(res$error)) {
+        if (input$lambda_source == "manual") input$set_lambda_manual else NA
+      } else {
+        switch(input$lambda_source,
+               "lambda_min" = res$lambda_min,
+               "lambda_1se" = res$lambda_1se,
+               "manual"     = input$set_lambda_manual)
+      }
+      
+      badge <- function(label, value, color) {
+        div(style = paste0(
+          "display:inline-block; background:", color, "22;",
+          "color:", color, "; border:1px solid ", color, "55;",
+          "border-radius:6px; padding:4px 10px; font-size:13px;",
+          "font-weight:600; margin-bottom:6px; margin-right:4px;"
+        ), paste0(label, ": ", value))
+      }
+      
+      tagList(
+        badge("α", input$set_alpha, "#185FA5"),
+        br(),
+        badge("λ", if (is.na(lambda_val)) "—" else round(lambda_val, 6), "#0F6E56")
+      )
+    })
+    
+    # ── Confirmed params (locked in after button click) ───────────────────────
+    
+    confirmed <- reactiveVal(list(alpha = NULL, lambda = NULL))
+    
+    observeEvent(input$confirm_params, {
+      res <- tune_result()
+      
+      lambda_val <- if (is.null(res) || !is.null(res$error)) {
+        input$set_lambda_manual
+      } else {
+        switch(input$lambda_source,
+               "lambda_min" = res$lambda_min,
+               "lambda_1se" = res$lambda_1se,
+               "manual"     = input$set_lambda_manual)
+      }
+      
+      confirmed(list(alpha = input$set_alpha, lambda = lambda_val))
     })
     
     # ── Reset ─────────────────────────────────────────────────────────────────
@@ -565,7 +735,7 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
                 else
                   "CV Error Curve",
                 style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
-        plotly::plotlyOutput(ns("cv_plot"), height = "600px")
+        plotOutput(ns("cv_plot"), height = "600px")
       )
       
       tagList(cards, cv_plot, alpha_table)
@@ -594,63 +764,30 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
     
     # ── CV error curve plot ────────────────────────────────────────────────────
     
-    output$cv_plot <- plotly::renderPlotly({
+    output$cv_plot <- renderPlot({
       res <- tune_result()
       req(res, is.null(res$error))
       
-      cv  <- res$cv_fit
-      log_lambda <- -log(cv$lambda)
+      title <- if (res$mode == "elasticnet") {
+        paste0("ElasticNet (α = ", res$best_alpha, "): CV Error vs Lambda")
+      } else if (res$alpha == 0) {
+        "Ridge: CV Error vs Lambda"
+      } else if (res$alpha == 1) {
+        "Lasso: CV Error vs Lambda"
+      } else {
+        paste0("α = ", res$alpha, ": CV Error vs Lambda")
+      }
       
-      plotly::plot_ly() |>
-        plotly::add_ribbons(
-          x    = log_lambda,
-          ymin = cv$cvlo,
-          ymax = cv$cvup,
-          fillcolor = "rgba(24,95,165,0.15)",
-          line      = list(color = "transparent"),
-          name      = "CV Error Band",
-          showlegend = TRUE
-        ) |>
-        plotly::add_lines(
-          x    = log_lambda,
-          y    = cv$cvm,
-          line = list(color = "#185FA5", width = 2),
-          name = "Mean CV Error"
-        ) |>
-        plotly::add_lines(
-          x    = c(-log(res$lambda_min), -log(res$lambda_min)),
-          y    = c(min(cv$cvlo), max(cv$cvup)),
-          line = list(color = "#198754", dash = "dash", width = 1.5),
-          name = paste0("lambda.min (", round(res$lambda_min, 5), ")")
-        ) |>
-        plotly::add_lines(
-          x    = c(-log(res$lambda_1se), -log(res$lambda_1se)),
-          y    = c(min(cv$cvlo), max(cv$cvup)),
-          line = list(color = "#BA7517", dash = "dash", width = 1.5),
-          name = paste0("lambda.1se (", round(res$lambda_1se, 5), ")")
-        ) |>
-        plotly::layout(
-          xaxis  = list(title = "<b>-log(λ)</b>"),
-          yaxis  = list(title = "<b>CV MSE</b>"),
-          legend = list(orientation = "h", x = 0.5, xanchor = "center",
-                        y = 1.05, yanchor = "bottom"),
-          hovermode = "x unified"
-        )
+      par(mar = c(5, 4, 6, 2))
+      plot(res$cv_fit, main = "")
+      title(main = title, line = 4)
     })
     
     # ── Return ────────────────────────────────────────────────────────────────
     
     return(list(
-      tuned_alpha  = reactive({
-        res <- tune_result()
-        if (is.null(res) || !is.null(res$error)) return(NULL)
-        if (res$mode == "elasticnet") res$best_alpha else res$alpha
-      }),
-      tuned_lambda = reactive({
-        res <- tune_result()
-        if (is.null(res) || !is.null(res$error)) return(NULL)
-        res$lambda_min
-      }),
+      tuned_alpha  = reactive({ confirmed()$alpha }),
+      tuned_lambda = reactive({ confirmed()$lambda }),
       tune_result  = tune_result
     ))
     
