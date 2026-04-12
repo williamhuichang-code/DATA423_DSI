@@ -230,17 +230,234 @@ prep_recipe_ui <- function(id) {
 }
 
 
-# ── SERVER (placeholder) ──────────────────────────────────────────────────────
+# ── SERVER ───────────────────────────────────────────────────────────────────
 
 prep_recipe_server <- function(id, get_data, roles, split) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
     
-    # server logic to be implemented
+    # ── Populate selectors from roles ────────────────────────────────────────
+    
+    observe({
+      req(get_data(), roles())
+      df <- get_data()
+      r  <- roles()
+      
+      all_vars <- names(df)
+      
+      y_default      <- names(r)[r == "outcome"]
+      pred_default   <- names(r)[r == "predictor"]
+      ignore_default <- names(r)[tolower(as.character(r)) %in%
+                                   c("obs_id", "split", "sensitive",
+                                     "weight", "stratifier", "ignore")]
+      
+      # keep only vars that exist in df
+      y_default      <- intersect(y_default,      all_vars)
+      pred_default   <- intersect(pred_default,   all_vars)
+      ignore_default <- intersect(ignore_default, all_vars)
+      
+      updateSelectizeInput(session, "y_var",
+                           choices  = all_vars,
+                           selected = if (length(y_default) > 0) y_default[1] else NULL,
+                           server   = TRUE)
+      updateSelectizeInput(session, "pred_cols",
+                           choices  = all_vars,
+                           selected = pred_default,
+                           server   = TRUE)
+      updateSelectizeInput(session, "ignore_cols",
+                           choices  = all_vars,
+                           selected = ignore_default,
+                           server   = TRUE)
+    }) |> bindEvent(get_data(), roles())
+    
+    # ── Reset ─────────────────────────────────────────────────────────────────
+    
+    observeEvent(input$reset, {
+      updateRadioButtons(session, "impute_method", selected = "none")
+      updateRadioButtons(session, "scale_method",  selected = "none")
+      updateSliderInput(session,  "knn_k",          value = 5)
+      updateSliderInput(session,  "bag_trees",      value = 25)
+      updateCheckboxInput(session, "dummy_encode",  value = TRUE)
+      updateCheckboxInput(session, "remove_nzv",    value = FALSE)
+      updateCheckboxInput(session, "remove_lincomb", value = FALSE)
+      # re-populate from roles
+      df <- get_data(); req(df)
+      r  <- roles()
+      all_vars       <- names(df)
+      y_default      <- intersect(names(r)[r == "outcome"],   all_vars)
+      pred_default   <- intersect(names(r)[r == "predictor"], all_vars)
+      ignore_default <- intersect(names(r)[tolower(as.character(r)) %in%
+                                             c("obs_id", "split", "sensitive",
+                                               "weight", "stratifier", "ignore")], all_vars)
+      updateSelectizeInput(session, "y_var",       selected = if (length(y_default) > 0) y_default[1] else NULL, server = TRUE)
+      updateSelectizeInput(session, "pred_cols",   selected = pred_default,   server = TRUE)
+      updateSelectizeInput(session, "ignore_cols", selected = ignore_default, server = TRUE)
+    })
+    
+    # ── Built recipe (reactive, triggered by Build button) ────────────────────
+    
+    built_recipe <- reactiveVal(NULL)
+    
+    observeEvent(input$build, {
+      df   <- get_data(); req(df)
+      y    <- input$y_var
+      preds <- input$pred_cols
+      
+      req(nzchar(y), length(preds) > 0)
+      
+      tryCatch({
+        library(recipes)
+        
+        # use train split if available, otherwise full df
+        train_df <- tryCatch(split$train(), error = function(e) df)
+        if (is.null(train_df) || nrow(train_df) == 0) train_df <- df
+        
+        rec <- recipe(as.formula(paste(y, "~ .")), data = train_df)
+        
+        # update roles for ignored columns
+        excl <- unique(c(input$ignore_cols))
+        excl <- intersect(excl, names(train_df))
+        excl <- setdiff(excl, c(y, preds))
+        if (length(excl) > 0)
+          rec <- rec |> update_role(all_of(excl), new_role = "ignore")
+        
+        # remove non-predictor, non-outcome cols from recipe scope
+        keep <- union(preds, y)
+        drop <- setdiff(names(train_df), keep)
+        drop <- setdiff(drop, excl)  # already handled above
+        if (length(drop) > 0)
+          rec <- rec |> update_role(all_of(drop), new_role = "ignore")
+        
+        # ── Part 2: imputation ────────────────────────────────────────────
+        rec <- switch(input$impute_method,
+                      "knn" = rec |> step_impute_knn(all_predictors(), neighbors = input$knn_k),
+                      "bag" = rec |> step_impute_bag(all_predictors(), trees = input$bag_trees),
+                      "mmm" = rec |> step_impute_mode(all_nominal_predictors()) |>
+                        step_impute_mean(all_numeric_predictors()),
+                      rec  # none
+        )
+        
+        # ── Part 2: scaling ───────────────────────────────────────────────
+        rec <- switch(input$scale_method,
+                      "standardise" = rec |> step_center(all_numeric_predictors()) |>
+                        step_scale(all_numeric_predictors()),
+                      "normalise"   = rec |> step_range(all_numeric_predictors()),
+                      "centre"      = rec |> step_center(all_numeric_predictors()),
+                      "scale"       = rec |> step_scale(all_numeric_predictors()),
+                      rec  # none
+        )
+        
+        # ── Part 3: model-specific ────────────────────────────────────────
+        if (isTRUE(input$remove_nzv))
+          rec <- rec |> step_nzv(all_predictors())
+        if (isTRUE(input$remove_lincomb))
+          rec <- rec |> step_lincomb(all_numeric_predictors())
+        if (isTRUE(input$dummy_encode))
+          rec <- rec |> step_dummy(all_nominal_predictors())
+        
+        built_recipe(rec)
+        
+      }, error = function(e) {
+        built_recipe(list(error = conditionMessage(e)))
+      })
+    })
+    
+    # ── Recipe code preview ───────────────────────────────────────────────────
+    
+    output$recipe_code <- renderPrint({
+      rec <- built_recipe()
+      
+      if (is.null(rec)) {
+        cat("# Click 'Build Recipe' to generate the recipe.\n")
+        return(invisible(NULL))
+      }
+      if (!is.null(rec$error)) {
+        cat("# Error building recipe:\n#", rec$error, "\n")
+        return(invisible(NULL))
+      }
+      
+      # build human-readable recipe code string
+      y     <- input$y_var
+      preds <- input$pred_cols
+      excl  <- input$ignore_cols
+      
+      lines <- c(
+        paste0('rec <- recipe(', y, ' ~ ., data = train)'),
+        if (length(excl) > 0)
+          paste0('  |> update_role(c("', paste(excl, collapse = '", "'), '"), new_role = "ignore")')
+      )
+      
+      if (input$impute_method == "knn")
+        lines <- c(lines, paste0('  |> step_impute_knn(all_predictors(), neighbors = ', input$knn_k, ')'))
+      else if (input$impute_method == "bag")
+        lines <- c(lines, paste0('  |> step_impute_bag(all_predictors(), trees = ', input$bag_trees, ')'))
+      else if (input$impute_method == "mmm")
+        lines <- c(lines,
+                   '  |> step_impute_mode(all_nominal_predictors())',
+                   '  |> step_impute_mean(all_numeric_predictors())')
+      
+      if (input$scale_method == "standardise")
+        lines <- c(lines,
+                   '  |> step_center(all_numeric_predictors())',
+                   '  |> step_scale(all_numeric_predictors())')
+      else if (input$scale_method == "normalise")
+        lines <- c(lines, '  |> step_range(all_numeric_predictors())')
+      else if (input$scale_method == "centre")
+        lines <- c(lines, '  |> step_center(all_numeric_predictors())')
+      else if (input$scale_method == "scale")
+        lines <- c(lines, '  |> step_scale(all_numeric_predictors())')
+      
+      if (isTRUE(input$remove_nzv))
+        lines <- c(lines, '  |> step_nzv(all_predictors())')
+      if (isTRUE(input$remove_lincomb))
+        lines <- c(lines, '  |> step_lincomb(all_numeric_predictors())')
+      if (isTRUE(input$dummy_encode))
+        lines <- c(lines, '  |> step_dummy(all_nominal_predictors())')
+      
+      cat(paste(lines, collapse = "\n"), "\n")
+    })
+    
+    # ── prep() summary ────────────────────────────────────────────────────────
+    
+    output$recipe_summary <- renderPrint({
+      rec <- built_recipe()
+      
+      if (is.null(rec)) {
+        cat("Click 'Build Recipe' first.\n")
+        return(invisible(NULL))
+      }
+      if (!is.null(rec$error)) {
+        cat("Error:", rec$error, "\n")
+        return(invisible(NULL))
+      }
+      
+      tryCatch({
+        df       <- get_data()
+        train_df <- tryCatch(split$train(), error = function(e) df)
+        if (is.null(train_df) || nrow(train_df) == 0) train_df <- df
+        prepped  <- prep(rec, training = train_df, verbose = FALSE)
+        print(summary(prepped))
+        cat("\n── Baked dimensions ────────────────────\n")
+        baked <- bake(prepped, new_data = NULL)
+        cat(sprintf("Rows : %d\nCols : %d\n", nrow(baked), ncol(baked)))
+        cat("\nColumn types after baking:\n")
+        type_tbl <- table(sapply(baked, function(x) class(x)[1]))
+        for (nm in names(type_tbl))
+          cat(sprintf("  %-12s : %d\n", nm, type_tbl[[nm]]))
+      }, error = function(e) {
+        cat("Could not prep recipe:\n", conditionMessage(e), "\n")
+      })
+    })
+    
+    # ── Return ────────────────────────────────────────────────────────────────
     
     return(list(
-      recipe = reactive({ NULL })
+      recipe = reactive({
+        rec <- built_recipe()
+        if (is.null(rec) || !is.null(rec$error)) return(NULL)
+        rec
+      })
     ))
     
   })
