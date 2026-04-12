@@ -116,7 +116,10 @@ ui <- dashboardPage(
       ),
       
       menuItem("Model", tabName = "model", icon = icon("brain"),
-               menuSubItem("Regression", tabName = "model_reg")
+               menuSubItem("Tune",       tabName = "model_tune"),
+               menuSubItem("Regression", tabName = "model_reg"),
+               menuSubItem("Model Selection", tabName = "model_selection")
+               # menuSubItem("Regression", tabName = "model_reg")
                # add more subtabs here
       ),
       
@@ -171,8 +174,9 @@ ui <- dashboardPage(
       
       
       # Model
-      tabItem(tabName = "model_reg", model_reg_ui("model_reg")),
-      tabItem(tabName = "model_regu",   box(title = "Regularised", width = 12, "coming soon")),
+      tabItem(tabName = "model_tune",      model_tune_ui("model_tune")),
+      tabItem(tabName = "model_reg",       model_reg_ui("model_reg")),
+      tabItem(tabName = "model_selection", box(title = "Model Selection", width = 12, "coming soon")),
       
       # Hyper Tuning
       tabItem(tabName = "hyper_grid",  box(title = "Grid Search", width = 12, "coming soon")),
@@ -225,7 +229,9 @@ server <- function(input, output, session) {
   impute    <- miss_impute_server("miss_impute",       excessive$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
   precipe   <- prep_recipe_server("prep_recipe",       transform$data, roles, split)
-  model_reg <- model_reg_server("model_reg",           transform$data, roles, split, precipe)
+  model_tune <- model_tune_server("model_tune",        transform$data, roles, precipe)
+  
+  # model_reg <- model_reg_server("model_reg",           transform$data, roles, split, precipe)
   
   get_data <- transform$data   # current end of pipeline
   
