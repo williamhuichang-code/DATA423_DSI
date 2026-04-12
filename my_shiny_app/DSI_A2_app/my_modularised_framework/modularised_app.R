@@ -229,8 +229,7 @@ server <- function(input, output, session) {
   impute    <- miss_impute_server("miss_impute",       excessive$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
   precipe   <- prep_recipe_server("prep_recipe",       transform$data, roles, split)
-  model_tune <- model_tune_server("model_tune",        transform$data, roles, precipe)
-  
+  model_tune <- model_tune_server("model_tune", transform$data, roles, precipe$recipe)
   # model_reg <- model_reg_server("model_reg",           transform$data, roles, split, precipe)
   
   get_data <- transform$data   # current end of pipeline
