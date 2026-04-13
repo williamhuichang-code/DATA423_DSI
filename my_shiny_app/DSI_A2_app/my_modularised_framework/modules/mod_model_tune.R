@@ -111,7 +111,7 @@ model_tune_ui <- function(id) {
                        div(style = "font-size:11px; color:#6c757d; margin-bottom:6px;",
                            "0 = Ridge, 1 = Lasso"),
                        sliderInput(ns("rl_alpha"), label = NULL,
-                                   min = 0, max = 1, value = 0, step = 0.05, width = "100%")
+                                   min = 0, max = 1, value = 0, step = 1, width = "100%")
                 ),
                 column(6,
                        tags$label("Lambda grid:",
@@ -392,7 +392,8 @@ model_tune_ui <- function(id) {
               icon  = icon("circle-check"),
               width = "100%",
               style = "background-color:#198754; color:white; border:none;"
-            )
+            ),
+            uiOutput(ns("confirm_feedback_ui"))
           )
         ) # end Set Parameters tabPanel
         
@@ -781,6 +782,22 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
       par(mar = c(5, 4, 6, 2))
       plot(res$cv_fit, main = "")
       title(main = title, line = 4)
+    })
+    
+    # ── Confirm feedback ──────────────────────────────────────────────────────
+    
+    output$confirm_feedback_ui <- renderUI({
+      req(input$confirm_params > 0)
+      c <- confirmed()
+      if (is.null(c$alpha) || is.null(c$lambda)) return(NULL)
+      div(
+        style = "margin-top:10px; font-size:12px; color:#0f6e56; background:#e1f5ee;
+                 border-left:3px solid #9fe1cb; padding:8px 12px; border-radius:6px;",
+        icon("circle-check", style = "color:#0f6e56;"),
+        HTML(paste0(" <b>Parameters confirmed</b> — α = <b>", c$alpha,
+                    "</b>, λ = <b>", round(c$lambda, 6),
+                    "</b>. Ready to pass to the Regression module."))
+      )
     })
     
     # ── Return ────────────────────────────────────────────────────────────────
