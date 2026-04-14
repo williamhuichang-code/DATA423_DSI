@@ -108,28 +108,10 @@ ui <- dashboardPage(
                # add more subtabs here
       ),
       
-      menuItem("Pre-Processing", tabName = "preproc", icon = icon("wand-magic-sparkles"),
-               menuSubItem("Recipe",      tabName = "pre_recipe"),
-               menuSubItem("Resampling",  tabName = "pre_resample"),
-               menuSubItem("Interaction", tabName = "pre_interaction")
-               # add more subtabs here
-      ),
-      
       menuItem("Model", tabName = "model", icon = icon("brain"),
+               menuSubItem("Recipe",     tabName = "pre_recipe"),
                menuSubItem("Tune",       tabName = "model_tune"),
-               menuSubItem("Regression", tabName = "model_reg"),
-               menuSubItem("Model Selection", tabName = "model_selection")
-               # menuSubItem("Regression", tabName = "model_reg")
-               # add more subtabs here
-      ),
-      
-      menuItem("Hyper Tuning", tabName = "hyper", icon = icon("gauge"),
-               menuSubItem("Grid Search", tabName = "hyper_grid")
-               # add more subtabs here
-      ),
-      
-      menuItem("Evaluation", tabName = "eval", icon = icon("square-check"),
-               menuSubItem("Metrics",     tabName = "eval_metrics")
+               menuSubItem("Regression", tabName = "model_reg")
                # add more subtabs here
       )
     )
@@ -167,23 +149,10 @@ ui <- dashboardPage(
       tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
       tabItem(tabName = "out_iforest", box(title = "iForest",     width = 12, "coming soon")),
       
-      # Pre-P Strategy
-      tabItem(tabName = "pre_recipe", prep_recipe_ui("prep_recipe")),
-      tabItem(tabName = "pre_resample",    box(title = "Resampling",  width = 12, "coming soon")),
-      tabItem(tabName = "pre_interaction", box(title = "Interaction", width = 12, "coming soon")),
-      
-      
       # Model
+      tabItem(tabName = "pre_recipe", prep_recipe_ui("prep_recipe")),
       tabItem(tabName = "model_tune",      model_tune_ui("model_tune")),
-      tabItem(tabName = "model_reg",       model_reg_ui("model_reg")),
-      tabItem(tabName = "model_selection", box(title = "Model Selection", width = 12, "coming soon")),
-      
-      # Hyper Tuning
-      tabItem(tabName = "hyper_grid",  box(title = "Grid Search", width = 12, "coming soon")),
-      
-      # Evaluation
-      tabItem(tabName = "eval_metrics", box(title = "Metrics",    width = 12, "coming soon"))
-      
+      tabItem(tabName = "model_reg",       model_reg_ui("model_reg"))
     )
   ),
   
@@ -230,7 +199,7 @@ server <- function(input, output, session) {
   transform <- miss_transform_server("miss_transform", impute$data, roles)
   precipe   <- prep_recipe_server("prep_recipe",       transform$data, roles, split)
   model_tune <- model_tune_server("model_tune", transform$data, roles, precipe$recipe)
-  model_reg <- model_reg_server("model_reg", transform$data, roles, precipe$recipe, model_tune)
+  model_reg <- model_reg_server("model_reg", transform$data, roles, precipe$recipe, model_tune, get_raw)
   
   get_data <- transform$data   # current end of pipeline
   

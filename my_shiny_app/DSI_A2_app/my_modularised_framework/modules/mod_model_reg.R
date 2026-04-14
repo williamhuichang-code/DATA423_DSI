@@ -187,15 +187,34 @@ model_reg_ui <- function(id) {
                                  selected = "rowindex", width = "100%")
               ),
               column(4,
-                     tags$label("Outlier threshold (IQR coef):",
+                     tags$label("Outlier detection:",
                                 style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
-                     sliderInput(ns("outlier_coef"), label = NULL,
-                                 min = 1.0, max = 3.0, value = 2.2, step = 0.1, width = "100%")
+                     radioButtons(ns("outlier_method"), label = NULL,
+                                  choices  = c("IQR fence"       = "iqr",
+                                               "Tail percentile" = "pct"),
+                                  selected = "iqr", inline = TRUE)
+              ),
+              column(4,
+                     conditionalPanel(
+                       condition = sprintf("input['%s'] == 'iqr'", ns("outlier_method")),
+                       tags$label("IQR coef:",
+                                  style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                       sliderInput(ns("outlier_coef"), label = NULL,
+                                   min = 1.0, max = 3.0, value = 2.2, step = 0.1, width = "100%")
+                     ),
+                     conditionalPanel(
+                       condition = sprintf("input['%s'] == 'pct'", ns("outlier_method")),
+                       tags$label("Tail % (each side):",
+                                  style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                       sliderInput(ns("outlier_pct"), label = NULL,
+                                   min = 1, max = 20, value = 5, step = 1, width = "100%")
+                     )
               )
             )
           ),
           
-          uiOutput(ns("prediction_ui"))
+          uiOutput(ns("prediction_ui")),
+          uiOutput(ns("outlier_tbl_ui"))
         ),
         
         # ── Tab 4: Residual Diagnostics ───────────────────────────────────
@@ -220,7 +239,7 @@ model_reg_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-model_reg_server <- function(id, get_data, roles, get_recipe, model_tune) {
+model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_raw) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -237,6 +256,18 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune) {
                    text-transform:uppercase; letter-spacing:.5px;", label),
       div(style = paste0("font-size:22px; font-weight:700; color:", color, ";"), value)
       )
+    }
+    
+    detect_outliers <- function(resids) {
+      if (isTRUE(input$outlier_method == "pct")) {
+        pct   <- input$outlier_pct / 100
+        lo    <- quantile(resids, pct,       na.rm = TRUE)
+        hi    <- quantile(resids, 1 - pct,   na.rm = TRUE)
+        resids < lo | resids > hi
+      } else {
+        limits <- boxplot.stats(resids, coef = input$outlier_coef)$stats
+        resids < limits[1] | resids > limits[5]
+      }
     }
     
     # ── Split var from roles ──────────────────────────────────────────────────
@@ -552,7 +583,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune) {
         ),
         div(
           style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
-                   padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+                   padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
           tags$h5(icon("chart-line", style = "color:#185FA5; margin-right:6px;"),
                   "Prediction Plot",
                   style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
@@ -591,8 +622,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune) {
         residual  = m$resids
       )
       
-      limits     <- boxplot.stats(df_plot$residual, coef = input$outlier_coef)$stats
-      is_outlier <- df_plot$residual < limits[1] | df_plot$residual > limits[5]
+      is_outlier <- detect_outliers(df_plot$residual)
       
       df_plot$label <- if (input$label_col == "none") {
         ""
@@ -620,6 +650,91 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune) {
       
       make_pred_actual(df_plot)
     })
+    
+    # ── Outlier table ─────────────────────────────────────────────────────────
+    
+    output$outlier_tbl_ui <- renderUI({
+      res <- model_result()
+      req(res, is.null(res$error), !is.null(res$metrics))
+      m <- res$metrics
+      
+      df      <- get_data()
+      sv      <- input$split_var
+      ts      <- input$test_level
+      test_df <- if (!is.null(sv) && sv != "(none)" && !is.null(ts) && ts != "(none)")
+        df[as.character(df[[sv]]) == ts, , drop = FALSE]
+      else df
+      
+      is_outlier <- detect_outliers(m$resids)
+      
+      if (!any(is_outlier)) return(NULL)
+      
+      div(
+        style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                 padding:16px; margin-top:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+        tags$h5(icon("triangle-exclamation", style = "color:#C41E3A; margin-right:6px;"),
+                paste0("Outlier Observations (", sum(is_outlier), ") — Full Test Row Data"),
+                style = "font-weight:600; color:#343a40; margin-bottom:4px;"),
+        div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
+            "Full rows from the test set for outlier observations. Investigate predictor patterns that may explain poor predictions."),
+        DT::dataTableOutput(ns("outlier_tbl"))
+      )
+    })
+    
+    output$outlier_tbl <- DT::renderDataTable({
+      res <- model_result()
+      req(res, is.null(res$error), !is.null(res$metrics))
+      m <- res$metrics
+      
+      df      <- get_data()
+      sv      <- input$split_var
+      ts      <- input$test_level
+      test_df <- if (!is.null(sv) && sv != "(none)" && !is.null(ts) && ts != "(none)")
+        df[as.character(df[[sv]]) == ts, , drop = FALSE]
+      else df
+      
+      is_outlier <- detect_outliers(m$resids)
+      req(any(is_outlier))
+      
+      # get raw test rows — match by rownames from transformed test_df
+      raw_df   <- tryCatch(get_raw(), error = function(e) NULL)
+      raw_test <- if (!is.null(raw_df)) {
+        # match transformed test row indices back to raw data
+        test_row_names <- rownames(test_df)
+        raw_idx <- suppressWarnings(as.integer(test_row_names))
+        if (!is.null(raw_idx) && !any(is.na(raw_idx)) && max(raw_idx) <= nrow(raw_df)) {
+          raw_df[raw_idx, , drop = FALSE]
+        } else if (!is.null(sv) && sv != "(none)" && sv %in% names(raw_df)) {
+          raw_df[as.character(raw_df[[sv]]) == ts, , drop = FALSE]
+        } else NULL
+      } else NULL
+      
+      # build full row table with prediction columns prepended
+      outlier_df <- if (!is.null(raw_test) && nrow(raw_test) == nrow(test_df)) {
+        raw_test[is_outlier, , drop = FALSE]
+      } else {
+        test_df[is_outlier, , drop = FALSE]  # fallback to transformed
+      }
+      
+      outlier_df <- cbind(
+        data.frame(
+          Actual    = round(m$y_test[is_outlier],  4),
+          Predicted = round(m$preds[is_outlier],   4),
+          Residual  = round(m$resids[is_outlier],  4)
+        ),
+        outlier_df
+      )
+      outlier_df <- outlier_df[order(-abs(outlier_df$Residual)), ]
+      
+      DT::datatable(outlier_df,
+                    options  = list(pageLength = 10, dom = "tip", scrollX = TRUE),
+                    rownames = FALSE) |>
+        DT::formatStyle("Residual",
+                        color      = DT::styleInterval(0, c("#C41E3A", "#198754")),
+                        fontWeight = "bold")
+    })
+    
+    outputOptions(output, "outlier_tbl_ui", suspendWhenHidden = FALSE)
     
     # ── Residual Diagnostics UI ───────────────────────────────────────────────
     

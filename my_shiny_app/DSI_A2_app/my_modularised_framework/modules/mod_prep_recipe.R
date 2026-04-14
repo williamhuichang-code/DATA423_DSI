@@ -335,8 +335,8 @@ prep_recipe_server <- function(id, get_data, roles, split) {
         library(recipes)
         
         # use train split if available, otherwise full df
-        train_df <- tryCatch(split$train(), error = function(e) df)
-        if (is.null(train_df) || nrow(train_df) == 0) train_df <- df
+        train_df <- df
+        
         
         rec <- recipe(as.formula(paste(y, "~ .")), data = train_df)
         
@@ -459,8 +459,8 @@ prep_recipe_server <- function(id, get_data, roles, split) {
       
       tryCatch({
         df       <- get_data()
-        train_df <- tryCatch(split$train(), error = function(e) df)
-        if (is.null(train_df) || nrow(train_df) == 0) train_df <- df
+        train_df <- df
+        
         prepped  <- prep(rec, training = train_df, verbose = FALSE)
         print(summary(prepped))
         cat("\n── Baked dimensions ────────────────────\n")

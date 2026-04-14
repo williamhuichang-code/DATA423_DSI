@@ -1,0 +1,276 @@
+---
+title: "Test - Assignment 2"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+library(summarytools)
+library(kableExtra)
+library(performance)
+
+##### initialise datasets
+dat <- read.csv('Ass21Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
+##### global parameters
+SEED = 2026
+```
+
+
+
+```{r cv_with_glmnet, fig.width=10, fig.height=5}
+
+library(glmnet)
+SEED = 2026
+lambda_grid <- 10^seq(3, -4, length.out = 100)
+##### initialise
+# summary
+# summary(dat)
+# define trainset and testset
+train_dat <- dat[dat$OBS_TYPE == "Train", ]
+test_dat  <- dat[dat$OBS_TYPE == "Test", ]
+# model formula
+formula_death <- DEATH_RATE ~ . - CODE - OBS_TYPE
+# matrix prep (required for glmnet)
+x_train <- model.matrix(formula_death, data = train_dat)[,-1]
+y_train <- train_dat$DEATH_RATE
+
+
+##### CV for Ridge/Lasso
+# run CV
+set.seed(SEED)
+best_cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0, family = "gaussian")
+set.seed(SEED)
+best_cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1, family = "gaussian")
+# extract best lambdas
+min_lambda_ridge <- best_cv_ridge$lambda.min
+cat("Best Ridge Lambda (min):", min_lambda_ridge, "\n")
+ose_lambda_ridge <- best_cv_ridge$lambda.1se
+cat("1se Ridge Lambda (1se):", ose_lambda_ridge, "\n")
+min_lambda_lasso <- best_cv_lasso$lambda.min
+cat("Best Lasso Lambda (min):", min_lambda_lasso, "\n")
+ose_lambda_lasso <- best_cv_lasso$lambda.1se
+cat("1se Lasso Lambda (1se):",ose_lambda_lasso, "\n")
+ose_lambda_lasso
+# CV error curve
+par(mfrow = c(1, 2), mar = c(5, 4, 8, 2))
+plot(best_cv_ridge, main = "Ridge: CV Error vs Lambda")
+plot(best_cv_lasso, main = "LASSO: CV Error vs Lambda")
+
+
+##### CV for elastic net
+alpha_grid <- seq(0, 1, by = 0.1)
+# CV function (elastic net)
+cv_elastic <- lapply(alpha_grid, function(a) {
+  set.seed(SEED)
+  cv <- cv.glmnet(x_train, y_train,
+                  alpha  = a,
+                  lambda = lambda_grid,
+                  nfolds = 10)
+  list(alpha      = a,
+       cv         = cv,
+       lambda_min = cv$lambda.min,
+       lambda_1se = cv$lambda.1se,
+       cvm_min    = min(cv$cvm))
+  })
+# CV index with best alpha
+best_cv_idx <- which.min(sapply(cv_elastic, function(x) x$cvm_min))
+best_alpha  <- cv_elastic[[best_cv_idx]]$alpha
+best_cv_elastic <- cv_elastic[[best_cv_idx]]$cv
+cat("Best Elastic Net Alpha: ", best_alpha, "\n")
+# extract best lambdas
+min_lambda_elastic <- best_cv_elastic$lambda.min
+cat("Best Elastic Net Lambda (min):", min_lambda_elastic, "\n")
+ose_lambda_elastic <- best_cv_elastic$lambda.1se
+cat("1se Elastic Net Lambda (1se):", ose_lambda_elastic, "\n")
+# CV error curve for best alpha
+par(mfrow = c(1, 1), mar = c(5, 4, 8, 2))
+plot(best_cv_elastic, main = paste0("ElasticNet CV: Error vs Lambda (alpha = ", best_alpha, ")"))
+
+```
+
+
+
+
+```{r test_3, fig.width=3.5, fig.height=3.5}
+##### summary
+summary(dat)
+
+
+##### define trainset and testset
+train_dat <- dat[dat$OBS_TYPE == "Train", ]
+test_dat  <- dat[dat$OBS_TYPE == "Test", ]
+
+
+##### define the model formulas
+# model formula
+formula_death <- DEATH_RATE ~ . - CODE - OBS_TYPE
+# all predictor names in formula
+colnames(model.matrix(formula_death, data = train_dat))
+
+
+##### summary
+# define specific hyper-parameters
+grid_of_interest <- expand.grid(alpha = 0, lambda = 0.129155)
+# run the model
+mod_gaussian_caret <- caret::train(
+  formula_death, 
+  data = train_dat, 
+  method = "glmnet",
+  family = "gaussian",
+  tuneGrid = grid_of_interest,
+  trControl = trainControl(method = "none") # "none" means not to cv
+)
+
+
+##### view the final coefficients
+coef(mod_gaussian_caret$finalModel, mod_gaussian_caret$bestTune$lambda)
+
+
+##### diagnostic plots for the GLM
+pred_test <- predict(mod_gaussian_caret, newdata = test_dat)
+res_test <- test_dat$DEATH_RATE - pred_test
+
+plot(pred_test, res_test,
+     xlab = "Fitted values",
+     ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+qqnorm(res_test)
+qqline(res_test, col = "red")
+
+plot(pred_test, sqrt(abs(res_test)),
+     xlab = "Fitted values",
+     ylab = "Sqrt(|Residuals|)",
+     main = "Scale-Location")
+
+
+```
+
+
+
+
+```{r cv_bug_code, fig.width=10, fig.height=5}
+library(recipes)
+
+df <- dat  # full data as app uses transform$data
+
+rec <- recipe(DEATH_RATE ~ ., data = df) |>
+  update_role(CODE,     new_role = "ignore") |>
+  update_role(OBS_TYPE, new_role = "ignore")
+
+prepped <- prep(rec, training = df, verbose = FALSE)
+baked   <- bake(prepped, new_data = df)
+
+cat("Baked columns:\n")
+cat(names(baked), sep = "\n")
+cat("\nN cols:", ncol(baked), "\n")
+
+# what get_xy does
+x_df <- baked[, setdiff(names(baked), "DEATH_RATE"), drop = FALSE]
+cat("\nX cols after setdiff:", ncol(x_df), "\n")
+cat(names(x_df), sep = "\n")
+```
+
+
+<div class="question">
+
+## **Question 1**
+
+</div>
+
+\vspace{2em}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="question">
+
+## **Reproducibility Statement**
+
+</div>
+
+All analyses were performed in R using the packages readxl, tidyverse, summarytools, kableExtra, corrplot, car, seriation, MASS, and glmnet. The datasets used were Residen.RData, Residential-Building-Data-Set.xlsx, parkinsons.csv, and Weather_Station_Data_v1.csv as provided in the assignment materials. A global random seed of 2026 (SEED = 2026) was set throughout to ensure reproducibility of all train–test splits and cross-validation procedures. Full session information is recorded in the sessionInfo() output below.
+
+```{r session_info}
+# sessionInfo for reproducibility
+sessionInfo()
+```
+
+<div class="question">
+
+## **Appendix: AI Use Declaration**
+
+</div>
+
+GPT assisted in:
+
+- Structuring this R Markdown document by defining global headers, global helper functions, enabling code chunks to appear more compact and improving the overall visual organization of the document;
+- Providing LaTeX syntax for mathematical expressions so that equations could be properly represented;
+- Explaining Test Error decomposition in terms of bias and variance;
+- Providing syntax explaination for glmnet();
+- Assisting with general debugging.
+- Assisting with accurate academic wording to help express clearly.
+
+<div class="question">
+
+## **References**
+
+</div>
+
+<blank>
