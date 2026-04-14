@@ -31,6 +31,7 @@ prep_recipe_ui <- function(id) {
         width = "100%",
         style = "background-color:#185FA5; color:white; border:none; margin-bottom:8px;"
       ),
+      uiOutput(ns("build_feedback_ui")),
       actionButton(
         ns("reset"),
         label = "Reset",
@@ -271,9 +272,32 @@ prep_recipe_server <- function(id, get_data, roles, split) {
                            server   = TRUE)
     }) |> bindEvent(get_data(), roles())
     
+    # ── Build feedback ────────────────────────────────────────────────────────
+    
+    output$build_feedback_ui <- renderUI({
+      rec <- built_recipe()
+      if (is.null(rec)) return(NULL)
+      if (!is.null(rec$error)) {
+        div(
+          style = "margin-top:6px; font-size:12px; color:#dc3545; background:#fff5f5;
+                   border-left:3px solid #f5c2c7; padding:6px 10px; border-radius:6px;",
+          icon("circle-xmark", style = "color:#dc3545;"),
+          HTML(" <b>Build failed.</b> Check Preview tab for details.")
+        )
+      } else {
+        div(
+          style = "margin-top:6px; font-size:12px; color:#0f6e56; background:#e1f5ee;
+                   border-left:3px solid #9fe1cb; padding:6px 10px; border-radius:6px;",
+          icon("circle-check", style = "color:#0f6e56;"),
+          HTML(" <b>Recipe built.</b> Check Preview tab to inspect steps.")
+        )
+      }
+    })
+    
     # ── Reset ─────────────────────────────────────────────────────────────────
     
     observeEvent(input$reset, {
+      built_recipe(NULL)
       updateRadioButtons(session, "impute_method", selected = "none")
       updateRadioButtons(session, "scale_method",  selected = "none")
       updateSliderInput(session,  "knn_k",          value = 5)
@@ -282,7 +306,8 @@ prep_recipe_server <- function(id, get_data, roles, split) {
       updateCheckboxInput(session, "remove_nzv",    value = FALSE)
       updateCheckboxInput(session, "remove_lincomb", value = FALSE)
       # re-populate from roles
-      df <- get_data(); req(df)
+      req(get_data(), roles())
+      df <- get_data()
       r  <- roles()
       all_vars       <- names(df)
       y_default      <- intersect(names(r)[r == "outcome"],   all_vars)
@@ -290,9 +315,9 @@ prep_recipe_server <- function(id, get_data, roles, split) {
       ignore_default <- intersect(names(r)[tolower(as.character(r)) %in%
                                              c("obs_id", "split", "sensitive",
                                                "weight", "stratifier", "ignore")], all_vars)
-      updateSelectizeInput(session, "y_var",       selected = if (length(y_default) > 0) y_default[1] else NULL, server = TRUE)
-      updateSelectizeInput(session, "pred_cols",   selected = pred_default,   server = TRUE)
-      updateSelectizeInput(session, "ignore_cols", selected = ignore_default, server = TRUE)
+      updateSelectizeInput(session, "y_var",       choices = all_vars, selected = if (length(y_default) > 0) y_default[1] else NULL, server = TRUE)
+      updateSelectizeInput(session, "pred_cols",   choices = all_vars, selected = pred_default,   server = TRUE)
+      updateSelectizeInput(session, "ignore_cols", choices = all_vars, selected = ignore_default, server = TRUE)
     })
     
     # ── Built recipe (reactive, triggered by Build button) ────────────────────
@@ -445,6 +470,25 @@ prep_recipe_server <- function(id, get_data, roles, split) {
         type_tbl <- table(sapply(baked, function(x) class(x)[1]))
         for (nm in names(type_tbl))
           cat(sprintf("  %-12s : %d\n", nm, type_tbl[[nm]]))
+        
+        # ── NZV and lincomb removals ───────────────────────────────────────
+        removals_found <- FALSE
+        for (step in prepped$steps) {
+          if (inherits(step, "step_nzv") || inherits(step, "step_lincomb")) {
+            if (!removals_found) {
+              cat("\n── Column Removals ──────────────────────\n")
+              removals_found <- TRUE
+            }
+            step_name <- class(step)[1]
+            removed   <- step$removals
+            if (length(removed) == 0) {
+              cat(sprintf("%-20s : none removed\n", step_name))
+            } else {
+              cat(sprintf("%-20s : %d removed\n", step_name, length(removed)))
+              cat("  ", paste(removed, collapse = ", "), "\n")
+            }
+          }
+        }
       }, error = function(e) {
         cat("Could not prep recipe:\n", conditionMessage(e), "\n")
       })
