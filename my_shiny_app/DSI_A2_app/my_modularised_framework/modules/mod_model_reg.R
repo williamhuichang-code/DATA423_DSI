@@ -217,7 +217,46 @@ model_reg_ui <- function(id) {
           uiOutput(ns("outlier_tbl_ui"))
         ),
         
-        # ── Tab 4: Residual Diagnostics ───────────────────────────────────
+        # ── Tab 4: Influence ──────────────────────────────────────────────
+        tabPanel(
+          title = tagList(icon("bullseye"), " Influence"),
+          style = "padding-top:16px;",
+          
+          div(
+            style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                     padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+            tags$h5(icon("sliders", style = "color:#185FA5; margin-right:6px;"),
+                    "Boxplot Controls",
+                    style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+            fluidRow(
+              column(4,
+                     tags$label("Data to show:",
+                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                     radioButtons(ns("influence_data"), label = NULL,
+                                  choices  = c("Train only"         = "train",
+                                               "Test only"          = "test",
+                                               "Both (side by side)"= "both"),
+                                  selected = "train", inline = TRUE)
+              ),
+              column(4,
+                     tags$label("IQR multiplier (k):",
+                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                     sliderInput(ns("influence_iqr_k"), label = NULL,
+                                 min = 1.0, max = 5.0, value = 2.4, step = 0.1, width = "100%")
+              ),
+              column(4,
+                     tags$label("Label outliers by:",
+                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
+                     selectInput(ns("influence_label_col"), label = NULL,
+                                 choices  = c("Row index" = "rowindex"),
+                                 selected = "rowindex", width = "100%")
+              )
+            )
+          ),
+          uiOutput(ns("influence_ui"))
+        ),
+        
+        # ── Tab 5: Residual Diagnostics ───────────────────────────────────
         tabPanel(
           title = tagList(icon("stethoscope"), " Residual Diagnostics"),
           style = "padding-top:16px;",
@@ -735,6 +774,270 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
     })
     
     outputOptions(output, "outlier_tbl_ui", suspendWhenHidden = FALSE)
+    
+    # ── Populate influence label col selector ─────────────────────────────────
+    observe({
+      df   <- get_data(); req(df)
+      cols <- names(df)
+      updateSelectInput(session, "influence_label_col",
+                        choices  = c("Row index" = "rowindex", setNames(cols, cols)),
+                        selected = "rowindex")
+    })
+    
+    # ── Influence UI ──────────────────────────────────────────────────────────
+    output$influence_ui <- renderUI({
+      res <- model_result()
+      if (is.null(res)) return(div(
+        style = "text-align:center; color:#6c757d; padding:60px 0;",
+        icon("bullseye", style = "font-size:32px; color:#adb5bd;"), br(),
+        tags$span("Run the model first.", style = "font-size:15px;")))
+      if (!is.null(res$error)) return(NULL)
+      
+      tagList(
+        div(
+          style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                   padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+          tags$h5(icon("bullseye", style = "color:#185FA5; margin-right:6px;"),
+                  "Residual Boxplot",
+                  style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+          plotOutput(ns("influence_plot"), height = "350px")
+        ),
+        div(
+          style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                   padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+          tags$h5(icon("triangle-exclamation", style = "color:#C41E3A; margin-right:6px;"),
+                  "Influential Observations",
+                  style = "font-weight:600; color:#343a40; margin-bottom:4px;"),
+          div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
+              "Rows whose residuals fall outside the IQR whiskers."),
+          DT::dataTableOutput(ns("influence_tbl"))
+        ),
+        
+        div(
+          style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                   padding:16px; margin-top:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+          tags$h5(icon("lightbulb", style = "color:#185FA5; margin-right:6px;"),
+                  "Interpretation Hints",
+                  style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+          div(
+            style = "font-size:12px; color:#343a40; line-height:1.8;",
+            tags$b("1. Median not on the zero line:"), br(),
+            HTML("&nbsp;&nbsp;• <b>Median right of 0</b> — model under-predicts.
+                  Actual values are consistently higher than predicted.<br>
+                  &nbsp;&nbsp;• <b>Median left of 0</b> — model over-predicts.
+                  Actual values are consistently lower than predicted.<br>
+                  &nbsp;&nbsp;• If only the test median is off but train is centred —
+                  suspect data shift or overfitting.<br>
+                  &nbsp;&nbsp;• If both are off in the same direction —
+                  a structural issue: missing predictor, wrong family, or response needs transformation."),
+            hr(),
+            tags$b("2. Outliers clustering on one side:"), br(),
+            HTML("&nbsp;&nbsp;• <b>More positive outliers</b> — model fails to capture
+                  high-value cases. The response may be right-skewed and Gaussian GLM
+                  pulls predictions toward the mean, missing the tail.<br>
+                  &nbsp;&nbsp;• Check flagged rows — do they share common characteristics
+                  (e.g. specific GOVERN_TYPE, high POPULATION)?<br>
+                  &nbsp;&nbsp;• Cross-reference with outlier detection methods (Mahalanobis,
+                  Cook's, LOF). If the same observations appear across multiple methods,
+                  they are genuinely unusual."),
+            hr(),
+            tags$b("3. More outliers than expected at this IQR multiplier:"), br(),
+            HTML("&nbsp;&nbsp;• At k=2.4, only ~0.1% of observations are expected to be
+                  flagged under normality (~0–1 for n=357).<br>
+                  &nbsp;&nbsp;• <b>Many flagged points</b> suggest heavy-tailed residuals,
+                  model misspecification, or heteroscedasticity.<br>
+                  &nbsp;&nbsp;• Check the <b>QQ plot</b> and <b>Scale-Location</b> in the
+                  Residual Diagnostics tab.<br>
+                  &nbsp;&nbsp;• Try increasing k to 3.0–3.5 — if the count drops dramatically,
+                  the threshold is too strict for this data rather than genuine influential points.")
+          )
+        )
+      )
+    })
+    
+    output$influence_plot <- renderPlot({
+      res <- model_result(); req(res, is.null(res$error))
+      m   <- res$metrics;   req(m)
+      
+      df  <- get_data()
+      sv  <- input$split_var
+      tl  <- input$train_level
+      ts  <- input$test_level
+      k   <- input$influence_iqr_k
+      
+      # ── build train residuals ──────────────────────────────────────────────
+      splits_ok <- !is.null(sv) && sv != "(none)" &&
+        !is.null(tl) && tl != "(none)" &&
+        !is.null(ts) && ts != "(none)"
+      train_df <- if (splits_ok) df[as.character(df[[sv]]) == tl, , drop=FALSE] else df
+      test_df  <- if (splits_ok) df[as.character(df[[sv]]) == ts, , drop=FALSE] else NULL
+      
+      # get label values for train
+      get_labels <- function(df_sub, n) {
+        lc <- input$influence_label_col
+        if (lc == "rowindex") as.character(seq_len(n))
+        else if (lc %in% names(df_sub) && nrow(df_sub) == n)
+          as.character(df_sub[[lc]])
+        else as.character(seq_len(n))
+      }
+      
+      train_resids <- tryCatch({
+        rec    <- get_recipe(); req(rec)
+        prepped <- recipes::prep(rec, training = train_df, verbose = FALSE)
+        baked   <- recipes::bake(prepped, new_data = train_df)
+        y_col   <- res$y_col
+        y_train <- baked[[y_col]]
+        preds_train <- predict(res$model, newdata = train_df)
+        y_train - preds_train
+      }, error = function(e) NULL)
+      
+      if (is.null(train_resids)) {
+        ggplot2::ggplot() +
+          ggplot2::annotate("text", x=0.5, y=0.5,
+                            label="Could not compute train residuals.",
+                            colour="#C41E3A", size=5) + ggplot2::theme_void()
+        return()
+      }
+      
+      # ── assemble plot data ─────────────────────────────────────────────────
+      train_row <- data.frame(
+        residual = train_resids,
+        group    = "Train",
+        label_id = get_labels(train_df, length(train_resids)),
+        stringsAsFactors = FALSE
+      )
+      
+      test_row <- if (!is.null(m$resids) && !is.null(test_df)) {
+        data.frame(
+          residual = m$resids,
+          group    = "Test",
+          label_id = get_labels(test_df, length(m$resids)),
+          stringsAsFactors = FALSE
+        )
+      } else NULL
+      
+      plot_df <- switch(input$influence_data,
+                        "train" = train_row,
+                        "test"  = if (!is.null(test_row)) test_row else train_row,
+                        "both"  = if (!is.null(test_row)) rbind(train_row, test_row) else train_row
+      )
+      
+      # ── flag outliers per group ────────────────────────────────────────────
+      plot_df$is_out <- ave(plot_df$residual, plot_df$group, FUN = function(x) {
+        lims <- boxplot.stats(x, coef = k)$stats
+        as.numeric(x < lims[1] | x > lims[5])
+      }) == 1
+      plot_df$label <- ifelse(plot_df$is_out, plot_df$label_id, NA_character_)
+      
+      group_colors <- c("Train" = "#185FA5", "Test" = "#C41E3A")
+      
+      ggplot2::ggplot(plot_df, ggplot2::aes(x = residual, y = group)) +
+        ggplot2::geom_boxplot(coef = k, outlier.colour = "#C41E3A",
+                              fill = "#e8f0fe", width = 0.4) +
+        ggrepel::geom_text_repel(ggplot2::aes(label = label),
+                                 max.overlaps = 30, na.rm = TRUE,
+                                 size = 3.2, colour = "#C41E3A") +
+        ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "#6c757d") +
+        ggplot2::labs(
+          title = paste0("Residual Boxplot | IQR k = ", k, " | ",
+                         switch(input$influence_data,
+                                "train" = "Train only",
+                                "test"  = "Test only",
+                                "both"  = "Train + Test")),
+          x = "Residual", y = NULL) +
+        ggplot2::theme_minimal(base_size = 13) +
+        ggplot2::theme(
+          plot.title         = ggplot2::element_text(size = 12, face = "bold", hjust = 0.5),
+          axis.text.y        = ggplot2::element_text(face = "bold", size = 12),
+          panel.grid.major.y = ggplot2::element_blank())
+    })
+    
+    output$influence_tbl <- DT::renderDataTable({
+      res <- model_result(); req(res, is.null(res$error))
+      m   <- res$metrics;   req(m)
+      
+      df  <- get_data()
+      sv  <- input$split_var
+      tl  <- input$train_level
+      ts  <- input$test_level
+      k   <- input$influence_iqr_k
+      
+      splits_ok <- !is.null(sv) && sv != "(none)" &&
+        !is.null(tl) && tl != "(none)" &&
+        !is.null(ts) && ts != "(none)"
+      train_df <- if (splits_ok) df[as.character(df[[sv]]) == tl, , drop=FALSE] else df
+      test_df  <- if (splits_ok) df[as.character(df[[sv]]) == ts, , drop=FALSE] else NULL
+      raw_df   <- tryCatch(get_raw(), error = function(e) NULL)
+      
+      # train residuals
+      train_resids <- tryCatch({
+        rec     <- get_recipe(); req(rec)
+        prepped <- recipes::prep(rec, training = train_df, verbose = FALSE)
+        baked   <- recipes::bake(prepped, new_data = train_df)
+        y_train <- baked[[res$y_col]]
+        preds_train <- predict(res$model, newdata = train_df)
+        y_train - preds_train
+      }, error = function(e) NULL)
+      
+      if (is.null(train_resids)) return(data.frame(Message = "Could not compute train residuals."))
+      
+      # flag outliers
+      flag_outliers <- function(resids, k) {
+        lims <- boxplot.stats(resids, coef = k)$stats
+        resids < lims[1] | resids > lims[5]
+      }
+      
+      train_out <- flag_outliers(train_resids, k)
+      rows_list <- list()
+      
+      if (any(train_out) && input$influence_data %in% c("train","both")) {
+        raw_train <- if (!is.null(raw_df)) {
+          idx <- suppressWarnings(as.integer(rownames(train_df)))
+          if (!any(is.na(idx)) && max(idx) <= nrow(raw_df)) raw_df[idx,,drop=FALSE]
+          else train_df
+        } else train_df
+        tbl_train <- raw_train[train_out,,drop=FALSE]
+        tbl_train <- cbind(
+          data.frame(Set="Train",
+                     Residual=round(train_resids[train_out], 4)),
+          tbl_train)
+        rows_list[["train"]] <- tbl_train
+      }
+      
+      if (input$influence_data %in% c("both","test") && !is.null(m$resids)) {
+        test_out <- flag_outliers(m$resids, k)
+        if (any(test_out)) {
+          raw_test <- if (!is.null(raw_df) && !is.null(test_df)) {
+            idx <- suppressWarnings(as.integer(rownames(test_df)))
+            if (!any(is.na(idx)) && max(idx) <= nrow(raw_df)) raw_df[idx,,drop=FALSE]
+            else test_df
+          } else test_df
+          if (!is.null(raw_test)) {
+            tbl_test <- raw_test[test_out,,drop=FALSE]
+            tbl_test <- cbind(
+              data.frame(Set="Test",
+                         Residual=round(m$resids[test_out], 4)),
+              tbl_test)
+            rows_list[["test"]] <- tbl_test
+          }
+        }
+      }
+      
+      if (length(rows_list) == 0) return(data.frame(Message = "No influential observations flagged."))
+      
+      out_df <- do.call(rbind, rows_list)
+      out_df <- out_df[order(-abs(out_df$Residual)), ]
+      
+      DT::datatable(out_df,
+                    options  = list(pageLength = 10, dom = "tip", scrollX = TRUE),
+                    rownames = FALSE) |>
+        DT::formatStyle("Residual",
+                        color      = DT::styleInterval(0, c("#C41E3A", "#198754")),
+                        fontWeight = "bold") |>
+        DT::formatStyle("Set",
+                        color      = DT::styleEqual(c("Train","Test"), c("#185FA5","#C41E3A")),
+                        fontWeight = "bold")
+    })
     
     # ── Residual Diagnostics UI ───────────────────────────────────────────────
     
