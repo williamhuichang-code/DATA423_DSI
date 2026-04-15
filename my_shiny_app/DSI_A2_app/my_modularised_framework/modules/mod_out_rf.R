@@ -22,10 +22,13 @@ out_rf_ui <- function(id) {
       hr(),
       selectInput(ns("id_col"),       "ID / label column:",     choices=NULL),
       selectInput(ns("response_col"), "Response variable (y):", choices=NULL),
+      helpText("⚠ Do not select ID, split, or non-numeric columns as response or predictors — 
+               the plot will not render."),
       hr(),
       selectizeInput(ns("pred_cols"), "Predictor columns:",
                      choices=NULL, multiple=TRUE,
                      options=list(placeholder="Defaults to Predictor roles")),
+      helpText("⚠ Do not select ID, split columns."),
       hr(),
       numericInput(ns("iqr_k"), "IQR multiplier (k):",
                    value=2.0, min=0.5, step=0.5),
