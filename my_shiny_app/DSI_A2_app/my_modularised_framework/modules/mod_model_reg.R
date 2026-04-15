@@ -200,7 +200,7 @@ model_reg_ui <- function(id) {
                        tags$label("IQR coef:",
                                   style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
                        sliderInput(ns("outlier_coef"), label = NULL,
-                                   min = 1.0, max = 3.0, value = 2.2, step = 0.1, width = "100%")
+                                   min = 1.0, max = 3.0, value = 2.4, step = 0.1, width = "100%")
                      ),
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'pct'", ns("outlier_method")),
@@ -1047,13 +1047,27 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
                                    icon("stethoscope", style = "font-size:32px; color:#adb5bd;"), br(),
                                    tags$span("Run the model first.", style = "font-size:15px;")))
       if (!is.null(res$error)) return(NULL)
-      div(
-        style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
-                 padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
-        tags$h5(icon("stethoscope", style = "color:#185FA5; margin-right:6px;"),
-                "Residual Diagnostics",
-                style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
-        plotOutput(ns("residual_plot"), height = "600px")
+      tagList(
+        div(
+          style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                   padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+          tags$h5(icon("stethoscope", style = "color:#185FA5; margin-right:6px;"),
+                  "Residual Diagnostics",
+                  style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+          plotOutput(ns("residual_plot"), height = "600px")
+        ),
+        div(
+          style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                   padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+          tags$h5(icon("chart-bar", style = "color:#185FA5; margin-right:6px;"),
+                  "Chi-Squared Goodness-of-Fit Test on Residuals",
+                  style = "font-weight:600; color:#343a40; margin-bottom:4px;"),
+          div(style = "font-size:12px; color:#6c757d; margin-bottom:10px;",
+              "Tests whether residuals follow a normal distribution by comparing observed
+               bin frequencies against expected frequencies under normality.
+               Complements the QQ plot with a formal p-value."),
+          verbatimTextOutput(ns("chisq_test"))
+        )
       )
     })
     
@@ -1082,6 +1096,59 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
       hist(m$resids, breaks = 20, col = "#e8f0fe", border = "white",
            main = "Residual Distribution", xlab = "Residuals")
       abline(v = 0, col = "#C41E3A", lty = 2)
+    })
+    
+    output$chisq_test <- renderPrint({
+      res <- model_result()
+      req(res, is.null(res$error), !is.null(res$metrics))
+      m      <- res$metrics
+      resids <- m$resids
+      n      <- length(resids)
+      
+      # bin residuals into k bins based on normal quantiles
+      k       <- max(5, min(20, round(sqrt(n))))
+      breaks  <- qnorm(seq(0, 1, length.out = k + 1),
+                       mean = mean(resids), sd = sd(resids))
+      breaks[1]     <- -Inf
+      breaks[k + 1] <-  Inf
+      
+      observed <- as.integer(table(cut(resids, breaks = breaks, include.lowest = TRUE)))
+      expected <- rep(n / k, k)
+      
+      tryCatch({
+        test <- chisq.test(observed, p = rep(1/k, k))
+        cat(sprintf("Chi-Squared Goodness-of-Fit | Normality of Residuals
+"))
+        cat(sprintf("Bins (k)    : %d
+", k))
+        cat(sprintf("n           : %d
+", n))
+        cat(sprintf("Chi-sq      : %.4f
+", test$statistic))
+        cat(sprintf("df          : %d
+", test$parameter))
+        cat(sprintf("p-value     : %.4f
+", test$p.value))
+        cat("──────────────────────────────
+")
+        if (test$p.value < 0.05) {
+          cat("Conclusion  : Reject H0 — residuals are NOT normally distributed (p < 0.05).
+")
+          cat("              Check the QQ plot for where normality breaks down.
+")
+          cat("              Consider a different response family or transform.
+")
+        } else {
+          cat("Conclusion  : Fail to reject H0 — residuals are consistent with normality (p ≥ 0.05).
+")
+          cat("              The Gaussian family assumption appears reasonable.
+")
+        }
+      }, error = function(e) {
+        cat("Could not compute chi-squared test:
+", conditionMessage(e), "
+")
+      })
     })
     
     # ── Comparison UI ─────────────────────────────────────────────────────────
