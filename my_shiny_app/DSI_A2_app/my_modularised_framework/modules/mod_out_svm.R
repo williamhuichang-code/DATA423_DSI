@@ -12,32 +12,85 @@ out_svm_ui <- function(id) {
              min-height:100vh; padding-left:20px;",
       div(
         style="font-size:13px; color:#343a40; background:white; padding:10px;
-               border-left:4px solid #0d6efd; border-radius:6px; margin-bottom:12px;",
+               border-left:4px solid #0d6efd; border-radius:6px; margin-bottom:12px;
+               box-shadow:0 1px 2px rgba(0,0,0,0.05);",
         icon("info-circle", style="color:#0d6efd;"),
         HTML("&nbsp; <b>One-Class SVM</b><br><br>
-              Novelty/outlier detection using a one-class SVM boundary.
-              Observations outside the learned boundary are flagged.<br><br>
-              <b>nu</b>: upper bound on fraction of outliers.<br>
-              Uses <code>e1071::svm()</code>.")
+              Learns a boundary around the majority of training data.
+              Observations outside the boundary are flagged as outliers.<br><br>
+              <b style='color:#856404;'>Assumptions to check:</b><br>
+              &nbsp;• Numeric variables only<br>
+              &nbsp;• No missing values<br>
+              &nbsp;• <b>Sensitive to scale</b> — the SVM kernel computes
+              distances or dot products between observations. Variables on
+              larger scales dominate the boundary shape. Always scale unless
+              variables are already on comparable units.<br>
+              &nbsp;• <b>nu</b> is an upper bound on the fraction of outliers
+              and a lower bound on the fraction of support vectors. Setting it
+              too low may miss real outliers; too high flags too many.<br>
+              &nbsp;• <b>Kernel choice</b> affects the boundary shape —
+              linear is fastest and most interpretable; radial handles
+              non-linear boundaries but is harder to tune.<br>
+              &nbsp;• Results can be unstable — small changes in nu or kernel
+              can change which points are flagged significantly. Use alongside
+              other methods and check the Summary tab for agreement.")
       ),
       hr(),
+      
+      # ── Column selection ───────────────────────────────────────────────────
       selectInput(ns("id_col"), "ID / label column:", choices=NULL),
       hr(),
-      selectizeInput(ns("pred_cols"), "Predictor columns (numeric only):",
+      selectizeInput(ns("pred_cols"), "Predictor columns:",
                      choices=NULL, multiple=TRUE,
                      options=list(placeholder="Defaults to Predictor roles")),
+      helpText("⚠ Drop response (y), ID, and split columns — predictors only."),
       hr(),
+      
+      # ── SVM parameters ────────────────────────────────────────────────────
       sliderInput(ns("nu"), "nu (outlier fraction):",
                   min=0.001, max=0.5, value=0.05, step=0.005, width="100%"),
-      helpText("~nu × n observations will be flagged."),
+      helpText("~nu × n observations will be flagged. Start at 0.05 (5%) and
+               adjust based on domain knowledge of expected outlier rate."),
       hr(),
       selectInput(ns("kernel"), "Kernel:",
                   choices=c("linear","polynomial","radial","sigmoid"),
-                  selected="linear"),
+                  selected="radial"),
+      helpText("Radial (RBF) handles non-linear boundaries and is the most
+               common choice. Linear is faster but assumes a convex boundary."),
       hr(),
-      checkboxInput(ns("scale"), "Scale inside SVM", value=FALSE),
-      helpText("Set TRUE if predictors are not already scaled.")
+      
+      # ── Preprocessing options ──────────────────────────────────────────────
+      tags$label("Preprocessing (plot only — does not affect pipeline data):",
+                 style="font-weight:600; font-size:13px; color:#343a40;"),
+      hr(),
+      
+      checkboxInput(ns("encode_nominal"),
+                    "Encode nominal predictors as dummies",
+                    value=FALSE),
+      helpText("Enable if you selected categorical predictor columns.
+               Shadow columns (_shadow) are already binary — no encoding needed."),
+      hr(),
+      
+      checkboxInput(ns("ignore_na"),
+                    "Ignore rows with missing values (complete cases only)",
+                    value=TRUE),
+      helpText("One-class SVM does not tolerate NAs. Recommended to keep checked."),
+      hr(),
+      
+      checkboxInput(ns("remove_nzv_lincomb"),
+                    "Remove zero-variance and linearly dependent columns",
+                    value=TRUE),
+      helpText("Near-zero variance columns add noise to the boundary without
+               contributing useful information."),
+      hr(),
+      
+      checkboxInput(ns("scale"), "Scale predictors (divide by SD)", value=TRUE),
+      helpText("One-class SVM is highly sensitive to scale. Strongly recommended
+               to keep checked unless variables are already on comparable units.
+               If your data is already centred and scaled from the pipeline,
+               you may uncheck this to avoid double-scaling.")
     ),
+    
     mainPanel(
       width=9,
       verbatimTextOutput(ns("summary")),
@@ -47,6 +100,8 @@ out_svm_ui <- function(id) {
     )
   )
 }
+
+# ── SERVER ───────────────────────────────────────────────────────────────────
 
 out_svm_server <- function(id, get_data, get_raw, roles) {
   moduleServer(id, function(input, output, session) {
@@ -67,38 +122,82 @@ out_svm_server <- function(id, get_data, get_raw, roles) {
     
     result <- reactive({
       req(input$id_col, input$pred_cols)
-      df       <- get_data()
-      num_cols <- input$pred_cols[sapply(input$pred_cols, function(v)
-        v %in% names(df) && is.numeric(df[[v]]))]
-      if (length(num_cols) < 1) return(NULL)
+      df   <- get_data()
+      cols <- intersect(input$pred_cols, names(df))
+      if (length(cols) < 1) return(NULL)
       
-      df_sub <- df[, num_cols, drop=FALSE]
-      mask   <- complete.cases(df_sub)
-      orig   <- which(mask)
-      df_comp <- df_sub[mask,,drop=FALSE]
-      if (nrow(df_comp) < 5) return(NULL)
+      df_sub <- df[, cols, drop=FALSE]
       
+      # ── 1. handle NAs ─────────────────────────────────────────────────────
+      if (isTRUE(input$ignore_na)) {
+        mask   <- complete.cases(df_sub)
+        orig   <- which(mask)
+        df_sub <- df_sub[mask, , drop=FALSE]
+      } else {
+        orig <- seq_len(nrow(df_sub))
+      }
+      if (nrow(df_sub) < 5) return(NULL)
+      
+      # ── 2. encode nominals ────────────────────────────────────────────────
+      if (isTRUE(input$encode_nominal)) {
+        fac_cols <- names(df_sub)[sapply(df_sub, function(x)
+          is.factor(x) || is.character(x))]
+        if (length(fac_cols) > 0) {
+          tryCatch({
+            library(recipes)
+            df_sub <- recipe(~., data=df_sub) |>
+              step_dummy(all_of(fac_cols), one_hot=FALSE) |>
+              prep(training=df_sub) |>
+              bake(new_data=NULL)
+          }, error=function(e) NULL)
+        }
+      }
+      
+      # keep only numeric
+      df_sub <- df_sub[, sapply(df_sub, is.numeric), drop=FALSE]
+      if (is.null(df_sub) || ncol(df_sub) < 1) return(NULL)
+      
+      # ── 3. remove NZV and lincomb ─────────────────────────────────────────
+      if (isTRUE(input$remove_nzv_lincomb)) {
+        tryCatch({
+          library(recipes)
+          df_sub <- recipe(~., data=df_sub) |>
+            step_nzv(all_predictors()) |>
+            step_lincomb(all_numeric_predictors()) |>
+            prep(training=df_sub) |>
+            bake(new_data=NULL)
+        }, error=function(e) NULL)
+      }
+      if (is.null(df_sub) || ncol(df_sub) < 1) return(NULL)
+      
+      # ── 4. scale ──────────────────────────────────────────────────────────
+      if (isTRUE(input$scale)) {
+        tryCatch({
+          library(recipes)
+          df_sub <- recipe(~., data=df_sub) |>
+            step_normalize(all_numeric_predictors()) |>
+            prep(training=df_sub) |>
+            bake(new_data=NULL)
+        }, error=function(e) NULL)
+      }
+      if (is.null(df_sub) || ncol(df_sub) < 1) return(NULL)
+      
+      # ── 5. fit one-class SVM ──────────────────────────────────────────────
       tryCatch({
-        library(recipes)
-        baked <- recipe(~., data=df_comp) |>
-          step_nzv(all_predictors()) |>
-          step_lincomb(all_numeric_predictors()) |>
-          prep(training=df_comp) |>
-          bake(new_data=NULL)
-        if (ncol(baked) < 1) return(NULL)
-        mat   <- as.matrix(baked)
+        mat   <- as.matrix(df_sub)
         model <- e1071::svm(mat, y=NULL, type="one-classification",
-                            nu=input$nu, scale=isTRUE(input$scale),
+                            nu=input$nu, scale=FALSE,  # scaling handled above
                             kernel=input$kernel)
         is_out <- !predict(model, mat)
-        list(is_out=is_out, orig_rows=orig, n_total=nrow(mat))
+        list(is_out=is_out, orig_rows=orig, n_total=nrow(mat), n_cols=ncol(mat))
       }, error=function(e) NULL)
     })
     
     output$summary <- renderPrint({
       res <- result()
       if (is.null(res)) {
-        cat("Could not fit SVM.\nCheck selections and ensure e1071 is installed.\n")
+        cat("Could not fit one-class SVM.\n")
+        cat("Check: ≥ 1 numeric predictor, no remaining NAs, e1071 installed.\n")
         return(invisible(NULL))
       }
       df        <- get_data()
@@ -107,9 +206,11 @@ out_svm_server <- function(id, get_data, get_raw, roles) {
       n_out     <- sum(is_out)
       out_ids   <- as.character(df[[input$id_col]])[orig_rows[is_out]]
       
-      cat(sprintf("One-Class SVM | kernel=%s | nu=%.4f | scale=%s\n",
-                  input$kernel, input$nu, if(isTRUE(input$scale)) "TRUE" else "FALSE"))
+      cat(sprintf("One-Class SVM | kernel=%s | nu=%.4f\n",
+                  input$kernel, input$nu))
+      cat(sprintf("Scale         : %s\n", if(isTRUE(input$scale)) "TRUE (normalised)" else "FALSE"))
       cat(sprintf("Complete rows : %d\n", res$n_total))
+      cat(sprintf("Predictors    : %d\n", res$n_cols))
       cat(sprintf("Outliers      : %d  (%.1f%%)\n", n_out, 100*n_out/res$n_total))
       cat("──────────────────────────────\n")
       if (n_out==0) cat("No outliers flagged.\n")
@@ -122,7 +223,8 @@ out_svm_server <- function(id, get_data, get_raw, roles) {
       out_idx <- res$orig_rows[res$is_out]
       if (length(out_idx)==0) return(data.frame(Message="No outliers flagged."))
       raw_df[out_idx,,drop=FALSE] |>
-        DT::datatable(options=list(pageLength=10, dom="tip", scrollX=TRUE), rownames=FALSE)
+        DT::datatable(options=list(pageLength=10, dom="tip", scrollX=TRUE),
+                      rownames=FALSE)
     })
     
     return(list(
