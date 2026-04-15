@@ -31,8 +31,9 @@ out_cooks_ui <- function(id) {
                      options=list(placeholder="Defaults to Predictor roles")),
       hr(),
       sliderInput(ns("threshold_mult"), "Threshold multiplier (k × mean D_c):",
-                  min=1, max=10, value=4, step=0.5, width="100%"),
-      helpText("Standard rule: 4 × mean. Higher = fewer outliers flagged.")
+                  min=1, max=10, value=4, step=0.25, width="100%"),
+      helpText("Standard rule: 4 × mean. Higher = fewer outliers flagged.
+               If low, an arbitrary cut-off of 0.25 or 0.5.")
     ),
     mainPanel(
       width = 9,
