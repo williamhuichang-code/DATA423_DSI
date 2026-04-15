@@ -522,7 +522,22 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
           icon("circle-xmark", style = "color:#dc3545; font-size:18px;"),
           tags$span(" Model error", style = "font-weight:600; color:#dc3545;"),
           br(), br(),
-          tags$code(res$error, style = "font-size:12px;")
+          tags$code(res$error, style = "font-size:12px;"),
+          br(), br(),
+          div(
+            style = "font-size:12px; color:#856404; background:#fff3cd;
+                     border-left:3px solid #ffc107; padding:8px 10px;
+                     border-radius:4px;",
+            icon("triangle-exclamation", style = "color:#ffc107;"),
+            HTML(" <b>Hint:</b> If the error mentions <code>NULL</code>, missing columns,
+                  or unexpected data types, check that you have set your
+                  <b>Data Roles</b> correctly under <b>Config &gt; Data Roles</b>:<br>
+                  &nbsp;• One column must be assigned <b>Outcome</b> (response Y)<br>
+                  &nbsp;• At least one column must be assigned <b>Predictor</b><br>
+                  &nbsp;• The <b>Train-Test Split</b> column must contain
+                  exactly <code>Train</code> and <code>Test</code> values<br>
+                  &nbsp;• The <b>Observation ID</b> column should not be a predictor")
+          )
         )
       } else {
         div(
