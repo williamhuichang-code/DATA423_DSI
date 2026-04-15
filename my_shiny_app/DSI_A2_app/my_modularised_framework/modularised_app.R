@@ -107,6 +107,9 @@ ui <- dashboardPage(
       ),
       
       menuItem("Out Strategy", tabName = "out", icon = icon("triangle-exclamation"),
+               menuSubItem("Histogram",      tabName = "out_hist"),
+               menuSubItem("Boxplot",        tabName = "out_boxplot"),
+               menuSubItem("Bagplot",        tabName = "out_bagplot"),
                menuSubItem("Mahalanobis",    tabName = "out_mah"),
                menuSubItem("Cook's Distance",tabName = "out_cooks"),
                menuSubItem("LOF",            tabName = "out_lof"),
@@ -155,6 +158,9 @@ ui <- dashboardPage(
       tabItem(tabName = "miss_transform",  miss_transform_ui("miss_transform")),
       
       # Out Strategy
+      tabItem(tabName = "out_hist",    out_histogram_ui("out_hist")),
+      tabItem(tabName = "out_boxplot", out_boxplot_ui("out_boxplot")),
+      tabItem(tabName = "out_bagplot", out_bagplot_ui("out_bagplot")),
       tabItem(tabName = "out_mah",     out_mahalanobis_ui("out_mah")),
       tabItem(tabName = "out_cooks",   out_cooks_ui("out_cooks")),
       tabItem(tabName = "out_lof",     out_lof_ui("out_lof")),
@@ -237,6 +243,9 @@ server <- function(input, output, session) {
   vis_miss_server("vis_miss",         get_data, roles)
   rising_value_server("rising_value", get_data)
   
+  out_histogram_server("out_hist",                   transform$data, roles)
+  out_boxplot_server("out_boxplot",                  transform$data, get_raw, roles)
+  out_bagplot_server("out_bagplot",                  transform$data, get_raw, roles)
   out_mah     <- out_mahalanobis_server("out_mah",   transform$data, get_raw, roles)
   out_cooks   <- out_cooks_server("out_cooks",       transform$data, get_raw, roles)
   out_lof     <- out_lof_server("out_lof",           transform$data, get_raw, roles)
