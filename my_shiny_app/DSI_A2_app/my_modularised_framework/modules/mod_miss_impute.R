@@ -100,7 +100,7 @@ miss_impute_ui <- function(id) {
         condition = sprintf("input['%s'] == 'bag'", ns("algorithm")),
         tags$label("Bag parameters:", style = "font-weight:600; font-size:13px; color:#343a40;"),
         sliderInput(ns("bag_trees"), "Number of trees:",
-                    min = 5, max = 50, value = 25, step = 5, width = "100%"),
+                    min = 2, max = 50, value = 4, step = 1, width = "100%"),
       ),
       
       # ── MMM parameters ────────────────────────────────────────────────────
@@ -547,8 +547,8 @@ miss_impute_server <- function(id, get_data, roles) {
     observeEvent(input$reset, {
       impute_result(NULL)
       updateRadioButtons(session, "algorithm",    selected = "knn")
-      updateSliderInput(session, "knn_neighbors",  value = 5)
-      updateSliderInput(session, "bag_trees",      value = 25)
+      updateSliderInput(session, "knn_neighbors",  value = 2)
+      updateSliderInput(session, "bag_trees",      value = 4)
       r                 <- roles()
       vars              <- names(get_data())
       ignore_role_names <- c("sensitive", "weight", "stratifier", "ignore")
