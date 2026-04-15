@@ -134,7 +134,7 @@ prep_recipe_ui <- function(id) {
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'knn'", ns("impute_method")),
                        sliderInput(ns("knn_k"), "Neighbours (k):",
-                                   min = 1, max = 25, value = 5, step = 1, width = "100%")
+                                   min = 1, max = 25, value = 2, step = 1, width = "100%")
                      ),
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'bag'", ns("impute_method")),

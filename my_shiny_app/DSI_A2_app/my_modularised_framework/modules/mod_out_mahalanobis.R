@@ -7,6 +7,7 @@
 out_mahalanobis_ui <- function(id) {
   ns <- NS(id)
   sidebarLayout(
+    position = "right",
     sidebarPanel(
       width = 3,
       style = "background-color: #e8f0fe; border-left: 2px solid #a8c0fd;
