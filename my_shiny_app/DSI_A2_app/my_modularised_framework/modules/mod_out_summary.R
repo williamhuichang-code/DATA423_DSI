@@ -107,11 +107,24 @@ out_summary_server <- function(id, get_data, get_raw, roles,
                             colour="#495057", size=5) + ggplot2::theme_void()
         return()
       }
-      counts   <- table(df_long$id)
-      keep_ids <- names(counts[counts >= input$min_count])
-      plot_df  <- df_long[df_long$id %in% keep_ids, ]
       
-      if (nrow(plot_df)==0) {
+      # ── build wide format: one col per method, 0/1 values ─────────────────
+      all_methods <- c("mahalanobis","cooks","lof","svm","rf","iforest")
+      active      <- intersect(input$active_methods, all_methods)
+      all_ids     <- unique(df_long$id)
+      
+      wide_df <- data.frame(id = all_ids, stringsAsFactors = FALSE)
+      for (m in active) {
+        flagged_ids  <- df_long$id[df_long$Type == m]
+        wide_df[[m]] <- as.integer(wide_df$id %in% flagged_ids)
+      }
+      
+      # filter by min_count
+      method_cols   <- setdiff(names(wide_df), "id")
+      wide_df$total <- rowSums(wide_df[, method_cols, drop=FALSE])
+      wide_df       <- wide_df[wide_df$total >= input$min_count, ]
+      
+      if (nrow(wide_df)==0) {
         ggplot2::ggplot() +
           ggplot2::annotate("text", x=0.5, y=0.5,
                             label=paste0("No observations flagged by ≥ ",
@@ -120,20 +133,39 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         return()
       }
       
-      id_order <- names(sort(table(plot_df$id), decreasing=TRUE))
-      plot_df$id <- factor(plot_df$id, levels=id_order)
+      # order x-axis by total flags descending
+      wide_df$id <- factor(wide_df$id,
+                           levels = wide_df$id[order(-wide_df$total)])
       
-      ggplot2::ggplot(plot_df, ggplot2::aes(x=id, fill=Type)) +
-        ggplot2::geom_bar(position="stack") +
+      # pivot longer for geom_col
+      plot_df <- tidyr::pivot_longer(
+        wide_df[, c("id", method_cols)],
+        cols      = tidyr::all_of(method_cols),
+        names_to  = "Type",
+        values_to = "Count"
+      )
+      plot_df <- plot_df[plot_df$Count > 0, ]
+      
+      ggplot2::ggplot(plot_df,
+                      ggplot2::aes(x=id, y=Count, fill=Type)) +
+        ggplot2::geom_col() +
         ggplot2::scale_fill_manual(values=method_colors) +
         ggplot2::labs(
-          title="Observation Novelty — Cumulative Outlier Flags",
-          x="ID", y="Flag count", fill="Method") +
-        ggplot2::theme_minimal(base_size=13) +
+          title = "Observation Novelty (cumulative outlier scores)",
+          x     = "ID",
+          y     = "Count",
+          fill  = "Method") +
+        # ggplot2::theme_minimal(base_size=13) +
         ggplot2::theme(
-          axis.text.x=ggplot2::element_text(angle=45, hjust=1, size=11),
-          plot.title=ggplot2::element_text(size=15, face="bold", hjust=0.5),
-          legend.title=ggplot2::element_text(face="bold"))
+          plot.title   = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title.x = ggplot2::element_text(size = 16, face = "bold"),
+          axis.title.y = ggplot2::element_text(size = 16, face = "bold"),
+          axis.text.x  = ggplot2::element_text(size = 12, angle = 45, hjust = 1),
+          axis.text.y  = ggplot2::element_text(size = 12),
+          legend.title = ggplot2::element_text(size = 14, face = "bold"),
+          legend.text  = ggplot2::element_text(size = 12),
+          legend.key.size = grid::unit(2, "lines")
+        )
     })
     
     output$table <- DT::renderDataTable({
