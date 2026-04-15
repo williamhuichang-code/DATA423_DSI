@@ -158,9 +158,8 @@ out_cooks_server <- function(id, get_data, get_raw, roles) {
       
       # ── 2. encode nominals ────────────────────────────────────────────────
       if (isTRUE(input$encode_nominal)) {
-        fac_cols <- names(df_sub)[sapply(df_sub, function(x)
-          (is.factor(x) || is.character(x)) && x != response)]
-        fac_cols <- setdiff(fac_cols, response)
+        fac_cols <- names(df_sub)[sapply(names(df_sub), function(v)
+          v != response && (is.factor(df_sub[[v]]) || is.character(df_sub[[v]])))]
         if (length(fac_cols) > 0) {
           tryCatch({
             library(recipes)

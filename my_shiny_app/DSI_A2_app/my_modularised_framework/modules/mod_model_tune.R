@@ -31,7 +31,7 @@ model_tune_ui <- function(id) {
       radioButtons(ns("mode"), label = NULL,
                    choices  = c("Ridge / Lasso" = "ridge_lasso",
                                 "ElasticNet"    = "elasticnet"),
-                   selected = "ridge_lasso"),
+                   selected = "elasticnet"),
       hr(),
       
       # ── Run / Reset ───────────────────────────────────────────────────────
