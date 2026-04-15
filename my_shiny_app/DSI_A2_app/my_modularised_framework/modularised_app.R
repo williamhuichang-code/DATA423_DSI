@@ -12,14 +12,18 @@ library(plotly)
 library(visdat)
 library(naniar)
 library(gridExtra)
-
+library(dbscan)       # LOF
+library(e1071)        # SVM
+library(randomForest) # RF
+library(isotree)      # Isolation Forest
+library(ggrepel)      # label repelling in plots
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
 ##### change global configs when needed
 
 # file of interest
-FILE_OF_INTEREST <- "Ass21Data.csv"
+FILE_OF_INTEREST <- "a2_knn.csv"
 
 # explicit data folder
 DATA_WD <- "."
@@ -103,8 +107,13 @@ ui <- dashboardPage(
       ),
       
       menuItem("Out Strategy", tabName = "out", icon = icon("triangle-exclamation"),
-               menuSubItem("Mahalanobis", tabName = "out_mah"),
-               menuSubItem("iForest",     tabName = "out_iforest")
+               menuSubItem("Mahalanobis",    tabName = "out_mah"),
+               menuSubItem("Cook's Distance",tabName = "out_cooks"),
+               menuSubItem("LOF",            tabName = "out_lof"),
+               menuSubItem("SVM",            tabName = "out_svm"),
+               menuSubItem("Random Forest",  tabName = "out_rf"),
+               menuSubItem("Isolation Forest",tabName = "out_iforest"),
+               menuSubItem("Summary",        tabName = "out_summary")
                # add more subtabs here
       ),
       
@@ -146,8 +155,13 @@ ui <- dashboardPage(
       tabItem(tabName = "miss_transform",  miss_transform_ui("miss_transform")),
       
       # Out Strategy
-      tabItem(tabName = "out_mah",     box(title = "Mahalanobis", width = 12, "coming soon")),
-      tabItem(tabName = "out_iforest", box(title = "iForest",     width = 12, "coming soon")),
+      tabItem(tabName = "out_mah",     out_mahalanobis_ui("out_mah")),
+      tabItem(tabName = "out_cooks",   out_cooks_ui("out_cooks")),
+      tabItem(tabName = "out_lof",     out_lof_ui("out_lof")),
+      tabItem(tabName = "out_svm",     out_svm_ui("out_svm")),
+      tabItem(tabName = "out_rf",      out_rf_ui("out_rf")),
+      tabItem(tabName = "out_iforest", out_iforest_ui("out_iforest")),
+      tabItem(tabName = "out_summary", out_summary_ui("out_summary")),
       
       # Model
       tabItem(tabName = "pre_recipe", prep_recipe_ui("prep_recipe")),
@@ -201,6 +215,10 @@ server <- function(input, output, session) {
   model_tune <- model_tune_server("model_tune", transform$data, roles, precipe$recipe)
   model_reg <- model_reg_server("model_reg", transform$data, roles, precipe$recipe, model_tune, get_raw)
   
+  
+  
+  
+  
   get_data <- transform$data   # current end of pipeline
   
   
@@ -219,6 +237,16 @@ server <- function(input, output, session) {
   vis_miss_server("vis_miss",         get_data, roles)
   rising_value_server("rising_value", get_data)
   
+  out_mah     <- out_mahalanobis_server("out_mah",   transform$data, get_raw, roles)
+  out_cooks   <- out_cooks_server("out_cooks",       transform$data, get_raw, roles)
+  out_lof     <- out_lof_server("out_lof",           transform$data, get_raw, roles)
+  out_svm     <- out_svm_server("out_svm",           transform$data, get_raw, roles)
+  out_rf      <- out_rf_server("out_rf",             transform$data, get_raw, roles)
+  out_iforest <- out_iforest_server("out_iforest",   transform$data, get_raw, roles)
+  out_summary <- out_summary_server("out_summary",   transform$data, get_raw, roles,
+                                    out_mah$flagged, out_cooks$flagged,
+                                    out_lof$flagged, out_svm$flagged,
+                                    out_rf$flagged,  out_iforest$flagged)
 }
 
 

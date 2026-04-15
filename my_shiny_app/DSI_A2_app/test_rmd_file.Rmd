@@ -39,11 +39,10 @@ library(summarytools)
 library(kableExtra)
 library(performance)
 
-##### initialise datasets
-dat <- read.csv('Ass21Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
 
 ##### global parameters
-SEED = 2026
+# SEED = 2026
 ```
 
 
@@ -51,27 +50,36 @@ SEED = 2026
 ```{r cv_with_glmnet, fig.width=10, fig.height=5}
 
 library(glmnet)
+
+##### initialise datasets
+dat <- read.csv('Ass21Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+# dat <- read.csv('a2_knn.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+# dat <- read.csv('a2_bag.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
 SEED = 2026
+# lambda grid should be optional across the regularisations
 lambda_grid <- 10^seq(3, -4, length.out = 100)
+
+
 ##### initialise
 # summary
-# summary(dat)
+summary(dat)
 # define trainset and testset
 train_dat <- dat[dat$OBS_TYPE == "Train", ]
 test_dat  <- dat[dat$OBS_TYPE == "Test", ]
 # model formula
 formula_death <- DEATH_RATE ~ . - CODE - OBS_TYPE
 # matrix prep (required for glmnet)
-x_train <- model.matrix(formula_death, data = train_dat)[,-1]
+x_train <- model.matrix(formula_death, data = train_dat)[, -1]
 y_train <- train_dat$DEATH_RATE
 
 
 ##### CV for Ridge/Lasso
 # run CV
 set.seed(SEED)
-best_cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0, family = "gaussian")
+best_cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0, family = "gaussian", lambda = lambda_grid, thresh = 1e-7)
 set.seed(SEED)
-best_cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1, family = "gaussian")
+best_cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1, family = "gaussian", lambda = lambda_grid, thresh = 1e-7)
 # extract best lambdas
 min_lambda_ridge <- best_cv_ridge$lambda.min
 cat("Best Ridge Lambda (min):", min_lambda_ridge, "\n")
@@ -88,14 +96,15 @@ plot(best_cv_ridge, main = "Ridge: CV Error vs Lambda")
 plot(best_cv_lasso, main = "LASSO: CV Error vs Lambda")
 
 
-##### CV for elastic net
+##### CV for ElasticNet
 alpha_grid <- seq(0, 1, by = 0.1)
-# CV function (elastic net)
+# CV function (ElasticNet)
 cv_elastic <- lapply(alpha_grid, function(a) {
   set.seed(SEED)
   cv <- cv.glmnet(x_train, y_train,
                   alpha  = a,
                   lambda = lambda_grid,
+                  thresh = 1e-7,
                   nfolds = 10)
   list(alpha      = a,
        cv         = cv,
@@ -107,12 +116,13 @@ cv_elastic <- lapply(alpha_grid, function(a) {
 best_cv_idx <- which.min(sapply(cv_elastic, function(x) x$cvm_min))
 best_alpha  <- cv_elastic[[best_cv_idx]]$alpha
 best_cv_elastic <- cv_elastic[[best_cv_idx]]$cv
-cat("Best Elastic Net Alpha: ", best_alpha, "\n")
+
+cat("Best ElasticNet Alpha: ", best_alpha, "\n")
 # extract best lambdas
 min_lambda_elastic <- best_cv_elastic$lambda.min
-cat("Best Elastic Net Lambda (min):", min_lambda_elastic, "\n")
+cat("Best ElasticNet Lambda (min):", min_lambda_elastic, "\n")
 ose_lambda_elastic <- best_cv_elastic$lambda.1se
-cat("1se Elastic Net Lambda (1se):", ose_lambda_elastic, "\n")
+cat("1se ElasticNet Lambda (1se):", ose_lambda_elastic, "\n")
 # CV error curve for best alpha
 par(mfrow = c(1, 1), mar = c(5, 4, 8, 2))
 plot(best_cv_elastic, main = paste0("ElasticNet CV: Error vs Lambda (alpha = ", best_alpha, ")"))
@@ -176,31 +186,6 @@ plot(pred_test, sqrt(abs(res_test)),
      main = "Scale-Location")
 
 
-```
-
-
-
-
-```{r cv_bug_code, fig.width=10, fig.height=5}
-library(recipes)
-
-df <- dat  # full data as app uses transform$data
-
-rec <- recipe(DEATH_RATE ~ ., data = df) |>
-  update_role(CODE,     new_role = "ignore") |>
-  update_role(OBS_TYPE, new_role = "ignore")
-
-prepped <- prep(rec, training = df, verbose = FALSE)
-baked   <- bake(prepped, new_data = df)
-
-cat("Baked columns:\n")
-cat(names(baked), sep = "\n")
-cat("\nN cols:", ncol(baked), "\n")
-
-# what get_xy does
-x_df <- baked[, setdiff(names(baked), "DEATH_RATE"), drop = FALSE]
-cat("\nX cols after setdiff:", ncol(x_df), "\n")
-cat(names(x_df), sep = "\n")
 ```
 
 

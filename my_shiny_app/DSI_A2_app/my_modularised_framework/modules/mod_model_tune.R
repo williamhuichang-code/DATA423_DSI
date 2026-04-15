@@ -441,10 +441,15 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
     
     get_xy <- function(df, rec, y_col) {
       library(recipes)
-      prepped <- prep(rec, training = df, verbose = FALSE)
-      baked   <- bake(prepped, new_data = df)
-      y <- baked[[y_col]]
-      x <- as.matrix(baked[, setdiff(names(baked), y_col), drop = FALSE])
+      prepped   <- prep(rec, training = df, verbose = FALSE)
+      baked     <- bake(prepped, new_data = df)
+      y         <- baked[[y_col]]
+      # use only predictor-role columns — excludes ignored cols like CODE, OBS_TYPE
+      pred_cols <- prepped$var_info$variable[prepped$var_info$role == "predictor"]
+      pred_cols <- intersect(pred_cols, names(baked))
+      x_df      <- baked[, pred_cols, drop = FALSE]
+      # model.matrix properly expands factors into dummy columns
+      x         <- model.matrix(~ ., data = x_df)[, -1]
       list(x = x, y = y)
     }
     
@@ -543,9 +548,9 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
             
             incProgress(0.2, message = paste0("Looping over ", length(alpha_grid), " alpha values..."))
             
-            set.seed(2026)
             cv_time <- system.time({
               cv_fits <- lapply(alpha_grid, function(a) {
+                set.seed(2026)
                 cv.glmnet(x_train, y_train,
                           alpha        = a,
                           lambda       = lambda_grid,
