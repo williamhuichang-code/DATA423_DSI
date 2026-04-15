@@ -27,7 +27,7 @@ out_iforest_ui <- function(id) {
                      options=list(placeholder="Defaults to Predictor roles")),
       hr(),
       sliderInput(ns("threshold"), "Outlier score threshold:",
-                  min=0.50, max=0.95, value=0.60, step=0.01, width="100%"),
+                  min=0.50, max=0.95, value=0.55, step=0.01, width="100%"),
       helpText("Scores above threshold are flagged as outliers.")
     ),
     mainPanel(

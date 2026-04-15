@@ -31,7 +31,7 @@ out_lof_ui <- function(id) {
       helpText("Range 3–6 is usually optimal."),
       hr(),
       sliderInput(ns("threshold"), "LOF threshold:",
-                  min=1.0, max=5.0, value=2.0, step=0.1, width="100%"),
+                  min=1.0, max=5.0, value=1.5, step=0.1, width="100%"),
       helpText("Observations with LOF > threshold are flagged."),
       hr(),
       checkboxInput(ns("scale"), "Scale predictors (divide by SD)", value=TRUE)

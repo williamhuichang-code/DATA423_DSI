@@ -21,6 +21,15 @@ out_summary_ui <- function(id) {
       hr(),
       selectInput(ns("id_col"), "ID / label column:", choices=NULL),
       hr(),
+      checkboxGroupInput(ns("active_methods"), "Methods to include:",
+                         choices  = c("Mahalanobis" = "mahalanobis",
+                                      "Cook's Distance" = "cooks",
+                                      "LOF"         = "lof",
+                                      "SVM"         = "svm",
+                                      "Random Forest" = "rf",
+                                      "Isolation Forest" = "iforest"),
+                         selected = c("mahalanobis", "cooks", "lof", "rf", "iforest")),
+      hr(),
       numericInput(ns("min_count"), "Min flag count to display:",
                    value=2, min=1, step=1),
       helpText("Only show observations flagged by at least this many methods.")
@@ -55,7 +64,10 @@ out_summary_server <- function(id, get_data, get_raw, roles,
       df <- get_data()
       id_labels <- as.character(df[[input$id_col]])
       
-      method_flags <- list(
+      active <- input$active_methods
+      if (is.null(active) || length(active) == 0) return(NULL)
+      
+      all_flags <- list(
         mahalanobis = flagged_mah(),
         cooks       = flagged_cooks(),
         lof         = flagged_lof(),
@@ -63,6 +75,7 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         rf          = flagged_rf(),
         iforest     = flagged_iforest()
       )
+      method_flags <- all_flags[intersect(active, names(all_flags))]
       
       # build long-format data frame
       rows <- lapply(names(method_flags), function(method) {

@@ -92,7 +92,7 @@ miss_impute_ui <- function(id) {
         condition = sprintf("input['%s'] == 'knn'", ns("algorithm")),
         tags$label("KNN parameters:", style = "font-weight:600; font-size:13px; color:#343a40;"),
         sliderInput(ns("knn_neighbors"), "Neighbours (k):",
-                    min = 1, max = 25, value = 5, step = 1, width = "100%")
+                    min = 1, max = 25, value = 2, step = 1, width = "100%")
       ),
       
       # ── Bag parameters ────────────────────────────────────────────────────
