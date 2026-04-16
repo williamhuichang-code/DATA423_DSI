@@ -84,7 +84,7 @@ out_svm_ui <- function(id) {
                contributing useful information."),
       hr(),
       
-      checkboxInput(ns("scale"), "Scale predictors (divide by SD)", value=TRUE),
+      checkboxInput(ns("scale"), "Scale predictors (divide by SD)", value=FALSE),
       helpText("One-class SVM is highly sensitive to scale. Strongly recommended
                to keep checked unless variables are already on comparable units.
                If your data is already centred and scaled from the pipeline,

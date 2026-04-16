@@ -60,7 +60,7 @@ out_iforest_ui <- function(id) {
       
       # ── Score threshold ────────────────────────────────────────────────────
       sliderInput(ns("threshold"), "Outlier score threshold:",
-                  min=0.50, max=0.95, value=0.60, step=0.01, width="100%"),
+                  min=0.50, max=0.95, value=0.53, step=0.01, width="100%"),
       helpText("Scores above threshold are flagged. 0.60 is a commonly used
                starting point but is arbitrary — adjust based on how many
                outliers you expect. Compare results at different thresholds

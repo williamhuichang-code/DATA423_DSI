@@ -104,7 +104,7 @@ out_lof_ui <- function(id) {
                Box-Cox requires all values > 0."),
       hr(),
       
-      checkboxInput(ns("scale"), "Scale predictors (divide by SD)", value=TRUE),
+      checkboxInput(ns("scale"), "Scale predictors (divide by SD)", value=FALSE),
       helpText("LOF is distance-based and highly sensitive to scale differences
                between variables. Strongly recommended to keep checked unless
                all variables are already on comparable units.")

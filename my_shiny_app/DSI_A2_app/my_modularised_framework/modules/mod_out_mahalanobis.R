@@ -45,7 +45,7 @@ out_mahalanobis_ui <- function(id) {
       
       # ── Threshold ─────────────────────────────────────────────────────────
       sliderInput(ns("threshold_p"), "Chi-squared threshold (p):",
-                  min=0.90, max=0.999, value=0.999, step=0.001, width="100%"),
+                  min=0.90, max=0.999, value=0.995, step=0.001, width="100%"),
       helpText("Higher p = stricter, fewer outliers flagged."),
       hr(),
       

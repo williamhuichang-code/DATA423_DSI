@@ -29,7 +29,7 @@ out_summary_ui <- function(id) {
                                       "SVM"         = "svm",
                                       "Random Forest" = "rf",
                                       "Isolation Forest" = "iforest"),
-                         selected = c("mahalanobis", "cooks", "lof", "rf", "iforest")),
+                         selected = c("mahalanobis", "cooks", "lof", "svm", "rf", "iforest")),
       hr(),
       numericInput(ns("min_count"), "Min flag count to display:",
                    value=2, min=1, step=1),
@@ -39,7 +39,7 @@ out_summary_ui <- function(id) {
       width=9,
       plotOutput(ns("plot"), height="70vh"),
       hr(),
-      h5("Observations Flagged by Multiple Methods"),
+      h5("Outlier Rows (raw data)"),
       DT::dataTableOutput(ns("table"))
     )
   )
@@ -78,7 +78,6 @@ out_summary_server <- function(id, get_data, get_raw, roles,
       )
       method_flags <- all_flags[intersect(active, names(all_flags))]
       
-      # build long-format data frame
       rows <- lapply(names(method_flags), function(method) {
         idx <- method_flags[[method]]
         if (length(idx) == 0) return(NULL)
@@ -108,7 +107,6 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         return()
       }
       
-      # ── build wide format: one col per method, 0/1 values ─────────────────
       all_methods <- c("mahalanobis","cooks","lof","svm","rf","iforest")
       active      <- intersect(input$active_methods, all_methods)
       all_ids     <- unique(df_long$id)
@@ -119,7 +117,6 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         wide_df[[m]] <- as.integer(wide_df$id %in% flagged_ids)
       }
       
-      # filter by min_count
       method_cols   <- setdiff(names(wide_df), "id")
       wide_df$total <- rowSums(wide_df[, method_cols, drop=FALSE])
       wide_df       <- wide_df[wide_df$total >= input$min_count, ]
@@ -133,11 +130,9 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         return()
       }
       
-      # order x-axis by total flags descending
       wide_df$id <- factor(wide_df$id,
                            levels = wide_df$id[order(-wide_df$total)])
       
-      # pivot longer for geom_col
       plot_df <- tidyr::pivot_longer(
         wide_df[, c("id", method_cols)],
         cols      = tidyr::all_of(method_cols),
@@ -155,7 +150,6 @@ out_summary_server <- function(id, get_data, get_raw, roles,
           x     = "ID",
           y     = "Count",
           fill  = "Method") +
-        # ggplot2::theme_minimal(base_size=13) +
         ggplot2::theme(
           plot.title   = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
           axis.title.x = ggplot2::element_text(size = 16, face = "bold"),
@@ -170,26 +164,28 @@ out_summary_server <- function(id, get_data, get_raw, roles,
     
     output$table <- DT::renderDataTable({
       df_long <- long_df()
-      if (is.null(df_long) || nrow(df_long)==0)
-        return(data.frame(Message="No outliers flagged yet."))
+      if (is.null(df_long) || nrow(df_long) == 0)
+        return(data.frame(Message = "No outliers flagged yet."))
       
       counts   <- table(df_long$id)
       keep_ids <- names(counts[counts >= input$min_count])
-      plot_df  <- df_long[df_long$id %in% keep_ids, ]
-      if (nrow(plot_df)==0)
-        return(data.frame(Message="No observations meet threshold."))
+      if (length(keep_ids) == 0)
+        return(data.frame(Message = "No observations meet threshold."))
       
-      summary_df <- as.data.frame.matrix(table(plot_df$id, plot_df$Type))
-      summary_df$id          <- rownames(summary_df)
-      summary_df$total_flags <- rowSums(summary_df[, setdiff(names(summary_df),"id"), drop=FALSE])
-      summary_df <- summary_df[order(-summary_df$total_flags), ]
-      rownames(summary_df) <- NULL
-      method_cols <- setdiff(names(summary_df), c("id","total_flags"))
-      summary_df  <- summary_df[, c("id","total_flags", method_cols)]
+      score_order <- names(sort(counts[keep_ids], decreasing = TRUE))
       
-      DT::datatable(summary_df,
-                    options=list(pageLength=15, scrollX=TRUE),
-                    rownames=FALSE)
+      raw_df    <- get_raw()
+      id_labels <- as.character(raw_df[[input$id_col]])
+      keep_rows <- which(id_labels %in% keep_ids)
+      
+      result_df <- raw_df[keep_rows, , drop = FALSE]
+      result_df$`.flag_count` <- counts[as.character(raw_df[[input$id_col]])[keep_rows]]
+      result_df <- result_df[order(-result_df$`.flag_count`), ]
+      result_df$`.flag_count` <- NULL
+      
+      DT::datatable(result_df,
+                    options = list(pageLength = 15, scrollX = TRUE),
+                    rownames = TRUE)
     })
   })
 }
