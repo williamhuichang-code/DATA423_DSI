@@ -32,8 +32,13 @@ out_summary_ui <- function(id) {
                          selected = c("mahalanobis", "cooks", "lof", "svm", "rf", "iforest")),
       hr(),
       numericInput(ns("min_count"), "Min flag count to display:",
-                   value=2, min=1, step=1),
-      helpText("Only show observations flagged by at least this many methods.")
+                   value=3, min=1, step=1),
+      helpText("Only show observations flagged by at least this many methods."),
+      hr(),
+      selectInput(ns("sort_by"), "Sort table by:",
+                  choices  = c("Cumulative flag count" = "flag_count",
+                               "Row index"             = "row_index"),
+                  selected = "flag_count")
     ),
     mainPanel(
       width=9,
@@ -88,28 +93,15 @@ out_summary_server <- function(id, get_data, get_raw, roles,
       do.call(rbind, rows)
     })
     
-    method_colors <- c(
-      mahalanobis = "#2ab7ca",
-      cooks       = "#fe4a49",
-      lof         = "#27ae60",
-      svm         = "#e056fd",
-      rf          = "#4a80d4",
-      iforest     = "#f39c12"
-    )
-    
-    output$plot <- renderPlot({
+    # ── Shared wide data (NEW) ────────────────────────────────────────────────
+    wide_data <- reactive({
       df_long <- long_df()
-      if (is.null(df_long) || nrow(df_long)==0) {
-        ggplot2::ggplot() +
-          ggplot2::annotate("text", x=0.5, y=0.5,
-                            label="No outliers flagged yet.\nRun detection methods first.",
-                            colour="#495057", size=5) + ggplot2::theme_void()
-        return()
-      }
+      req(df_long)
       
       all_methods <- c("mahalanobis","cooks","lof","svm","rf","iforest")
       active      <- intersect(input$active_methods, all_methods)
-      all_ids     <- unique(df_long$id)
+      
+      all_ids <- unique(df_long$id)
       
       wide_df <- data.frame(id = all_ids, stringsAsFactors = FALSE)
       for (m in active) {
@@ -119,7 +111,33 @@ out_summary_server <- function(id, get_data, get_raw, roles,
       
       method_cols   <- setdiff(names(wide_df), "id")
       wide_df$total <- rowSums(wide_df[, method_cols, drop=FALSE])
-      wide_df       <- wide_df[wide_df$total >= input$min_count, ]
+      
+      wide_df
+    })
+    
+    method_colors <- c(
+      mahalanobis = "#2ab7ca",
+      cooks       = "#fe4a49",
+      lof         = "#27ae60",
+      svm         = "#e056fd",
+      rf          = "#4a80d4",
+      iforest     = "#f39c12"
+    )
+    
+    # ── Plot ──────────────────────────────────────────────────────────────────
+    output$plot <- renderPlot({
+      wide_df <- wide_data()
+      
+      if (is.null(wide_df) || nrow(wide_df)==0) {
+        ggplot2::ggplot() +
+          ggplot2::annotate("text", x=0.5, y=0.5,
+                            label="No outliers flagged yet.\nRun detection methods first.",
+                            colour="#495057", size=5) + ggplot2::theme_void()
+        return()
+      }
+      
+      method_cols <- setdiff(names(wide_df), c("id","total"))
+      wide_df     <- wide_df[wide_df$total >= input$min_count, ]
       
       if (nrow(wide_df)==0) {
         ggplot2::ggplot() +
@@ -130,8 +148,11 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         return()
       }
       
-      wide_df$id <- factor(wide_df$id,
-                           levels = wide_df$id[order(-wide_df$total)])
+      # consistent ordering
+      wide_df$id <- factor(
+        wide_df$id,
+        levels = wide_df$id[order(-wide_df$total)]
+      )
       
       plot_df <- tidyr::pivot_longer(
         wide_df[, c("id", method_cols)],
@@ -162,6 +183,7 @@ out_summary_server <- function(id, get_data, get_raw, roles,
         )
     })
     
+    # ── Table ─────────────────────────────────────────────────────────────────
     output$table <- DT::renderDataTable({
       df_long <- long_df()
       if (is.null(df_long) || nrow(df_long) == 0)
@@ -172,20 +194,28 @@ out_summary_server <- function(id, get_data, get_raw, roles,
       if (length(keep_ids) == 0)
         return(data.frame(Message = "No observations meet threshold."))
       
-      score_order <- names(sort(counts[keep_ids], decreasing = TRUE))
-      
       raw_df    <- get_raw()
       id_labels <- as.character(raw_df[[input$id_col]])
       keep_rows <- which(id_labels %in% keep_ids)
       
       result_df <- raw_df[keep_rows, , drop = FALSE]
-      result_df$`.flag_count` <- counts[as.character(raw_df[[input$id_col]])[keep_rows]]
-      result_df <- result_df[order(-result_df$`.flag_count`), ]
-      result_df$`.flag_count` <- NULL
+      result_df$flag_count <- as.integer(counts[as.character(result_df[[input$id_col]])])
+      
+      wide_df <- wide_data()
+      
+      # 🔥 FIXED SORT (aligned with plot)
+      result_df <- if (input$sort_by == "flag_count") {
+        result_df[order(
+          -result_df$flag_count,
+          match(result_df[[input$id_col]], wide_df$id)
+        ), ]
+      } else {
+        result_df[order(as.integer(rownames(result_df))), ]
+      }
       
       DT::datatable(result_df,
-                    options = list(pageLength = 15, scrollX = TRUE),
+                    options = list(pageLength = 15, scrollX = TRUE, order = list()),
                     rownames = TRUE)
     })
   })
-}
+} 
