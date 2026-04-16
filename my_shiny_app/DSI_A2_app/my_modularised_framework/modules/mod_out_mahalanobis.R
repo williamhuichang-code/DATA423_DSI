@@ -236,23 +236,29 @@ out_mahalanobis_server <- function(id, get_data, get_raw, roles) {
                       ggplot2::aes(y=md2, x=id)) +
         ggplot2::geom_point(ggplot2::aes(colour=Obs), size=2) +
         ggrepel::geom_text_repel(ggplot2::aes(label=label), max.overlaps=50,
-                                 size=3.2, na.rm=TRUE) +
+                                 size=5, na.rm=TRUE) +
         ggplot2::scale_colour_manual(
           values=c("non-outlier"="#4a80d4","outlier"="#C41E3A")) +
         ggplot2::geom_hline(yintercept=threshold, linetype="dashed") +
         ggplot2::scale_x_continuous(breaks=c(0,.5,1), labels=c("0%","50%","100%")) +
         ggplot2::annotate("text", x=0.01, y=threshold*1.05,
                           label=sprintf("χ²=%.1f  (%d outliers)", threshold, n_out),
-                          hjust=0, size=3.5) +
+                          hjust=0, size=5) +
         ggplot2::labs(
           title=paste0("Mahalanobis D² | p=", input$threshold_p,
                        " | χ²(", res$n_processed, ")=", round(threshold,1),
                        " | n=", res$n_rows, " | ", transform_label),
           y="Mahalanobis D²", x="Complete observations") +
-        ggplot2::theme_minimal(base_size=13) +
+        ggplot2::theme_minimal(base_size = 16) +
         ggplot2::theme(
-          plot.title=ggplot2::element_text(size=12, face="bold", hjust=0.5),
-          legend.title=ggplot2::element_text(face="bold"))
+          plot.title   = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title.x = ggplot2::element_text(size = 16, face = "bold"),
+          axis.title.y = ggplot2::element_text(size = 16, face = "bold"),
+          axis.text.x  = ggplot2::element_text(size = 15),
+          axis.text.y  = ggplot2::element_text(size = 15),
+          legend.title = ggplot2::element_text(size = 16, face = "bold"),
+          legend.text  = ggplot2::element_text(size = 15)
+        )
     })
     
     # ── Outlier table ─────────────────────────────────────────────────────────
