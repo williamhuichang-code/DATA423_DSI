@@ -103,7 +103,8 @@ ui <- dashboardPage(
                menuSubItem("Not Applicable", tabName = "miss_napp"),
                menuSubItem("Excessive Miss", tabName = "miss_excessive"),
                menuSubItem("Imputation",     tabName = "miss_impute"),
-               menuSubItem("Transform",      tabName = "miss_transform")
+               menuSubItem("Transform",      tabName = "miss_transform"),
+               menuSubItem("Miss Rpart",      tabName = "miss_rpart")
                # add more subtabs here
       ),
       
@@ -157,8 +158,9 @@ ui <- dashboardPage(
       tabItem(tabName = "miss_shadow",    miss_shadow_ui("miss_shadow")),
       tabItem(tabName = "miss_napp",      miss_napp_ui("miss_napp")),
       tabItem(tabName = "miss_excessive", miss_excessive_ui("miss_excessive")),
+      tabItem(tabName = "miss_rpart",     miss_rpart_ui("miss_rpart")),
       tabItem(tabName = "miss_impute",    miss_impute_ui("miss_impute")),
-      tabItem(tabName = "miss_transform",  miss_transform_ui("miss_transform")),
+      tabItem(tabName = "miss_transform", miss_transform_ui("miss_transform")),
       
       # Out Strategy
       tabItem(tabName = "out_hist",    out_histogram_ui("out_hist")),
@@ -258,6 +260,7 @@ server <- function(input, output, session) {
   eda_bar_server("eda_bar",             get_data)
   
   
+  miss_rpart_server("miss_rpart", get_data, roles)
   
   
   out_histogram_server("out_hist",                   get_data, roles)
