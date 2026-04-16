@@ -90,11 +90,19 @@ out_histogram_server <- function(id, get_data, roles) {
       
       ggplot2::ggplot(data.frame(x = x_plot), ggplot2::aes(x = x)) +
         ggplot2::geom_histogram(bins = input$bins, fill = "#4a80d4", colour = "white") +
-        ggplot2::labs(title = paste("Histogram for", x_label),
-                      x = x_label, y = "Count") +
+        ggplot2::labs(
+          title    = paste0("Histogram — ", x_label, "   |   Bins: ", input$bins),
+          x        = x_label,
+          y        = "Count"
+        ) +
         ggplot2::theme_minimal(base_size = 13) +
         ggplot2::theme(
-          plot.title = ggplot2::element_text(size = 14, face = "bold", hjust = 0.5))
+          plot.title   = ggplot2::element_text(size = 18, face = "bold", hjust = 0.5),
+          axis.title.x = ggplot2::element_text(size = 14, face = "bold"),
+          axis.title.y = ggplot2::element_text(size = 14, face = "bold"),
+          axis.text.x  = ggplot2::element_text(size = 14),
+          axis.text.y  = ggplot2::element_text(size = 14)
+        )
     })
   })
 }
