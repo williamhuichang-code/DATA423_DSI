@@ -12,7 +12,7 @@ eda_rising_ui <- function(id) {
       
       # layout
       
-      width = 2,
+      width = 3,
       style = "background-color: #e8f0fe; border-left: 2px solid #a8c0fd; min-height: 100vh; padding-left: 20px;",
       
       # note
@@ -47,7 +47,7 @@ eda_rising_ui <- function(id) {
       )
     ),
     mainPanel(
-      width = 10,
+      width = 9,
       plotlyOutput(ns("rv_output"), height = "80vh")
     )
   )
@@ -55,7 +55,7 @@ eda_rising_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-eda_rising_server <- function(id, get_data) {
+eda_rising_server <- function(id, get_data, roles = NULL) {
   moduleServer(id, function(input, output, session) {
     
     # helpers
@@ -89,10 +89,20 @@ eda_rising_server <- function(id, get_data) {
     # variable selector
     
     observe({
-      df <- get_data()
-      req(df)
+      df <- get_data(); req(df)
       num_vars <- names(df)[sapply(df, is.numeric)]
-      updateSelectizeInput(session, "rv_vars", choices = num_vars, selected = num_vars)
+      
+      default_vars <- if (!is.null(roles)) {
+        role_vals <- roles()
+        pred_vars <- names(role_vals[role_vals %in% c("predictor", "outcome")])
+        intersect(pred_vars, num_vars)
+      } else {
+        num_vars
+      }
+      
+      updateSelectizeInput(session, "rv_vars",
+                           choices  = num_vars,
+                           selected = default_vars)
     })
     
     # plot

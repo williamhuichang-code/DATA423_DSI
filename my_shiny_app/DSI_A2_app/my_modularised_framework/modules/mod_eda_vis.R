@@ -21,7 +21,7 @@ eda_vis_ui <- function(id) {
     position = "right",
     
     sidebarPanel(
-      width = 2,
+      width = 3,
       style = "background-color: #f4f6fb; border-left: 3px solid #6a9fd8;
                min-height: 100vh; padding: 16px 14px;",
       
@@ -124,7 +124,7 @@ eda_vis_ui <- function(id) {
     ),
     
     mainPanel(
-      width = 10,
+      width = 9,
       plotOutput(ns("plot"), height = "85vh"),
       conditionalPanel(
         condition = paste0("input['", ns("mcar"), "'] == true"),

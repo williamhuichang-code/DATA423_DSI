@@ -111,7 +111,7 @@ eda_datatable_server <- function(id, get_data, get_raw) {
                            choices  = names(df),
                            selected = names(df),
                            server   = TRUE)
-    }) |> bindEvent(active_data())
+    }) |> bindEvent(active_data(), input$use_raw, ignoreNULL = TRUE)
     
     # ── Filtered data ─────────────────────────────────────────────────────
     get_display_df <- reactive({

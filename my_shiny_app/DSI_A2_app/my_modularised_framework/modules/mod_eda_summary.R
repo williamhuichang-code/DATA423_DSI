@@ -12,7 +12,7 @@ eda_summary_ui <- function(id) {
       
       # layout
       
-      width = 2,
+      width = 3,
       style = "background-color: #e8f0fe; border-left: 2px solid #a8c0fd; min-height: 100vh; padding-left: 20px;",
       
       # tab note
@@ -40,7 +40,7 @@ eda_summary_ui <- function(id) {
       )
     ),
     mainPanel(
-      width = 10,
+      width = 9,
       uiOutput(ns("summary_output"))
     )
   )

@@ -254,8 +254,10 @@ server <- function(input, output, session) {
   eda_summary_server("eda_summary",     get_data)
   eda_cloud_server("eda_cloud",         get_data)
   eda_vis_server("eda_vis",             get_data, roles)
-  eda_rising_server("eda_rising",       get_data)
+  eda_rising_server("eda_rising",       get_data, roles)
   eda_bar_server("eda_bar",             get_data)
+  
+  
   
   
   out_histogram_server("out_hist",                   get_data, roles)
