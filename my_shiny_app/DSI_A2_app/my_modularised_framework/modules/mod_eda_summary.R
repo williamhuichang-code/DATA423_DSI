@@ -1,10 +1,10 @@
 # =================================================================================
-# mod_summary.R
+# mod_eda_summary.R
 # =================================================================================
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 
-summary_ui <- function(id) {
+eda_summary_ui <- function(id) {
   ns <- NS(id)
   sidebarLayout(
     position = "right",
@@ -49,7 +49,7 @@ summary_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-summary_server <- function(id, get_data) {
+eda_summary_server <- function(id, get_data) {
   moduleServer(id, function(input, output, session) {
     
     output$summary_output <- renderUI({

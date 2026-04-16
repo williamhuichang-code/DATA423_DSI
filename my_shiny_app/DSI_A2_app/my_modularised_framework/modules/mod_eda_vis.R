@@ -1,10 +1,10 @@
 # =================================================================================
-# mod_vis_miss.R
+# mod_eda_vis.R
 # =================================================================================
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 
-vis_miss_ui <- function(id) {
+eda_vis_ui <- function(id) {
   ns <- NS(id)
   
   # global label weight fix
@@ -139,7 +139,7 @@ vis_miss_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-vis_miss_server <- function(id, get_data, get_roles = NULL) {
+eda_vis_server <- function(id, get_data, get_roles = NULL) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns

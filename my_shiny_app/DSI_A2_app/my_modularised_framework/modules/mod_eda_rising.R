@@ -1,10 +1,10 @@
 # =================================================================================
-# mod_rising_value.R
+# mod_eda_rising.R
 # =================================================================================
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 
-rising_value_ui <- function(id) {
+eda_rising_ui <- function(id) {
   ns <- NS(id)
   sidebarLayout(
     position = "right",
@@ -55,7 +55,7 @@ rising_value_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-rising_value_server <- function(id, get_data) {
+eda_rising_server <- function(id, get_data) {
   moduleServer(id, function(input, output, session) {
     
     # helpers
