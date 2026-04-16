@@ -107,16 +107,17 @@ ui <- dashboardPage(
       ),
       
       menuItem("Out Strategy", tabName = "out", icon = icon("triangle-exclamation"),
-               menuSubItem("Histogram",      tabName = "out_hist"),
-               menuSubItem("Boxplot",        tabName = "out_boxplot"),
-               menuSubItem("Bagplot",        tabName = "out_bagplot"),
-               menuSubItem("Mahalanobis",    tabName = "out_mah"),
-               menuSubItem("Cook's Distance",tabName = "out_cooks"),
-               menuSubItem("LOF",            tabName = "out_lof"),
-               menuSubItem("SVM",            tabName = "out_svm"),
-               menuSubItem("Random Forest",  tabName = "out_rf"),
-               menuSubItem("Isolation Forest",tabName = "out_iforest"),
-               menuSubItem("Summary",        tabName = "out_summary")
+               menuSubItem("Histogram",        tabName = "out_hist"),
+               menuSubItem("Boxplot",          tabName = "out_boxplot"),
+               menuSubItem("Bagplot",          tabName = "out_bagplot"),
+               menuSubItem("Mahalanobis",      tabName = "out_mah"),
+               menuSubItem("Cook's Distance",  tabName = "out_cooks"),
+               menuSubItem("LOF",              tabName = "out_lof"),
+               menuSubItem("SVM",              tabName = "out_svm"),
+               menuSubItem("Random Forest",    tabName = "out_rf"),
+               menuSubItem("Isolation Forest", tabName = "out_iforest"),
+               menuSubItem("Summary",          tabName = "out_summary"),
+               menuSubItem("Response",         tabName = "out_response")
                # add more subtabs here
       ),
       
@@ -168,6 +169,7 @@ ui <- dashboardPage(
       tabItem(tabName = "out_rf",      out_rf_ui("out_rf")),
       tabItem(tabName = "out_iforest", out_iforest_ui("out_iforest")),
       tabItem(tabName = "out_summary", out_summary_ui("out_summary")),
+      tabItem(tabName = "out_response", out_response_ui("out_response")),
       
       # Model
       tabItem(tabName = "pre_recipe", prep_recipe_ui("prep_recipe")),
@@ -211,21 +213,28 @@ server <- function(input, output, session) {
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
+  # missingness ones
   variant   <- miss_variants_server("miss_variants",   split$data)
   shadow    <- miss_shadow_server("miss_shadow",       variant$data)
   napp      <- miss_napp_server("miss_napp",           shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  impute    <- miss_impute_server("miss_impute",       excessive$data, roles)
+  
+  # outlier one
+  out_response <- out_response_server("out_response",  excessive$data, get_raw, roles)
+  
+  # preprocessing one
+  precipe   <- prep_recipe_server("prep_recipe",       out_response$data, roles, split)
+  
+  # model ones
+  model_tune <- model_tune_server("model_tune", out_response$data, roles, precipe$recipe)
+  model_reg <- model_reg_server("model_reg", out_response$data, roles, precipe$recipe, model_tune, get_raw)
+  
+  # explore only
+  impute    <- miss_impute_server("miss_impute",       out_response$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
-  precipe   <- prep_recipe_server("prep_recipe",       transform$data, roles, split)
-  model_tune <- model_tune_server("model_tune", transform$data, roles, precipe$recipe)
-  model_reg <- model_reg_server("model_reg", transform$data, roles, precipe$recipe, model_tune, get_raw)
   
   
-  
-  
-  
-  get_data <- transform$data   # current end of pipeline
+  get_data <- impute$data   # current end of pipeline
   
   
   
@@ -243,16 +252,16 @@ server <- function(input, output, session) {
   vis_miss_server("vis_miss",         get_data, roles)
   rising_value_server("rising_value", get_data)
   
-  out_histogram_server("out_hist",                   transform$data, roles)
-  out_boxplot_server("out_boxplot",                  transform$data, get_raw, roles)
-  out_bagplot_server("out_bagplot",                  transform$data, get_raw, roles)
-  out_mah     <- out_mahalanobis_server("out_mah",   transform$data, get_raw, roles)
-  out_cooks   <- out_cooks_server("out_cooks",       transform$data, get_raw, roles)
-  out_lof     <- out_lof_server("out_lof",           transform$data, get_raw, roles)
-  out_svm     <- out_svm_server("out_svm",           transform$data, get_raw, roles)
-  out_rf      <- out_rf_server("out_rf",             transform$data, get_raw, roles)
-  out_iforest <- out_iforest_server("out_iforest",   transform$data, get_raw, roles)
-  out_summary <- out_summary_server("out_summary",   transform$data, get_raw, roles,
+  out_histogram_server("out_hist",                   get_data, roles)
+  out_boxplot_server("out_boxplot",                  get_data, get_raw, roles)
+  out_bagplot_server("out_bagplot",                  get_data, get_raw, roles)
+  out_mah     <- out_mahalanobis_server("out_mah",   get_data, get_raw, roles)
+  out_cooks   <- out_cooks_server("out_cooks",       get_data, get_raw, roles)
+  out_lof     <- out_lof_server("out_lof",           get_data, get_raw, roles)
+  out_svm     <- out_svm_server("out_svm",           get_data, get_raw, roles)
+  out_rf      <- out_rf_server("out_rf",             get_data, get_raw, roles)
+  out_iforest <- out_iforest_server("out_iforest",   get_data, get_raw, roles)
+  out_summary <- out_summary_server("out_summary",   get_data, get_raw, roles,
                                     out_mah$flagged, out_cooks$flagged,
                                     out_lof$flagged, out_svm$flagged,
                                     out_rf$flagged,  out_iforest$flagged)
