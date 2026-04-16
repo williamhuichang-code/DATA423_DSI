@@ -83,7 +83,8 @@ ui <- dashboardPage(
                menuSubItem("Summary",      tabName = "eda_summary"),
                menuSubItem("Word Cloud",   tabName = "eda_cloud"),
                menuSubItem("Vis Miss",     tabName = "eda_vis_miss"),
-               menuSubItem("Rising Value", tabName = "eda_rising")
+               menuSubItem("Rising Value", tabName = "eda_rising"),
+               menuSubItem("Bar Chart",    tabName = "eda_bar")
                # add more subtabs here
       ),
       
@@ -138,10 +139,11 @@ ui <- dashboardPage(
       
       # EDA
       tabItem(tabName = "eda_datatable", eda_datatable_ui("eda_datatable")),
-      tabItem(tabName = "eda_summary",  eda_summary_ui("eda_summary")),
-      tabItem(tabName = "eda_cloud",    eda_cloud_ui("eda_cloud")),
-      tabItem(tabName = "eda_vis_miss", eda_vis_ui("eda_vis")),
-      tabItem(tabName = "eda_rising",   eda_rising_ui("eda_rising")),
+      tabItem(tabName = "eda_summary",   eda_summary_ui("eda_summary")),
+      tabItem(tabName = "eda_cloud",     eda_cloud_ui("eda_cloud")),
+      tabItem(tabName = "eda_vis_miss",  eda_vis_ui("eda_vis")),
+      tabItem(tabName = "eda_rising",    eda_rising_ui("eda_rising")),
+      tabItem(tabName = "eda_bar",       eda_bar_ui("eda_bar")),
       
       # Config
       tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
@@ -253,6 +255,7 @@ server <- function(input, output, session) {
   eda_cloud_server("eda_cloud",         get_data)
   eda_vis_server("eda_vis",             get_data, roles)
   eda_rising_server("eda_rising",       get_data)
+  eda_bar_server("eda_bar",             get_data)
   
   
   out_histogram_server("out_hist",                   get_data, roles)
