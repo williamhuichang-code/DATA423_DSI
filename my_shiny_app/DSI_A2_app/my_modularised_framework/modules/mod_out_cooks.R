@@ -267,14 +267,14 @@ out_cooks_server <- function(id, get_data, get_raw, roles) {
       ggplot2::ggplot(data.frame(dc, id, label, Obs), ggplot2::aes(y=dc, x=id)) +
         ggplot2::geom_point(ggplot2::aes(colour=Obs), size=2) +
         ggrepel::geom_text_repel(ggplot2::aes(label=label), max.overlaps=50,
-                                 size=3.2, na.rm=TRUE) +
+                                 size=5, na.rm=TRUE) +
         ggplot2::scale_colour_manual(
           values=c("non-outlier"="#4a80d4","outlier"="#C41E3A")) +
         ggplot2::geom_hline(yintercept=threshold, linetype="dashed") +
         ggplot2::scale_x_continuous(breaks=c(0,.5,1), labels=c("0%","50%","100%")) +
         ggplot2::annotate("text", x=0.01, y=threshold*1.05,
                           label=sprintf("threshold=%.4f  (%d outliers)", threshold, n_out),
-                          hjust=0, size=3.5) +
+                          hjust=0, size=5) +
         ggplot2::labs(
           title=paste0("Cook's Distance | threshold=", input$threshold_mult,
                        " × mean(D_c)=", round(threshold,4),
@@ -284,8 +284,16 @@ out_cooks_server <- function(id, get_data, get_raw, roles) {
                                      "yeojohnson" = "Yeo-Johnson",
                                      "boxcox"     = "Box-Cox")),
           y="Cook's distance", x="Complete observations") +
-        ggplot2::theme_minimal(base_size=13) +
-        ggplot2::theme(plot.title=ggplot2::element_text(size=12, face="bold", hjust=0.5))
+        ggplot2::theme_minimal(base_size = 16) +
+        ggplot2::theme(
+          plot.title   = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title.x = ggplot2::element_text(size = 16, face = "bold"),
+          axis.title.y = ggplot2::element_text(size = 16, face = "bold"),
+          axis.text.x  = ggplot2::element_text(size = 15),
+          axis.text.y  = ggplot2::element_text(size = 15),
+          legend.title = ggplot2::element_text(size = 16, face = "bold"),
+          legend.text  = ggplot2::element_text(size = 15)
+        )
     })
     
     output$table <- DT::renderDataTable({
