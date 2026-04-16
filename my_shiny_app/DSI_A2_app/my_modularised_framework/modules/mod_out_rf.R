@@ -197,7 +197,7 @@ out_rf_server <- function(id, get_data, get_raw, roles) {
                               "Check: numeric response, ≥ 1 predictor,\n",
                               "no remaining NAs, randomForest installed.\n",
                               "Also check for high-cardinality factor columns."),
-                            colour="#C41E3A", size=4.5, hjust=0.5) +
+                            colour="#C41E3A", size=5, hjust=0.5) +
           ggplot2::theme_void()
         return()
       }
@@ -212,18 +212,21 @@ out_rf_server <- function(id, get_data, get_raw, roles) {
       ggplot2::ggplot(plot_df, ggplot2::aes(x=resids, y=0)) +
         ggplot2::geom_boxplot(coef=k, outlier.colour="#C41E3A") +
         ggrepel::geom_text_repel(ggplot2::aes(label=label), max.overlaps=50,
-                                 na.rm=TRUE, size=3.2) +
+                                 na.rm=TRUE, size=5) +
         ggplot2::labs(
           title=paste0("RF Residuals | IQR k=", k,
                        " | n=", res$n_rows, " rows | ",
                        res$n_cols, " predictors"),
           x="Residuals") +
-        ggplot2::theme_minimal(base_size=13) +
+        ggplot2::theme_minimal(base_size=16) +
         ggplot2::theme(
-          plot.title   = ggplot2::element_text(size=12, face="bold", hjust=0.5),
+          plot.title   = ggplot2::element_text(size=20, face="bold", hjust=0.5),
+          axis.title.x = ggplot2::element_text(size = 16, face = "bold"),
           axis.title.y = ggplot2::element_blank(),
+          axis.text.x  = ggplot2::element_text(size = 15),
           axis.text.y  = ggplot2::element_blank(),
-          axis.ticks.y = ggplot2::element_blank())
+          axis.ticks.y = ggplot2::element_blank(),
+          )
     })
     
     output$summary <- renderPrint({

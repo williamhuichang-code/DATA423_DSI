@@ -260,7 +260,7 @@ out_lof_server <- function(id, get_data, get_raw, roles) {
                       ggplot2::aes(y=scores, x=id)) +
         ggplot2::geom_point(ggplot2::aes(colour=Obs), size=2) +
         ggrepel::geom_text_repel(ggplot2::aes(label=label), max.overlaps=50,
-                                 size=3.2, na.rm=TRUE) +
+                                 size=5, na.rm=TRUE) +
         ggplot2::scale_colour_manual(
           values=c("non-outlier"="#4a80d4","outlier"="#C41E3A")) +
         ggplot2::geom_hline(yintercept=threshold, linetype="dashed") +
@@ -268,7 +268,7 @@ out_lof_server <- function(id, get_data, get_raw, roles) {
         ggplot2::scale_y_continuous(limits=c(0,NA)) +
         ggplot2::annotate("text", x=0.01, y=threshold*1.05,
                           label=sprintf("threshold=%.1f  (%d outliers)", threshold, n_out),
-                          hjust=0, size=3.5) +
+                          hjust=0, size=5) +
         ggplot2::labs(
           title=paste0("LOF | minPts=", input$min_pts,
                        " | threshold=", threshold,
@@ -276,9 +276,16 @@ out_lof_server <- function(id, get_data, get_raw, roles) {
                        if(isTRUE(input$scale)) " + scaled" else "",
                        " | n=", res$n_rows, " rows × ", res$n_cols, " cols"),
           y="LOF score", x="Complete observations") +
-        ggplot2::theme_minimal(base_size=13) +
-        ggplot2::theme(plot.title=ggplot2::element_text(size=12, face="bold", hjust=0.5),
-                       legend.title=ggplot2::element_text(face="bold"))
+        ggplot2::theme_minimal(base_size = 16) +
+        ggplot2::theme(
+          plot.title   = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title.x = ggplot2::element_text(size = 16, face = "bold"),
+          axis.title.y = ggplot2::element_text(size = 16, face = "bold"),
+          axis.text.x  = ggplot2::element_text(size = 15),
+          axis.text.y  = ggplot2::element_text(size = 15),
+          legend.title = ggplot2::element_text(size = 16, face = "bold"),
+          legend.text  = ggplot2::element_text(size = 15)
+        )
     })
     
     output$table <- DT::renderDataTable({
