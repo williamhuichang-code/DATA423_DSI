@@ -129,6 +129,14 @@ out_bagplot_server <- function(id, get_data, get_raw, roles) {
       }
       
       tryCatch({
+        # size and bold
+        par(
+          cex.main = 1.3,   # title size
+          font.main = 2,    # title bold
+          cex.lab  = 1.2,   # axis label size
+          font.lab = 2,     # axis label bold
+          cex.axis = 1.2    # axis number size
+        )
         # draw bagplot natively (base R)
         aplpack::bagplot(x = x_vals, y = y_vals,
                          factor = input$bag_k,
@@ -151,7 +159,7 @@ out_bagplot_server <- function(id, get_data, get_raw, roles) {
           text(x      = x_vals[outlier_mask],
                y      = y_vals[outlier_mask],
                labels = as.character(outlier_df[[input$label_col]]),
-               pos    = 3, cex = 0.7, col = "#C41E3A")
+               pos    = 3, cex = 0.7, col = "#C41E3A", font = 3)
         }
       }, error = function(e) {
         ggplot2::ggplot() +
