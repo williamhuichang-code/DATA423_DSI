@@ -130,9 +130,9 @@ out_boxplot_server <- function(id, get_data, get_raw, roles) {
         ggplot2::labs(title = paste("Boxplot of", var_label,
                                     "at IQR multiplier k =", k),
                       x = var_label) +
-        ggplot2::theme_minimal(base_size = 13) +
+        ggplot2::theme_minimal(base_size = 16) +
         ggplot2::theme(
-          plot.title   = ggplot2::element_text(size = 13, face = "bold", hjust = 0.5),
+          plot.title   = ggplot2::element_text(size = 18, face = "bold", hjust = 0.5),
           axis.title.y = ggplot2::element_blank(),
           axis.text.y  = ggplot2::element_blank(),
           axis.ticks.y = ggplot2::element_blank())
