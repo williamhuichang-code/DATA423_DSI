@@ -139,7 +139,7 @@ prep_recipe_ui <- function(id) {
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'bag'", ns("impute_method")),
                        sliderInput(ns("bag_trees"), "Number of trees:",
-                                   min = 5, max = 50, value = 4, step = 5, width = "100%")
+                                   min = 2, max = 50, value = 4, step = 5, width = "100%")
                      )
               ),
               column(6,
