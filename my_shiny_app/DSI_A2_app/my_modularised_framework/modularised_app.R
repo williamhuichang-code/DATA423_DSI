@@ -78,22 +78,27 @@ ui <- dashboardPage(
     sidebarMenu(
       id = "sidebar",
       
-      menuItem("EDA", tabName = "eda", icon = icon("chart-bar"),
-               menuSubItem("Summary",      tabName = "eda_summary"),
-               menuSubItem("Data Table",   tabName = "eda_datatable"),
-               menuSubItem("Word Cloud",   tabName = "eda_cloud"),
-               menuSubItem("Vis Miss",     tabName = "eda_vis_miss"),
-               menuSubItem("Rising Value", tabName = "eda_rising"),
-               menuSubItem("Bar Chart",    tabName = "eda_bar")
-               # add more subtabs here
-      ),
-      
       menuItem("Config", tabName = "config", icon = icon("sliders"),
                menuSubItem("Global Seed",    tabName = "config_seed"),
                menuSubItem("Split Setting",  tabName = "config_split"),
                menuSubItem("Data Roles",     tabName = "data_roles"),
                menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
+               # add more subtabs here
+      ),
+      
+      menuItem("EDA", tabName = "eda", icon = icon("chart-bar"),
+               menuSubItem("Data Table",   tabName = "eda_datatable"),
+               menuSubItem("Data Summary", tabName = "eda_summary"),
+               menuSubItem("Word Cloud",   tabName = "eda_cloud"),
+               menuSubItem("Vis Miss",     tabName = "eda_vis_miss"),
+               menuSubItem("Miss Upset",   tabName = "eda_upset"),
+               menuSubItem("Rising Value", tabName = "eda_rising"),
+               menuSubItem("Mosaic",       tabName = "eda_mosaic"),
+               menuSubItem("Tabplot",      tabName = "eda_tabplot"),
+               menuSubItem("Heatmap",      tabName = "eda_heatmap"),
+               menuSubItem("GGPairs",      tabName = "eda_ggpairs"),
+               menuSubItem("Bar Chart",    tabName = "eda_bar")
                # add more subtabs here
       ),
       
@@ -139,20 +144,25 @@ ui <- dashboardPage(
   body = dashboardBody(
     tabItems(
       
-      # EDA
-      tabItem(tabName = "eda_summary",   eda_summary_ui("eda_summary")),
-      tabItem(tabName = "eda_datatable", eda_datatable_ui("eda_datatable")),
-      tabItem(tabName = "eda_cloud",     eda_cloud_ui("eda_cloud")),
-      tabItem(tabName = "eda_vis_miss",  eda_vis_ui("eda_vis")),
-      tabItem(tabName = "eda_rising",    eda_rising_ui("eda_rising")),
-      tabItem(tabName = "eda_bar",       eda_bar_ui("eda_bar")),
-      
       # Config
       tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
       tabItem(tabName = "config_split",     split_ui("split")),
       tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
       tabItem(tabName = "config_important", config_important_ui("config_important")),
       tabItem(tabName = "data_download",    data_download_ui("data_download")),
+      
+      # EDA
+      tabItem(tabName = "eda_datatable", eda_datatable_ui("eda_datatable")),
+      tabItem(tabName = "eda_summary",   eda_summary_ui("eda_summary")),
+      tabItem(tabName = "eda_cloud",     eda_cloud_ui("eda_cloud")),
+      tabItem(tabName = "eda_vis_miss",  eda_vis_ui("eda_vis")),
+      tabItem(tabName = "eda_upset",     eda_upset_ui("eda_upset")),
+      tabItem(tabName = "eda_rising",    eda_rising_ui("eda_rising")),
+      tabItem(tabName = "eda_mosaic",    eda_mosaic_ui("eda_mosaic")),
+      tabItem(tabName = "eda_tabplot",   eda_tabplot_ui("eda_tabplot")),
+      tabItem(tabName = "eda_heatmap",   eda_heatmap_ui("eda_heatmap")),
+      tabItem(tabName = "eda_ggpairs",   eda_ggpairs_ui("eda_ggpairs")),
+      tabItem(tabName = "eda_bar",       eda_bar_ui("eda_bar")),
       
       # Miss Strategy
       tabItem(tabName = "miss_variants",   miss_variants_ui("miss_variants")),
@@ -254,11 +264,16 @@ server <- function(input, output, session) {
   
   # ── MODULE CALLS ──────────────────────────────────────────────────────────
   
-  eda_summary_server("eda_summary",     get_data)
   eda_datatable_server("eda_datatable", get_data, get_raw)
+  eda_summary_server("eda_summary",     get_data)
   eda_cloud_server("eda_cloud",         get_data)
   eda_vis_server("eda_vis",             get_data, roles)
+  eda_upset_server("eda_upset",         get_data, roles)
   eda_rising_server("eda_rising",       get_data, roles)
+  eda_mosaic_server("eda_mosaic",       get_data, roles)
+  eda_tabplot_server("eda_tabplot",     get_data, roles)
+  eda_heatmap_server("eda_heatmap",     get_data, roles)
+  eda_ggpairs_server("eda_ggpairs",     get_data, roles)
   eda_bar_server("eda_bar",             get_data)
   
   
