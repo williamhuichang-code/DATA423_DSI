@@ -229,25 +229,25 @@ server <- function(input, output, session) {
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
+  # manual ones
   # missingness ones
   variant   <- miss_variants_server("miss_variants",   split$data)
   shadow    <- miss_shadow_server("miss_shadow",       variant$data)
   napp      <- miss_napp_server("miss_napp",           shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  
   # outlier one
   out_response <- out_response_server("out_response",  excessive$data, get_raw, roles)
-  
-  # preprocessing one
-  precipe   <- prep_recipe_server("prep_recipe",       out_response$data, roles, split)
-  
-  # model ones
-  model_tune <- model_tune_server("model_tune", out_response$data, roles, precipe$recipe)
-  model_reg <- model_reg_server("model_reg", out_response$data, roles, precipe$recipe, model_tune, get_raw)
-  
   # explore only
   impute    <- miss_impute_server("miss_impute",       out_response$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
+  
+  
+  # recipe ones
+  # preprocessing one
+  precipe   <- prep_recipe_server("prep_recipe",       out_response$data, roles, split)
+  # model ones
+  model_tune <- model_tune_server("model_tune", out_response$data, roles, precipe$recipe)
+  model_reg <- model_reg_server("model_reg", out_response$data, roles, precipe$recipe, model_tune, get_raw)
   
   
   get_data <- impute$data   # current end of pipeline
