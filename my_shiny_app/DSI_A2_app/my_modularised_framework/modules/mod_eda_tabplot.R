@@ -4,9 +4,8 @@
 
 # ── HELPER ───────────────────────────────────────────────────────────────────
 
-# plot tabplot graph
-plot_tabplot <- function(df, vars, sort_on, sort_var, sort_desc, transform, nbin) {
-  
+plot_tabplot <- function(df, vars, sort_on, sort_var, sort_desc, transform, nbin,
+                         custom_title = NULL) {
   sel <- intersect(vars, names(df))
   if (length(sel) == 0) return(invisible(NULL))
   
@@ -37,13 +36,17 @@ plot_tabplot <- function(df, vars, sort_on, sort_var, sort_desc, transform, nbin
     df_plot <- df_plot[, c(sort_col, setdiff(names(df_plot), sort_col)), drop = FALSE]
   }
   
+  auto_title <- paste0(
+    "Tabplot | Sorted by ", if (using_index) "Row Order" else sort_var,
+    if (transform != "none") paste0(" | ", tools::toTitleCase(transform)) else ""
+  )
+  
   tabplot::tableplot(
     df_plot,
-    sortCol    = sort_col,
-    decreasing = if (using_index) FALSE else isTRUE(sort_desc),
-    nBins      = nbin,
-    title      = paste0("Tabplot | Sorted by ", if (using_index) "Row Order" else sort_var,
-                        if (transform != "none") paste0(" | ", tools::toTitleCase(transform)) else ""),
+    sortCol        = sort_col,
+    decreasing     = if (using_index) FALSE else isTRUE(sort_desc),
+    nBins          = nbin,
+    title          = if (!is.null(custom_title) && nzchar(custom_title)) custom_title else auto_title,
     fontsize       = 14,
     fontsize.title = 22
   )
@@ -94,7 +97,10 @@ eda_tabplot_ui <- function(id) {
       hr(),
       
       sliderInput(ns("tp_nbin"), "Number of bins:",
-                  min = 10, max = 500, value = 60, step = 10, width = "100%")
+                  min = 10, max = 500, value = 60, step = 10, width = "100%"),
+      hr(),
+      
+      textInput(ns("tp_title"), "Custom plot title:", placeholder = "Auto-generated if empty")
     ),
     mainPanel(
       width = 9,
@@ -138,13 +144,14 @@ eda_tabplot_server <- function(id, get_data, roles = NULL) {
     output$tp_output <- renderPlot({
       req(get_data(), input$tp_vars)
       plot_tabplot(
-        df        = get_data(),
-        vars      = input$tp_vars,
-        sort_on   = isTRUE(input$tp_sort_on),
-        sort_var  = input$tp_sortvar,
-        sort_desc = isTRUE(input$tp_decreasing),
-        transform = input$tp_transform,
-        nbin      = input$tp_nbin
+        df           = get_data(),
+        vars         = input$tp_vars,
+        sort_on      = isTRUE(input$tp_sort_on),
+        sort_var     = input$tp_sortvar,
+        sort_desc    = isTRUE(input$tp_decreasing),
+        transform    = input$tp_transform,
+        nbin         = input$tp_nbin,
+        custom_title = if (nzchar(input$tp_title)) input$tp_title else NULL
       )
     })
     

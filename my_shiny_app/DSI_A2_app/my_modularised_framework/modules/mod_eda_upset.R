@@ -31,11 +31,15 @@ eda_upset_ui <- function(id) {
       hr(),
       
       numericInput(ns("mu_nsets"), "Max variable sets (nsets):",
-                   value = 6, min = 2, max = 20, step = 1)
+                   value = 6, min = 2, max = 20, step = 1),
+      hr(),
+      
+      textInput(ns("mu_title"), "Custom plot title:", placeholder = "Auto-generated if empty")
     ),
     mainPanel(
       width = 9,
-      plotOutput(ns("mu_output"), height = "85vh")
+      # use uiOutput so we can stack a title div above the plot
+      uiOutput(ns("mu_ui"))
     )
   )
 }
@@ -52,6 +56,19 @@ eda_upset_server <- function(id, get_data, roles = NULL) {
                            choices  = names(df),
                            selected = names(df),
                            server   = TRUE)
+    })
+    
+    # render the title + plot as stacked HTML
+    output$mu_ui <- renderUI({
+      title_str <- if (nzchar(input$mu_title)) input$mu_title else "Missing Value Intersection (UpSet)"
+      tagList(
+        div(
+          style = "text-align: center; font-size: 22px; font-weight: bold;
+                   margin-top: 10px; margin-bottom: 4px;",
+          title_str
+        ),
+        plotOutput(session$ns("mu_output"), height = "80vh")
+      )
     })
     
     output$mu_output <- renderPlot({

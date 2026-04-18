@@ -4,12 +4,10 @@
 
 # ── HELPER ───────────────────────────────────────────────────────────────────
 
-# plot ggpairs graph
-plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, fontsize = 14, cardinality_threshold = 15) {
-  
+plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, fontsize = 14,
+                         cardinality_threshold = 15, custom_title = NULL) {
   sel <- intersect(vars, names(df))
   
-  # drop factor cols with too many levels
   sel <- sel[sapply(sel, function(v) {
     x <- df[[v]]
     if (is.factor(x) || is.character(x)) length(unique(na.omit(x))) <= cardinality_threshold
@@ -26,13 +24,14 @@ plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, fontsize =
   }
   
   if (group_on && !is.null(group_var) && group_var %in% names(df)) {
-    plot_df  <- df[, c(sel, group_var), drop = FALSE]
-    plot_df  <- plot_df[!is.na(plot_df[[group_var]]), ]
+    plot_df <- df[, c(sel, group_var), drop = FALSE]
+    plot_df <- plot_df[!is.na(plot_df[[group_var]]), ]
     if (!is.null(group_levels) && length(group_levels) > 0) {
       plot_df <- plot_df[as.character(plot_df[[group_var]]) %in% group_levels, ]
       plot_df[[group_var]] <- droplevels(as.factor(plot_df[[group_var]]))
     }
-    col_idx <- seq_along(sel)
+    col_idx    <- seq_along(sel)
+    auto_title <- paste0("GGPairs | Grouped by ", group_var)
     GGally::ggpairs(
       plot_df, progress = FALSE, columns = col_idx,
       mapping = aes(colour = .data[[group_var]], alpha = 0.6),
@@ -54,12 +53,11 @@ plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, fontsize =
             axis.text.y  = element_text(size = fontsize),
             legend.title = element_text(face = "bold"),
             legend.text  = element_text(size = fontsize - 2)) +
-      labs(title = paste0("GGPairs | Grouped by ", group_var))
+      labs(title = if (!is.null(custom_title) && nzchar(custom_title)) custom_title else auto_title)
     
   } else {
-    plot_df <- df[, sel, drop = FALSE]
     GGally::ggpairs(
-      plot_df, progress = FALSE,
+      df[, sel, drop = FALSE], progress = FALSE,
       upper = list(continuous = GGally::wrap("cor", size = 4)),
       lower = list(continuous = GGally::wrap("points", alpha = 0.4, size = 0.8)),
       diag  = list(continuous = GGally::wrap("densityDiag"))
@@ -72,7 +70,7 @@ plot_ggpairs <- function(df, vars, group_on, group_var, group_levels, fontsize =
             axis.text.y  = element_text(size = fontsize),
             legend.title = element_text(face = "bold"),
             legend.text  = element_text(size = fontsize - 2)) +
-      labs(title = "GGPairs")
+      labs(title = if (!is.null(custom_title) && nzchar(custom_title)) custom_title else "GGPairs")
   }
 }
 
@@ -119,6 +117,9 @@ eda_ggpairs_ui <- function(id) {
       
       sliderInput(ns("gg_fontsize"), "Label font size:",
                   min = 6, max = 24, value = 10, step = 1, width = "100%"),
+      hr(),
+      
+      textInput(ns("gg_title"), "Custom plot title:", placeholder = "Auto-generated if empty"),
       hr(),
       
       actionButton(ns("gg_run"), "Plot", icon = icon("play"), width = "100%"),
@@ -180,7 +181,7 @@ eda_ggpairs_server <- function(id, get_data, roles = NULL) {
     })
     
     output$gg_output <- renderPlot({
-      input$gg_run   # button trigger
+      input$gg_run
       isolate({
         req(get_data(), input$gg_vars)
         validate(need(length(input$gg_vars) >= 2, "Select at least 2 variables."))
@@ -190,7 +191,8 @@ eda_ggpairs_server <- function(id, get_data, roles = NULL) {
           group_on     = isTRUE(input$gg_group_on),
           group_var    = input$gg_group_var,
           group_levels = input$gg_group_levels,
-          fontsize     = input$gg_fontsize
+          fontsize     = input$gg_fontsize,
+          custom_title = if (nzchar(input$gg_title)) input$gg_title else NULL
         )
       })
     })

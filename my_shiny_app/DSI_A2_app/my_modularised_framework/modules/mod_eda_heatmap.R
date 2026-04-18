@@ -4,24 +4,22 @@
 
 # ── HELPER ───────────────────────────────────────────────────────────────────
 
-# plot correlation corrgram (reusable for miss cor and variable heatmap)
 plot_corrgram <- function(cor_mat, order, title = NULL, label_cex = 0.9) {
   par(oma = c(0, 0, 3, 0))
   corrgram::corrgram(
     cor_mat,
-    order      = if (order == "FALSE") FALSE else order,
-    abs        = FALSE,
-    cex.labels = label_cex,
-    font.labels = 2        # ← 2 = bold
+    order       = if (order == "FALSE") FALSE else order,
+    abs         = FALSE,
+    cex.labels  = label_cex,
+    font.labels = 2
   )
   if (!is.null(title)) {
     title(main = title, cex.main = 1.8, font.main = 2, outer = TRUE, line = 1)
   }
 }
 
-# plot missingness correlation
-plot_miss_cor <- function(df, order, abs_cor, method = "pearson", label_cex = 0.9) {
-  
+plot_miss_cor <- function(df, order, abs_cor, method = "pearson", label_cex = 0.9,
+                          custom_title = NULL) {
   m  <- is.na(df) + 0
   cm <- colMeans(m)
   m  <- m[, cm > 0 & cm < 1, drop = FALSE]
@@ -37,18 +35,18 @@ plot_miss_cor <- function(df, order, abs_cor, method = "pearson", label_cex = 0.
   cor_m <- cor(m, method = method)
   if (abs_cor) cor_m <- abs(cor_m)
   
+  auto_title <- paste0("Variable Missingness Correlation | ", tools::toTitleCase(method),
+                       if (abs_cor) " | Absolute" else "")
   plot_corrgram(
-    cor_mat = cor_m,
-    order   = order,
-    title   = paste0("Variable Missingness Correlation | ", tools::toTitleCase(method),
-                     if (abs_cor) " | Absolute" else ""),
+    cor_mat   = cor_m,
+    order     = order,
+    title     = if (!is.null(custom_title) && nzchar(custom_title)) custom_title else auto_title,
     label_cex = label_cex
   )
 }
 
-# plot variable correlation heatmap
-plot_var_cor <- function(df, vars, method, order, abs_cor, label_cex = 0.9) {
-  
+plot_var_cor <- function(df, vars, method, order, abs_cor, label_cex = 0.9,
+                         custom_title = NULL) {
   num_vars <- vars[sapply(vars, function(v) is.numeric(df[[v]]))]
   
   if (length(num_vars) < 2) {
@@ -63,11 +61,12 @@ plot_var_cor <- function(df, vars, method, order, abs_cor, label_cex = 0.9) {
   cor_mat <- cor(df_num, use = "pairwise.complete.obs", method = method)
   if (abs_cor) cor_mat <- abs(cor_mat)
   
+  auto_title <- paste0("Variable Correlation Heatmap | ", tools::toTitleCase(method),
+                       if (abs_cor) " | Absolute" else "")
   plot_corrgram(
-    cor_mat = cor_mat,
-    order   = order,
-    title   = paste0("Variable Correlation Heatmap | ", tools::toTitleCase(method),
-                     if (abs_cor) " | Absolute" else ""),
+    cor_mat   = cor_mat,
+    order     = order,
+    title     = if (!is.null(custom_title) && nzchar(custom_title)) custom_title else auto_title,
     label_cex = label_cex
   )
 }
@@ -125,7 +124,10 @@ eda_heatmap_ui <- function(id) {
       hr(),
       
       sliderInput(ns("cor_label_size"), "Diagonal label size:",
-                  min = 0.3, max = 2.5, value = 1.5, step = 0.1, width = "100%")
+                  min = 0.3, max = 2.5, value = 1.5, step = 0.1, width = "100%"),
+      hr(),
+      
+      textInput(ns("cor_title"), "Custom plot title:", placeholder = "Auto-generated if empty")
     ),
     mainPanel(
       width = 9,
@@ -140,7 +142,6 @@ eda_heatmap_ui <- function(id) {
 eda_heatmap_server <- function(id, get_data, roles = NULL) {
   moduleServer(id, function(input, output, session) {
     
-    # populate variable selector — default to Predictor + Outcome roles
     observe({
       df <- get_data(); req(df)
       
@@ -164,21 +165,24 @@ eda_heatmap_server <- function(id, get_data, roles = NULL) {
       df  <- get_data()
       sel <- intersect(input$cor_vars, names(df))
       req(length(sel) >= 2)
-      df_sel <- df[, sel, drop = FALSE]
+      df_sel       <- df[, sel, drop = FALSE]
+      custom_title <- if (nzchar(input$cor_title)) input$cor_title else NULL
       
       if (input$cor_view == "misscor") {
         plot_miss_cor(df_sel,
-                      order     = input$cor_order,
-                      abs_cor   = isTRUE(input$cor_abs),
-                      method    = input$cor_method,
-                      label_cex = input$cor_label_size)
+                      order        = input$cor_order,
+                      abs_cor      = isTRUE(input$cor_abs),
+                      method       = input$cor_method,
+                      label_cex    = input$cor_label_size,
+                      custom_title = custom_title)
       } else {
         plot_var_cor(df_sel,
-                     vars      = names(df_sel),
-                     method    = input$cor_method,
-                     order     = input$cor_order,
-                     abs_cor   = isTRUE(input$cor_abs),
-                     label_cex = input$cor_label_size)
+                     vars         = names(df_sel),
+                     method       = input$cor_method,
+                     order        = input$cor_order,
+                     abs_cor      = isTRUE(input$cor_abs),
+                     label_cex    = input$cor_label_size,
+                     custom_title = custom_title)
       }
     })
     
