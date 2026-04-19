@@ -23,7 +23,7 @@ library(ggrepel)      # label repelling in plots
 ##### change global configs when needed
 
 # file of interest
-FILE_OF_INTEREST <- "a2_14_accepted.csv"
+FILE_OF_INTEREST <- "non_exist_file.csv"
 
 # explicit data folder
 DATA_WD <- "."
@@ -32,7 +32,7 @@ DATA_WD <- "."
 # ── FILES IN THE WORK DIRECTORY ──────────────────────────────────────────────
 
 csv_files <- list.files(DATA_WD, pattern = "\\.csv$", full.names = FALSE)
-file_choices <- if (length(csv_files) == 0) c("(none)") else csv_files
+file_choices    <- c("(none)", csv_files)
 default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "(none)"
 
 
@@ -212,6 +212,7 @@ server <- function(input, output, session) {
   
   get_raw <- reactive({
     req(input$selected_file)
+    req(input$selected_file != "(none)")
     read.csv(file.path(DATA_WD, input$selected_file),
              header = TRUE,
              na.strings = c('NA', 'N/A'),
