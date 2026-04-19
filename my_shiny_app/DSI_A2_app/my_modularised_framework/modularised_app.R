@@ -20,8 +20,6 @@ library(ggrepel)      # label repelling in plots
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
-##### change global configs when needed
-
 # file of interest
 FILE_OF_INTEREST <- "non_exist_file.csv"
 
@@ -29,18 +27,24 @@ FILE_OF_INTEREST <- "non_exist_file.csv"
 DATA_WD <- "."
 
 
-# ── FILES IN THE WORK DIRECTORY ──────────────────────────────────────────────
+# ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
 
+# all csv files as a list
 csv_files <- list.files(DATA_WD, pattern = "\\.csv$", full.names = FALSE)
-file_choices    <- c("(none)", csv_files)
+
+# add a (none) option to choices
+file_choices_with_none    <- c("(none)", csv_files)
+
+# prioritise on interested file and fallback at (none)
 default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "(none)"
 
 
 # ── LOAD MODULE ──────────────────────────────────────────────────────────────
+
+# look inside "modules" folder and its subs, load all files with .R according to their full paths
 list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
   lapply(source)
-print(getwd())
-print(csv_files)
+
 
 
 
@@ -54,11 +58,11 @@ ui <- dashboardPage(
   # ── HEADER ─────────────────────────────────────────────────────────────────
   
   header = dashboardHeader(
-    title = "My App",
+    title = "My DSI Studio",
     selectInput(
       inputId  = "selected_file",
       label    = NULL,
-      choices  = file_choices,
+      choices  = file_choices_with_none,
       selected = default_selected,
       width    = "200px"
     ),
@@ -84,7 +88,7 @@ ui <- dashboardPage(
                menuSubItem("Data Roles",     tabName = "data_roles"),
                menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("EDA", tabName = "eda", icon = icon("chart-bar"),
@@ -99,7 +103,7 @@ ui <- dashboardPage(
                menuSubItem("Heatmap",      tabName = "eda_heatmap"),
                menuSubItem("GGPairs",      tabName = "eda_ggpairs"),
                menuSubItem("Bar Chart",    tabName = "eda_bar")
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("Miss Strategy", tabName = "miss", icon = icon("circle-question"),
@@ -111,7 +115,7 @@ ui <- dashboardPage(
                menuSubItem("Diag: Transform",  tabName = "miss_transform"),
                menuSubItem("Diag: Rpart",      tabName = "miss_rpart"),
                menuSubItem("Diag: Importance", tabName = "miss_importance")
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("Out Strategy", tabName = "out", icon = icon("triangle-exclamation"),
@@ -126,14 +130,14 @@ ui <- dashboardPage(
                menuSubItem("Isolation Forest", tabName = "out_iforest"),
                menuSubItem("Summary",          tabName = "out_summary"),
                menuSubItem("Response",         tabName = "out_response")
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("Model", tabName = "model", icon = icon("brain"),
                menuSubItem("Recipe",     tabName = "pre_recipe"),
                menuSubItem("Tune",       tabName = "model_tune"),
                menuSubItem("Regression", tabName = "model_reg")
-               # add more subtabs here
+               # more future subtabs here
       )
     )
   ),
