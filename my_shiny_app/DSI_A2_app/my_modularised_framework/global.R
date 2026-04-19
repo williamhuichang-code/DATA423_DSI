@@ -23,7 +23,7 @@ library(ggrepel)      # label repelling in plots
 ##### change global configs when needed
 
 # file of interest
-FILE_OF_INTEREST <- "a2_14_accepted.csv"
+FILE_OF_INTEREST <- "Ass2Data.csv"
 
 # explicit data folder
 DATA_WD <- "."
