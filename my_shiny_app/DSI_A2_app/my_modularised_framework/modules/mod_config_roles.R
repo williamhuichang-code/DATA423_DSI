@@ -121,6 +121,10 @@ data_roles_server <- function(id, get_data) {
         bg  <- if (is.null(r)) "#f1f3f5" else r$bg
         txt <- if (is.null(r)) "#495057" else r$txt
         bdr <- if (is.null(r)) "#dee2e6" else r$bdr
+        
+        # ── shield icon for sensitive role ──
+        icon_html <- if (role_id == "sensitive") "<i class='fas fa-shield-alt' style='color:#993556;font-size:16px;margin-right:3px;'></i>" else ""
+        
         tags$div(
           class          = "rv-pill",
           draggable      = "true",
@@ -132,7 +136,7 @@ data_roles_server <- function(id, get_data) {
             "cursor:grab;user-select:none;border:0.5px solid ", bdr, ";",
             "background:", bg, ";color:", txt, ";margin:2px;"
           ),
-          v
+          HTML(paste0(icon_html, v))
         )
       }
       
