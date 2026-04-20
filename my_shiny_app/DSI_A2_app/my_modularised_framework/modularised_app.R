@@ -218,132 +218,83 @@ server <- function(input, output, session) {
   }) |> bindCache(input$selected_file)
   
   
-  # ── DOMAIN CONFIGS ───────────────────────────────────────────────────────
+  # ── DOMAIN CONFIGS ────────────────────────────────────────────────────────
   
   config         <- data_roles_server("data_roles", get_raw)
+  config_data    <- config$data            # reactive df (raw + optional split col)
   roles          <- config$roles           # reactive named list of role assignments
   important_vars <- config$important_vars  # reactive character vector
   seed_in_use    <- config$seed            # reactive integer
   
   
-  # ── PIPELINE ──────────────────────────────────────────────────────────────
+  # ── PIPELINE (MANUAL) ─────────────────────────────────────────────────────
   
-  # manual ones
-  # missingness ones
-  variant <- miss_variants_server("miss_variants",     config$data)
-  shadow    <- miss_shadow_server("miss_shadow",       variant$data)
-  napp      <- miss_napp_server("miss_napp",           shadow$data)
-  excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  # outlier one
-  out_response <- out_response_server("out_response",  excessive$data, get_raw, roles)
-  # explore only
+  # Note: 
+  #   works like OOP in python (e.g., df.variants().shadow().excessive())
+  #   but R doesn't have class and class methods
+  #   for modularised app design, this is the best choice already
+  
+  # OOP for missingness and outlier strategies
+  variant      <- miss_variants_server("miss_variants",   config_data)
+  shadow       <- miss_shadow_server("miss_shadow",       variant$data)
+  napp         <- miss_napp_server("miss_napp",           shadow$data)
+  excessive    <- miss_excessive_server("miss_excessive", napp$data, important_vars)
+  out_response <- out_response_server("out_response",     excessive$data, get_raw, roles)
+  
+  # exploratory diagnostics for imputation and standarisation choices
   impute    <- miss_impute_server("miss_impute",       out_response$data, roles)
   transform <- miss_transform_server("miss_transform", impute$data, roles)
   
+  # get data for different purposes (training and diagnose respectively)
+  get_train_data    <- out_response$data
+  get_diagnose_data <- transform$data
   
-  # ── DEBUG ─────────────────────────────────────────────────────────────────
-  observe({
-    df <- out_response$data()
-    cat("\n── out_response rows feeding recipe:", nrow(df), "\n")
-    
-    r  <- roles()
-    sv <- names(r)[r == "split"]
-    if (length(sv) > 0 && sv %in% names(df)) {
-      cat("── split distribution in recipe input:\n")
-      print(table(df[[sv]], useNA = "always"))
-    }
-  })
-  # ── DEBUG ─────────────────────────────────────────────────────────────────
-  
-  
-  # recipe ones
-  # preprocessing one
-  precipe   <- prep_recipe_server("prep_recipe",       out_response$data, roles, seed_in_use)
-  
-  
-  # ── DEBUG ─────────────────────────────────────────────────────────────────
-  observe({
-    df <- out_response$data()
-    cat("\n── out_response$data rows:", nrow(df), "\n")
-    cat("── impute$data rows:       ", nrow(impute$data()), "\n")
-    cat("── transform$data rows:    ", nrow(transform$data()), "\n")
-  })
-  # ── DEBUG ─────────────────────────────────────────────────────────────────
-  
-  
-  # model ones
-  model_tune <- model_tune_server("model_tune", out_response$data, roles, precipe$recipe)
-  model_reg <- model_reg_server("model_reg", out_response$data, roles, precipe$recipe, model_tune, get_raw)
-  
-  
-  get_data <- impute$data   # current end of pipeline
-  
-  
-  # ── DEBUG ─────────────────────────────────────────────────────────────────
-  observe({
-    df <- out_response$data()
-    r  <- roles()
-    
-    outcome_col <- names(r)[r == "outcome"]
-    split_col   <- names(r)[r == "split"]
-    
-    cat("\n── df rows:", nrow(df), "\n")
-    cat("── outcome col:", outcome_col, "\n")
-    cat("── split col:  ", split_col, "\n")
-    
-    if (length(split_col) > 0 && split_col %in% names(df)) {
-      cat("── split col values:\n")
-      print(table(df[[split_col]], useNA = "always"))
-    } else {
-      cat("── NO split col found in df\n")
-    }
-  })
-  # ── DEBUG ─────────────────────────────────────────────────────────────────
-  
-  
-  # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────
-  
+  # download df at any stage
   data_download_server("data_download", stages = list(
     "Raw"       = get_raw,
-    "Processed" = get_data
+    "Processed" = get_diagnose_data
   ))
   
+  # EDA visualisations
+  eda_datatable_server("eda_datatable", get_diagnose_data, get_raw)
+  eda_summary_server("eda_summary",     get_diagnose_data)
+  eda_cloud_server("eda_cloud",         get_diagnose_data)
+  eda_vis_server("eda_vis",             get_diagnose_data, roles)
+  eda_upset_server("eda_upset",         get_diagnose_data, roles)
+  eda_rising_server("eda_rising",       get_diagnose_data, roles)
+  eda_mosaic_server("eda_mosaic",       get_diagnose_data, roles)
+  eda_tabplot_server("eda_tabplot",     get_diagnose_data, roles)
+  eda_heatmap_server("eda_heatmap",     get_diagnose_data, roles)
+  eda_ggpairs_server("eda_ggpairs",     get_diagnose_data, roles)
+  eda_bar_server("eda_bar",             get_diagnose_data)
   
-  # ── MODULE CALLS ──────────────────────────────────────────────────────────
-  
-  eda_datatable_server("eda_datatable", get_data, get_raw)
-  eda_summary_server("eda_summary",     get_data)
-  eda_cloud_server("eda_cloud",         get_data)
-  eda_vis_server("eda_vis",             get_data, roles)
-  eda_upset_server("eda_upset",         get_data, roles)
-  eda_rising_server("eda_rising",       get_data, roles)
-  eda_mosaic_server("eda_mosaic",       get_data, roles)
-  eda_tabplot_server("eda_tabplot",     get_data, roles)
-  eda_heatmap_server("eda_heatmap",     get_data, roles)
-  eda_ggpairs_server("eda_ggpairs",     get_data, roles)
-  eda_bar_server("eda_bar",             get_data)
-  
-  
-  miss_rpart_server("miss_rpart",           get_data, roles)
-  miss_importance_server("miss_importance", get_data, roles)
-  
-  
-  out_histogram_server("out_hist",                   get_data, roles)
-  out_boxplot_server("out_boxplot",                  get_data, get_raw, roles)
-  out_bagplot_server("out_bagplot",                  get_data, get_raw, roles)
-  out_mah     <- out_mahalanobis_server("out_mah",   get_data, get_raw, roles)
-  out_cooks   <- out_cooks_server("out_cooks",       get_data, get_raw, roles)
-  out_lof     <- out_lof_server("out_lof",           get_data, get_raw, roles)
-  out_svm     <- out_svm_server("out_svm",           get_data, get_raw, roles)
-  out_rf      <- out_rf_server("out_rf",             get_data, get_raw, roles)
-  out_iforest <- out_iforest_server("out_iforest",   get_data, get_raw, roles)
-  out_summary <- out_summary_server("out_summary",   get_data, get_raw, roles,
+  # diagnostics visualisations
+  miss_rpart_server("miss_rpart",                  get_diagnose_data, roles)
+  miss_importance_server("miss_importance",        get_diagnose_data, roles)
+  out_histogram_server("out_hist",                 get_diagnose_data, roles)
+  out_boxplot_server("out_boxplot",                get_diagnose_data, get_raw, roles)
+  out_bagplot_server("out_bagplot",                get_diagnose_data, get_raw, roles)
+  out_mah     <- out_mahalanobis_server("out_mah", get_diagnose_data, get_raw, roles)
+  out_cooks   <- out_cooks_server("out_cooks",     get_diagnose_data, get_raw, roles)
+  out_lof     <- out_lof_server("out_lof",         get_diagnose_data, get_raw, roles)
+  out_svm     <- out_svm_server("out_svm",         get_diagnose_data, get_raw, roles)
+  out_rf      <- out_rf_server("out_rf",           get_diagnose_data, get_raw, roles)
+  out_iforest <- out_iforest_server("out_iforest", get_diagnose_data, get_raw, roles)
+  out_summary <- out_summary_server("out_summary", get_diagnose_data, get_raw, roles,
                                     out_mah$flagged, out_cooks$flagged,
                                     out_lof$flagged, out_svm$flagged,
                                     out_rf$flagged,  out_iforest$flagged)
+  
+  
+  # ── PIPELINE (AUTO) ───────────────────────────────────────────────────────
+  
+  # recipe-based preprocessing and training
+  precipe    <- prep_recipe_server("prep_recipe", get_train_data, roles, seed_in_use)
+  model_tune <- model_tune_server("model_tune",   get_train_data, roles, precipe$recipe)
+  model_reg  <- model_reg_server("model_reg",     get_train_data, roles, precipe$recipe, model_tune, get_raw)
+  
+  
 }
-
-
 
 
 
