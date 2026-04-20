@@ -288,7 +288,7 @@ server <- function(input, output, session) {
   
   # ── PIPELINE (AUTO) ───────────────────────────────────────────────────────
   
-  # recipe-based preprocessing and training
+  # OOP for recipe-based preprocessing and training
   precipe    <- prep_recipe_server("prep_recipe", get_train_data, roles, seed_in_use)
   model_tune <- model_tune_server("model_tune",   get_train_data, roles, precipe$recipe)
   model_reg  <- model_reg_server("model_reg",     get_train_data, roles, precipe$recipe, model_tune, get_raw)
