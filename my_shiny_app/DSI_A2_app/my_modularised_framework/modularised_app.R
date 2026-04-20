@@ -290,8 +290,8 @@ server <- function(input, output, session) {
   
   # OOP for recipe-based preprocessing and modelling
   precipe    <- prep_recipe_server("prep_recipe", get_model_data, roles, seed_in_use)
-  model_tune <- model_tune_server("model_tune",   get_model_data, roles, precipe$recipe)
-  model_reg  <- model_reg_server("model_reg",     get_model_data, roles, precipe$recipe, model_tune, get_raw)
+  model_tune <- model_tune_server("model_tune",   get_model_data, roles, precipe$recipe, seed_in_use)
+  model_reg <- model_reg_server("model_reg",      get_model_data, roles, precipe$recipe, model_tune, get_raw, seed_in_use)
   
   
 }

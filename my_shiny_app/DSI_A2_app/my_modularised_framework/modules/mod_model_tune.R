@@ -25,6 +25,26 @@ model_tune_ui <- function(id) {
       ),
       hr(),
       
+      # ── Split ────────────────────────────────────────────────────────────
+      tags$label("Split variable:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      selectInput(ns("split_var"), label = NULL,
+                  choices = c("(none)"), width = "100%"),
+      conditionalPanel(
+        condition = paste0("input['", ns("split_var"), "'] != '(none)'"),
+        fluidRow(
+          column(6,
+                 tags$label("Train level:", style = "font-size:12px; font-weight:600; color:#343a40;"),
+                 selectInput(ns("train_level"), label = NULL, choices = c("(none)"), width = "100%")
+          ),
+          column(6,
+                 tags$label("Test level:", style = "font-size:12px; font-weight:600; color:#343a40;"),
+                 selectInput(ns("test_level"), label = NULL, choices = c("(none)"), width = "100%")
+          )
+        )
+      ),
+      hr(),
+      
       # ── Mode ──────────────────────────────────────────────────────────────
       tags$label("Mode:",
                  style = "font-weight:600; font-size:13px; color:#343a40;"),
@@ -60,37 +80,6 @@ model_tune_ui <- function(id) {
         tabPanel(
           title = tagList(icon("sliders"), " Configuration"),
           style = "padding-top:16px;",
-          
-          # ── Split config ──────────────────────────────────────────────────
-          div(
-            style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
-                     padding:20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
-            tags$h5(
-              icon("scissors", style = "color:#185FA5; margin-right:6px;"),
-              "Split",
-              style = "font-weight:600; color:#343a40; margin-bottom:12px;"
-            ),
-            fluidRow(
-              column(4,
-                     tags$label("Split variable:",
-                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
-                     selectInput(ns("split_var"), label = NULL,
-                                 choices = c("(none)"), width = "100%")
-              ),
-              column(4,
-                     tags$label("Train level:",
-                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
-                     selectInput(ns("train_level"), label = NULL,
-                                 choices = c("(none)"), width = "100%")
-              ),
-              column(4,
-                     tags$label("Test level:",
-                                style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
-                     selectInput(ns("test_level"), label = NULL,
-                                 choices = c("(none)"), width = "100%")
-              )
-            )
-          ),
           
           # ── Ridge / Lasso config ──────────────────────────────────────────
           conditionalPanel(
@@ -405,7 +394,7 @@ model_tune_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-model_tune_server <- function(id, get_data, roles, get_recipe) {
+model_tune_server <- function(id, get_data, roles, get_recipe, seed = reactive(42)) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -471,7 +460,9 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
       pred_cols <- intersect(pred_cols, names(baked))
       x_df      <- baked[, pred_cols, drop = FALSE]
       # model.matrix properly expands factors into dummy columns
-      x         <- model.matrix(~ ., data = x_df)[, -1]
+      old_na <- options(na.action = "na.pass")
+      x      <- model.matrix(~ ., data = x_df)[, -1]
+      options(old_na)
       
       
       # ── DEBUG ─────────────────────────────────────────────────────────────────
@@ -541,7 +532,7 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
             nfolds      <- if (input$rl_cv_method == "loocv") nrow(x_train) else input$rl_nfolds
             
             incProgress(0.3, message = "Running cv.glmnet...")
-            set.seed(2026)
+            set.seed(seed())
             cv_time <- system.time({
               cv_fit <- cv.glmnet(x_train, y_train,
                                   alpha        = alpha,
@@ -579,7 +570,7 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
             
             cv_time <- system.time({
               cv_fits <- lapply(alpha_grid, function(a) {
-                set.seed(2026)
+                set.seed(seed())
                 cv.glmnet(x_train, y_train,
                           alpha        = a,
                           lambda       = lambda_grid,

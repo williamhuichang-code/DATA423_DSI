@@ -72,7 +72,7 @@ model_reg_ui <- function(id) {
                                   "RMSE" = "rmse",
                                   "MAE"  = "mae",
                                   "R²"   = "r2"),
-                     selected = c("mse", "rmse", "mae", "r2"),
+                     selected = c("mse", "rmse"),
                      multiple = TRUE,
                      options  = list(placeholder = "Select metrics..."),
                      width    = "100%"),
@@ -278,7 +278,7 @@ model_reg_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_raw, seed = 2026) {
+model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_raw, seed = reactive(42)) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -429,7 +429,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
           incProgress(0.2, message = "Training...")
           
           train_time <- system.time({
-            set.seed(seed)
+            set.seed(seed())
             model <- caret::train(
               rec,
               data      = train_df,
@@ -696,7 +696,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
           ggplot2::geom_abline(slope = 1, intercept = 0, color = "#185FA5", linewidth = 1) +
           ggrepel::geom_text_repel(ggplot2::aes(label = label),
                                    max.overlaps = 50, na.rm = TRUE, size = 3.5,
-                                   color = "#C41E3A", seed = seed) +
+                                   color = "#C41E3A", seed = seed()) +
           ggplot2::coord_fixed(ratio = 1, xlim = rang, ylim = rang, expand = TRUE) +
           ggplot2::labs(title = "Predicted vs Actual", x = "Predicted", y = "Actual") +
           ggplot2::theme_minimal(base_size = 13)
@@ -898,7 +898,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
       
       train_resids <- tryCatch({
         rec    <- get_recipe(); req(rec)
-        set.seed(seed)
+        set.seed(seed())
         prepped <- recipes::prep(rec, training = train_df, verbose = FALSE)
         baked   <- recipes::bake(prepped, new_data = train_df)
         y_col   <- res$y_col
@@ -952,7 +952,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
                               fill = "#e8f0fe", width = 0.4) +
         ggrepel::geom_text_repel(ggplot2::aes(label = label),
                                  max.overlaps = 30, na.rm = TRUE,
-                                 size = 3.2, colour = "#C41E3A", seed = seed) +
+                                 size = 3.2, colour = "#C41E3A", seed = seed()) +
         ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "#6c757d") +
         ggplot2::labs(
           title = paste0("Residual Boxplot | IQR k = ", k, " | ",
@@ -988,7 +988,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
       # train residuals
       train_resids <- tryCatch({
         rec     <- get_recipe(); req(rec)
-        set.seed(seed)
+        set.seed(seed())
         prepped <- recipes::prep(rec, training = train_df, verbose = FALSE)
         baked   <- recipes::bake(prepped, new_data = train_df)
         y_train <- baked[[res$y_col]]
