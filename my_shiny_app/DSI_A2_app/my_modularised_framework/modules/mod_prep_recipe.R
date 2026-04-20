@@ -2,6 +2,10 @@
 # mod_prep_recipe.R
 # =================================================================================
 
+library(recipes)
+library(glmnet)
+
+
 # ── UI ───────────────────────────────────────────────────────────────────────
 
 prep_recipe_ui <- function(id) {
@@ -19,9 +23,31 @@ prep_recipe_ui <- function(id) {
                  margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);",
         icon("info-circle", style = "color:#0d6efd;"),
         HTML("&nbsp; <b>Recipe Builder</b><br><br>
-              Define a <b>recipes</b>-based preprocessing pipeline to feed
-              into model training. Steps are fitted on train only.")
+              Define a <b>recipes</b>-based preprocessing pipeline.
+              All steps are <b>fitted on train only</b> and applied to
+              both train and test to prevent data leakage.")
       ),
+      hr(),
+      
+      # ── Split ────────────────────────────────────────────────────────────
+      tags$label("Split variable:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      selectInput(ns("split_var"), label = NULL,
+                  choices = c("(none)"), width = "100%"),
+      conditionalPanel(
+        condition = paste0("input['", ns("split_var"), "'] != '(none)'"),
+        fluidRow(
+          column(6,
+                 tags$label("Train level:", style = "font-size:12px; font-weight:600; color:#343a40;"),
+                 selectInput(ns("train_level"), label = NULL, choices = c("(none)"), width = "100%")
+          ),
+          column(6,
+                 tags$label("Test level:", style = "font-size:12px; font-weight:600; color:#343a40;"),
+                 selectInput(ns("test_level"), label = NULL, choices = c("(none)"), width = "100%")
+          )
+        )
+      ),
+      uiOutput(ns("split_counts_ui")),
       hr(),
       
       actionButton(
@@ -66,9 +92,8 @@ prep_recipe_ui <- function(id) {
                        border-left:3px solid #ffc107; padding:6px 10px;
                        border-radius:4px; margin-bottom:16px;",
               icon("triangle-exclamation", style = "color:#ffc107;"),
-              HTML(" <b>Required.</b> You must define the response (Y), predictors,
-                    and any columns to exclude. Defaults are pulled from Data Roles config —
-                    fall back to <b>(none)</b> if not configured.")
+              HTML(" <b>Required.</b> Define the response (Y), predictors, and columns
+                    to exclude. Auto-filled from Data Roles — override if needed.")
             ),
             
             fluidRow(
@@ -99,14 +124,14 @@ prep_recipe_ui <- function(id) {
             )
           ),
           
-          # ── Part 2: Previously Handled Steps ──────────────────────────────
+          # ── Part 2: Imputation & Scaling ───────────────────────────────────
           div(
             style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
                      padding:20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
             
             tags$h5(
               icon("rotate", style = "color:#185FA5; margin-right:6px;"),
-              "Part 2 — Previously Handled Steps",
+              "Part 2 — Imputation & Scaling",
               style = "font-weight:600; color:#343a40; margin-bottom:4px;"
             ),
             div(
@@ -114,9 +139,10 @@ prep_recipe_ui <- function(id) {
                        border-left:3px solid #a8c0fd; padding:6px 10px;
                        border-radius:4px; margin-bottom:16px;",
               icon("circle-info", style = "color:#185FA5;"),
-              HTML(" These steps default to <b>None</b> and are safe to skip if already
-                    handled in the Miss Strategy pipeline. Only enable if you want the
-                    recipe to handle them instead.")
+              HTML(" All steps are <b>fitted on train only</b> and applied to both
+                    train and test. Imputation is required if missing values remain.
+                    Scaling is recommended for linear models (Ridge, Lasso, ElasticNet)
+                    but not needed for tree-based models.")
             ),
             
             fluidRow(
@@ -125,21 +151,21 @@ prep_recipe_ui <- function(id) {
                                 style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
                      radioButtons(ns("impute_method"), label = NULL,
                                   choices = c(
-                                    "None (already handled)" = "none",
-                                    "KNN"                    = "knn",
-                                    "Bagged Trees"           = "bag",
-                                    "Mean / Median / Mode"   = "mmm"
+                                    "None"         = "none",
+                                    "KNN"          = "knn",
+                                    "Bagged Trees" = "bag",
+                                    "Mean / Median / Mode" = "mmm"
                                   ),
-                                  selected = "none"),
+                                  selected = "bag"),
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'knn'", ns("impute_method")),
                        sliderInput(ns("knn_k"), "Neighbours (k):",
-                                   min = 1, max = 25, value = 2, step = 1, width = "100%")
+                                   min = 1, max = 25, value = 5, step = 1, width = "100%")
                      ),
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'bag'", ns("impute_method")),
                        sliderInput(ns("bag_trees"), "Number of trees:",
-                                   min = 2, max = 50, value = 4, step = 5, width = "100%")
+                                   min = 2, max = 50, value = 4, step = 1, width = "100%")
                      )
               ),
               column(6,
@@ -147,13 +173,13 @@ prep_recipe_ui <- function(id) {
                                 style = "font-weight:600; font-size:13px; color:#343a40; display:block; margin-bottom:4px;"),
                      radioButtons(ns("scale_method"), label = NULL,
                                   choices = c(
-                                    "None (already handled)"               = "none",
+                                    "None"                                 = "none",
                                     "Standardise — (x - mean) / sd"        = "standardise",
                                     "Normalise — (x - min) / (max - min)"  = "normalise",
                                     "Centre only — x - mean"               = "centre",
                                     "Scale only — x / sd"                  = "scale"
                                   ),
-                                  selected = "none")
+                                  selected = "standardise")
               )
             )
           ),
@@ -238,7 +264,68 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
     
     ns <- session$ns
     
-    # ── Populate selectors from roles ────────────────────────────────────────
+    # ── Helper: resolve train df from split settings ──────────────────────────
+    
+    get_train_df <- function(df) {
+      sv <- input$split_var
+      tl <- input$train_level
+      if (!is.null(sv) && sv != "(none)" && sv %in% names(df) &&
+          !is.null(tl) && tl != "(none)") {
+        df[as.character(df[[sv]]) == tl, , drop = FALSE]
+      } else {
+        df
+      }
+    }
+    
+    # ── Populate split selectors from roles ───────────────────────────────────
+    
+    observe({
+      req(get_data(), roles())
+      r    <- roles()
+      df   <- get_data()
+      vars <- names(df)
+      sv   <- names(r)[r == "split"]
+      
+      updateSelectInput(session, "split_var",
+                        choices  = c("(none)", vars),
+                        selected = if (length(sv) > 0 && sv[1] %in% vars) sv[1] else "(none)")
+    })
+    
+    observe({
+      req(input$split_var, input$split_var != "(none)")
+      df   <- get_data(); req(df)
+      lvls <- as.character(unique(df[[input$split_var]]))
+      lvls <- lvls[!is.na(lvls)]
+      train_sel <- if ("Train" %in% lvls) "Train" else lvls[1]
+      test_sel  <- if ("Test"  %in% lvls) "Test"  else if (length(lvls) >= 2) lvls[2] else lvls[1]
+      updateSelectInput(session, "train_level", choices = c("(none)", lvls), selected = train_sel)
+      updateSelectInput(session, "test_level",  choices = c("(none)", lvls), selected = test_sel)
+    })
+    
+    # ── Split counts hint ─────────────────────────────────────────────────────
+    
+    output$split_counts_ui <- renderUI({
+      sv <- input$split_var
+      tl <- input$train_level
+      ts <- input$test_level
+      req(!is.null(sv) && sv != "(none)")
+      df <- get_data(); req(df)
+      req(sv %in% names(df))
+      
+      n_train <- if (!is.null(tl) && tl != "(none)") sum(as.character(df[[sv]]) == tl, na.rm = TRUE) else NA
+      n_test  <- if (!is.null(ts) && ts != "(none)") sum(as.character(df[[sv]]) == ts, na.rm = TRUE) else NA
+      
+      div(
+        style = "font-size:12px; color:#185FA5; background:#E6F1FB;
+                 border-radius:6px; padding:6px 10px; margin-top:8px;",
+        icon("circle-info"),
+        HTML(paste0(" Train: <b>", if (is.na(n_train)) "—" else n_train,
+                    "</b> &nbsp;|&nbsp; Test: <b>",
+                    if (is.na(n_test))  "—" else n_test, "</b>"))
+      )
+    })
+    
+    # ── Populate role selectors ───────────────────────────────────────────────
     
     observe({
       req(get_data(), roles())
@@ -247,16 +334,13 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
       
       all_vars <- names(df)
       
-      y_default      <- names(r)[r == "outcome"]
-      pred_default   <- names(r)[r == "predictor"]
-      ignore_default <- names(r)[tolower(as.character(r)) %in%
-                                   c("obs_id", "split", "sensitive",
-                                     "weight", "stratifier", "ignore")]
-      
-      # keep only vars that exist in df
-      y_default      <- intersect(y_default,      all_vars)
-      pred_default   <- intersect(pred_default,   all_vars)
-      ignore_default <- intersect(ignore_default, all_vars)
+      y_default      <- intersect(names(r)[r == "outcome"],   all_vars)
+      pred_default   <- intersect(names(r)[r == "predictor"], all_vars)
+      ignore_default <- intersect(
+        names(r)[tolower(as.character(r)) %in%
+                   c("obs_id", "split", "sensitive", "weight", "stratifier", "ignore")],
+        all_vars
+      )
       
       updateSelectizeInput(session, "y_var",
                            choices  = all_vars,
@@ -298,60 +382,63 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
     
     observeEvent(input$reset, {
       built_recipe(NULL)
-      updateRadioButtons(session, "impute_method", selected = "none")
-      updateRadioButtons(session, "scale_method",  selected = "none")
-      updateSliderInput(session,  "knn_k",          value = 5)
-      updateSliderInput(session,  "bag_trees",      value = 25)
-      updateCheckboxInput(session, "dummy_encode",  value = TRUE)
-      updateCheckboxInput(session, "remove_nzv",    value = FALSE)
+      updateRadioButtons(session, "impute_method",  selected = "bag")
+      updateRadioButtons(session, "scale_method",   selected = "standardise")
+      updateSliderInput(session,  "knn_k",           value = 5)
+      updateSliderInput(session,  "bag_trees",       value = 4)
+      updateCheckboxInput(session, "dummy_encode",   value = TRUE)
+      updateCheckboxInput(session, "remove_nzv",     value = FALSE)
       updateCheckboxInput(session, "remove_lincomb", value = FALSE)
-      # re-populate from roles
+      
       req(get_data(), roles())
       df <- get_data()
       r  <- roles()
       all_vars       <- names(df)
       y_default      <- intersect(names(r)[r == "outcome"],   all_vars)
       pred_default   <- intersect(names(r)[r == "predictor"], all_vars)
-      ignore_default <- intersect(names(r)[tolower(as.character(r)) %in%
-                                             c("obs_id", "split", "sensitive",
-                                               "weight", "stratifier", "ignore")], all_vars)
-      updateSelectizeInput(session, "y_var",       choices = all_vars, selected = if (length(y_default) > 0) y_default[1] else NULL, server = TRUE)
+      ignore_default <- intersect(
+        names(r)[tolower(as.character(r)) %in%
+                   c("obs_id", "split", "sensitive", "weight", "stratifier", "ignore")],
+        all_vars
+      )
+      updateSelectizeInput(session, "y_var",
+                           choices = all_vars,
+                           selected = if (length(y_default) > 0) y_default[1] else NULL,
+                           server = TRUE)
       updateSelectizeInput(session, "pred_cols",   choices = all_vars, selected = pred_default,   server = TRUE)
       updateSelectizeInput(session, "ignore_cols", choices = all_vars, selected = ignore_default, server = TRUE)
     })
     
-    # ── Built recipe (reactive, triggered by Build button) ────────────────────
+    # ── Built recipe (triggered by Build button) ──────────────────────────────
     
     built_recipe <- reactiveVal(NULL)
     
     observeEvent(input$build, {
-      df   <- get_data(); req(df)
-      y    <- input$y_var
+      df    <- get_data(); req(df)
+      y     <- input$y_var
       preds <- input$pred_cols
       
       req(nzchar(y), length(preds) > 0)
       
       tryCatch({
-        library(recipes)
         set.seed(seed())
         
-        # use train split if available, otherwise full df
-        train_df <- df
-        
+        # ── use train rows only ───────────────────────────────────────────
+        train_df <- get_train_df(df)
         
         rec <- recipe(as.formula(paste(y, "~ .")), data = train_df)
         
         # update roles for ignored columns
-        excl <- unique(c(input$ignore_cols))
+        excl <- unique(input$ignore_cols)
         excl <- intersect(excl, names(train_df))
         excl <- setdiff(excl, c(y, preds))
         if (length(excl) > 0)
           rec <- rec |> update_role(all_of(excl), new_role = "ignore")
         
-        # remove non-predictor, non-outcome cols from recipe scope
+        # drop non-predictor non-outcome cols
         keep <- union(preds, y)
         drop <- setdiff(names(train_df), keep)
-        drop <- setdiff(drop, excl)  # already handled above
+        drop <- setdiff(drop, excl)
         if (length(drop) > 0)
           rec <- rec |> update_role(all_of(drop), new_role = "ignore")
         
@@ -359,14 +446,16 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
         rec <- switch(input$impute_method,
                       "knn" = rec |> step_impute_knn(all_predictors(), neighbors = input$knn_k),
                       "bag" = rec |> step_impute_bag(all_predictors(), trees = input$bag_trees),
-                      "mmm" = rec |> step_impute_mode(all_nominal_predictors()) |>
+                      "mmm" = rec |>
+                        step_impute_mode(all_nominal_predictors()) |>
                         step_impute_mean(all_numeric_predictors()),
                       rec  # none
         )
         
         # ── Part 2: scaling ───────────────────────────────────────────────
         rec <- switch(input$scale_method,
-                      "standardise" = rec |> step_center(all_numeric_predictors()) |>
+                      "standardise" = rec |>
+                        step_center(all_numeric_predictors()) |>
                         step_scale(all_numeric_predictors()),
                       "normalise"   = rec |> step_range(all_numeric_predictors()),
                       "centre"      = rec |> step_center(all_numeric_predictors()),
@@ -380,7 +469,9 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
         if (isTRUE(input$remove_lincomb))
           rec <- rec |> step_lincomb(all_numeric_predictors())
         if (isTRUE(input$dummy_encode))
-          rec <- rec |> step_dummy(all_nominal_predictors())
+          rec <- rec |>
+          step_unknown(all_nominal_predictors()) |>   # handle unseen factor levels
+          step_dummy(all_nominal_predictors())
         
         built_recipe(rec)
         
@@ -403,16 +494,15 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
         return(invisible(NULL))
       }
       
-      # build human-readable recipe code string
-      y     <- input$y_var
-      preds <- input$pred_cols
-      excl  <- input$ignore_cols
+      y    <- input$y_var
+      excl <- input$ignore_cols
       
       lines <- c(
-        paste0('rec <- recipe(', y, ' ~ ., data = train)'),
-        if (length(excl) > 0)
-          paste0('  |> update_role(c("', paste(excl, collapse = '", "'), '"), new_role = "ignore")')
+        paste0('rec <- recipe(', y, ' ~ ., data = train_df)')
       )
+      
+      if (length(excl) > 0)
+        lines <- c(lines, paste0('  |> update_role(c("', paste(excl, collapse = '", "'), '"), new_role = "ignore")'))
       
       if (input$impute_method == "knn")
         lines <- c(lines, paste0('  |> step_impute_knn(all_predictors(), neighbors = ', input$knn_k, ')'))
@@ -439,7 +529,9 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
       if (isTRUE(input$remove_lincomb))
         lines <- c(lines, '  |> step_lincomb(all_numeric_predictors())')
       if (isTRUE(input$dummy_encode))
-        lines <- c(lines, '  |> step_dummy(all_nominal_predictors())')
+        lines <- c(lines,
+                   '  |> step_unknown(all_nominal_predictors())',
+                   '  |> step_dummy(all_nominal_predictors())')
       
       cat(paste(lines, collapse = "\n"), "\n")
     })
@@ -460,20 +552,32 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
       
       tryCatch({
         df       <- get_data()
-        train_df <- df
+        train_df <- get_train_df(df)
         
         set.seed(seed())
-        prepped  <- prep(rec, training = train_df, verbose = FALSE)
+        prepped <- prep(rec, training = train_df, verbose = FALSE)
         print(summary(prepped))
-        cat("\n── Baked dimensions ────────────────────\n")
-        baked <- bake(prepped, new_data = NULL)
-        cat(sprintf("Rows : %d\nCols : %d\n", nrow(baked), ncol(baked)))
+        
+        cat("\n── Train dimensions (after baking) ─────\n")
+        baked_train <- bake(prepped, new_data = NULL)
+        cat(sprintf("Rows : %d\nCols : %d\n", nrow(baked_train), ncol(baked_train)))
+        
+        # test dimensions if split is set
+        sv <- input$split_var
+        ts <- input$test_level
+        if (!is.null(sv) && sv != "(none)" && !is.null(ts) && ts != "(none)" && sv %in% names(df)) {
+          test_df    <- df[as.character(df[[sv]]) == ts, , drop = FALSE]
+          baked_test <- bake(prepped, new_data = test_df)
+          cat(sprintf("\n── Test dimensions (after baking) ──────\n"))
+          cat(sprintf("Rows : %d\nCols : %d\n", nrow(baked_test), ncol(baked_test)))
+        }
+        
         cat("\nColumn types after baking:\n")
-        type_tbl <- table(sapply(baked, function(x) class(x)[1]))
+        type_tbl <- table(sapply(baked_train, function(x) class(x)[1]))
         for (nm in names(type_tbl))
           cat(sprintf("  %-12s : %d\n", nm, type_tbl[[nm]]))
         
-        # ── NZV and lincomb removals ───────────────────────────────────────
+        # NZV and lincomb removals
         removals_found <- FALSE
         for (step in prepped$steps) {
           if (inherits(step, "step_nzv") || inherits(step, "step_lincomb")) {
