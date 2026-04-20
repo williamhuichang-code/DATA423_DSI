@@ -38,6 +38,21 @@ miss_excessive_ui <- function(id) {
                   min = 0, max = 1, value = 1, step = 0.05, width = "100%"),
       hr(),
       
+      hr(),
+      
+      tags$p("Step 2 Table \u2014 Extra Columns",
+             style = "font-size:12px; color:#6c757d; margin-bottom:4px;"),
+      tags$label("Show columns alongside excluded rows:",
+                 style = "font-weight:600; font-size:13px; color:#343a40;"),
+      div(style = "font-size:11px; color:#6c757d; margin-bottom:6px;",
+          "e.g. select your ID column to identify excluded observations."),
+      selectizeInput(ns("extra_cols"), label = NULL,
+                     choices  = NULL,
+                     multiple = TRUE,
+                     options  = list(placeholder = "Select columns to display..."),
+                     width    = "100%"),
+      hr(),
+      
       actionButton(ns("reset"), label = "Reset", icon = icon("rotate-left"), width = "100%")
     ),
     
@@ -59,7 +74,18 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
     observeEvent(input$reset, {
       updateSliderInput(session, "var_thresh", value = 1)
       updateSliderInput(session, "obs_thresh", value = 1)
+      updateSelectizeInput(session, "extra_cols", selected = character(0))
     })
+    
+    # ── populate extra_cols selector ─────────────────────────────────────
+    observe({
+      df <- get_data(); req(df)
+      updateSelectizeInput(session, "extra_cols",
+                           choices  = names(df),
+                           selected = character(0),
+                           server   = TRUE)
+    }) |> bindEvent(get_data(), once = TRUE)
+    
     
     # ── compute exclusions ────────────────────────────────────────────────
     
@@ -230,15 +256,24 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
       req(result())
       res <- result()
       req(length(res$excl_rows) > 0)
+      df  <- get_data(); req(df)
       
       tbl <- data.frame(
-        Row               = res$excl_rows,
-        Missing_Pct       = paste0(round(res$obs_miss[res$excl_rows] * 100, 1), "%"),
-        stringsAsFactors  = FALSE
+        Row         = res$excl_rows,
+        Missing_Pct = paste0(round(res$obs_miss[res$excl_rows] * 100, 1), "%"),
+        stringsAsFactors = FALSE
       )
+      
+      # append any user-selected extra columns
+      extra <- intersect(input$extra_cols, names(df))
+      if (length(extra) > 0) {
+        extra_df <- df[res$excl_rows, extra, drop = FALSE]
+        tbl      <- cbind(tbl, extra_df)
+      }
+      
       tbl <- tbl[order(-res$obs_miss[res$excl_rows]), ]
       
-      DT::datatable(tbl, options = list(pageLength = 10, dom = "tip"),
+      DT::datatable(tbl, options = list(pageLength = 10, dom = "tip", scrollX = TRUE),
                     rownames = FALSE) |>
         DT::formatStyle("Missing_Pct", color = "#993556", fontWeight = "bold")
     })
