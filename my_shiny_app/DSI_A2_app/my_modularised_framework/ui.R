@@ -4,14 +4,22 @@
 
 ui <- dashboardPage(
   
+  preloader = list(
+    html  = tagList(
+      waiter::spin_flower(),
+      h4("Loading My DSI Studio...", style = "color:#D6DEE6; margin-top:10px;")
+    ),
+    color = "#49545C"
+  ),
+  
   # ── HEADER ─────────────────────────────────────────────────────────────────
   
   header = dashboardHeader(
-    title = "My App",
+    title = "My DSI Studio",
     selectInput(
       inputId  = "selected_file",
       label    = NULL,
-      choices  = file_choices,
+      choices  = file_choices_with_none,
       selected = default_selected,
       width    = "200px"
     ),
@@ -32,12 +40,9 @@ ui <- dashboardPage(
       id = "sidebar",
       
       menuItem("Config", tabName = "config", icon = icon("sliders"),
-               menuSubItem("Global Seed",    tabName = "config_seed"),
-               menuSubItem("Split Setting",  tabName = "config_split"),
                menuSubItem("Data Roles",     tabName = "data_roles"),
-               menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("EDA", tabName = "eda", icon = icon("chart-bar"),
@@ -52,7 +57,7 @@ ui <- dashboardPage(
                menuSubItem("Heatmap",      tabName = "eda_heatmap"),
                menuSubItem("GGPairs",      tabName = "eda_ggpairs"),
                menuSubItem("Bar Chart",    tabName = "eda_bar")
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("Miss Strategy", tabName = "miss", icon = icon("circle-question"),
@@ -64,7 +69,7 @@ ui <- dashboardPage(
                menuSubItem("Diag: Transform",  tabName = "miss_transform"),
                menuSubItem("Diag: Rpart",      tabName = "miss_rpart"),
                menuSubItem("Diag: Importance", tabName = "miss_importance")
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("Out Strategy", tabName = "out", icon = icon("triangle-exclamation"),
@@ -79,14 +84,14 @@ ui <- dashboardPage(
                menuSubItem("Isolation Forest", tabName = "out_iforest"),
                menuSubItem("Summary",          tabName = "out_summary"),
                menuSubItem("Response",         tabName = "out_response")
-               # add more subtabs here
+               # more future subtabs here
       ),
       
       menuItem("Model", tabName = "model", icon = icon("brain"),
                menuSubItem("Recipe",     tabName = "pre_recipe"),
                menuSubItem("Tune",       tabName = "model_tune"),
                menuSubItem("Regression", tabName = "model_reg")
-               # add more subtabs here
+               # more future subtabs here
       )
     )
   ),
@@ -98,10 +103,7 @@ ui <- dashboardPage(
     tabItems(
       
       # Config
-      tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
-      tabItem(tabName = "config_split",     split_ui("split")),
       tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
-      tabItem(tabName = "config_important", config_important_ui("config_important")),
       tabItem(tabName = "data_download",    data_download_ui("data_download")),
       
       # EDA

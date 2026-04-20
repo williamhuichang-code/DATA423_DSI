@@ -7,20 +7,11 @@
 library(shiny)
 library(bs4Dash)
 library(dplyr)
-library(summarytools)
+library(waiter)
 library(plotly)
-library(visdat)
-library(naniar)
-library(gridExtra)
-library(dbscan)       # LOF
-library(e1071)        # SVM
-library(randomForest) # RF
-library(isotree)      # Isolation Forest
-library(ggrepel)      # label repelling in plots
+library(ggrepel)
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
-
-##### change global configs when needed
 
 # file of interest
 FILE_OF_INTEREST <- "Ass2Data.csv"
@@ -29,18 +20,24 @@ FILE_OF_INTEREST <- "Ass2Data.csv"
 DATA_WD <- "."
 
 
-# ── FILES IN THE WORK DIRECTORY ──────────────────────────────────────────────
+# ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
 
+# all csv files as a list
 csv_files <- list.files(DATA_WD, pattern = "\\.csv$", full.names = FALSE)
-file_choices <- if (length(csv_files) == 0) c("(none)") else csv_files
+
+# add a (none) option to choices
+file_choices_with_none    <- c("(none)", csv_files)
+
+# prioritise on interested file and fallback at (none)
 default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "(none)"
 
 
-# ── LOAD MODULE ──────────────────────────────────────────────────────────────
+# ── MODULE LOADING LOGIC ─────────────────────────────────────────────────────
+
+# look inside "modules" folder and its subs, load all files with .R according to their full paths
 list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
   lapply(source)
-print(getwd())
-print(csv_files)
+
 
 
 
