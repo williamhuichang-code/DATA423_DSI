@@ -160,7 +160,7 @@ prep_recipe_ui <- function(id) {
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'knn'", ns("impute_method")),
                        sliderInput(ns("knn_k"), "Neighbours (k):",
-                                   min = 1, max = 25, value = 5, step = 1, width = "100%")
+                                   min = 1, max = 25, value = 2, step = 1, width = "100%")
                      ),
                      conditionalPanel(
                        condition = sprintf("input['%s'] == 'bag'", ns("impute_method")),
@@ -384,7 +384,7 @@ prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
       built_recipe(NULL)
       updateRadioButtons(session, "impute_method",  selected = "bag")
       updateRadioButtons(session, "scale_method",   selected = "standardise")
-      updateSliderInput(session,  "knn_k",           value = 5)
+      updateSliderInput(session,  "knn_k",           value = 2)
       updateSliderInput(session,  "bag_trees",       value = 4)
       updateCheckboxInput(session, "dummy_encode",   value = TRUE)
       updateCheckboxInput(session, "remove_nzv",     value = FALSE)
