@@ -613,8 +613,15 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
         ggplot2::coord_flip() +
         ggplot2::labs(x = NULL, y = "|Coefficient|",
                       title = "Variable Importance (|Coefficient|)") +
-        ggplot2::theme_minimal(base_size = 13) +
-        ggplot2::theme(legend.position = "bottom")
+        ggplot2::theme_minimal(base_size = 16) +
+        ggplot2::theme(
+          plot.title      = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title.x    = ggplot2::element_text(size = 16, face = "bold"),
+          axis.text       = ggplot2::element_text(size = 14),
+          legend.title    = ggplot2::element_text(size = 16, face = "bold"),
+          legend.text     = ggplot2::element_text(size = 14),
+          legend.position = "bottom"
+        )
     })
     
     # ── Prediction UI ─────────────────────────────────────────────────────────
@@ -695,11 +702,16 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
           ggplot2::geom_point(alpha = 0.6, size = 2.5, color = "#343a40") +
           ggplot2::geom_abline(slope = 1, intercept = 0, color = "#185FA5", linewidth = 1) +
           ggrepel::geom_text_repel(ggplot2::aes(label = label),
-                                   max.overlaps = 50, na.rm = TRUE, size = 3.5,
+                                   max.overlaps = 50, na.rm = TRUE, size = 5,
                                    color = "#C41E3A", seed = seed()) +
           ggplot2::coord_fixed(ratio = 1, xlim = rang, ylim = rang, expand = TRUE) +
           ggplot2::labs(title = "Predicted vs Actual", x = "Predicted", y = "Actual") +
-          ggplot2::theme_minimal(base_size = 13)
+          ggplot2::theme_minimal(base_size = 16) +
+          ggplot2::theme(
+            plot.title   = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+            axis.title   = ggplot2::element_text(size = 16, face = "bold"),
+            axis.text    = ggplot2::element_text(size = 14)
+          )
       }
       
       make_pred_actual(df_plot)
@@ -952,7 +964,7 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
                               fill = "#e8f0fe", width = 0.4) +
         ggrepel::geom_text_repel(ggplot2::aes(label = label),
                                  max.overlaps = 30, na.rm = TRUE,
-                                 size = 3.2, colour = "#C41E3A", seed = seed()) +
+                                 size = 5, colour = "#C41E3A", seed = seed()) +
         ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "#6c757d") +
         ggplot2::labs(
           title = paste0("Residual Boxplot | IQR k = ", k, " | ",
@@ -961,10 +973,12 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
                                 "test"  = "Test only",
                                 "both"  = "Train + Test")),
           x = "Residual", y = NULL) +
-        ggplot2::theme_minimal(base_size = 13) +
+        ggplot2::theme_minimal(base_size = 16) +
         ggplot2::theme(
-          plot.title         = ggplot2::element_text(size = 12, face = "bold", hjust = 0.5),
-          axis.text.y        = ggplot2::element_text(face = "bold", size = 12),
+          plot.title         = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title.x       = ggplot2::element_text(size = 16, face = "bold"),
+          axis.text.x        = ggplot2::element_text(size = 14),
+          axis.text.y        = ggplot2::element_text(face = "bold", size = 14),
           panel.grid.major.y = ggplot2::element_blank())
     })
     
@@ -1092,7 +1106,8 @@ model_reg_server <- function(id, get_data, roles, get_recipe, model_tune, get_ra
       res <- model_result()
       req(res, is.null(res$error), !is.null(res$metrics))
       m <- res$metrics
-      par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+      par(mfrow = c(2, 2), mar = c(4, 4, 3, 1),
+          cex.main = 1.4, cex.lab = 1.2, cex.axis = 1.1)
       
       # 1. Residuals vs Fitted
       plot(m$preds, m$resids,

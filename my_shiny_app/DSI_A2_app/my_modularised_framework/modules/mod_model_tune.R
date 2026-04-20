@@ -804,9 +804,11 @@ model_tune_server <- function(id, get_data, roles, get_recipe, seed = reactive(4
         paste0("α = ", res$alpha, ": CV Error vs Lambda")
       }
       
-      par(mar = c(5, 4, 6, 2))
+      par(mar = c(5, 5, 6, 2),
+          cex.axis = 1.3,
+          cex.lab  = 1.4)
       plot(res$cv_fit, main = "")
-      title(main = title, line = 4)
+      title(main = title, line = 4, cex.main = 1.6, font.main = 2)
     })
     
     # ── Confirm feedback ──────────────────────────────────────────────────────
