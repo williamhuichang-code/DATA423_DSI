@@ -159,7 +159,7 @@ out_bagplot_server <- function(id, get_data, get_raw, roles) {
           text(x      = x_vals[outlier_mask],
                y      = y_vals[outlier_mask],
                labels = as.character(outlier_df[[input$label_col]]),
-               pos    = 3, cex = 0.7, col = "#C41E3A", font = 3)
+               pos    = 3, cex = 1.3, col = "#C41E3A", font = 3)
         }
       }, error = function(e) {
         ggplot2::ggplot() +

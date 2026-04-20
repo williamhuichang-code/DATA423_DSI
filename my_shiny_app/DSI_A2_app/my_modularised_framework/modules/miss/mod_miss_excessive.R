@@ -181,7 +181,7 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
                  padding:8px 12px; margin-bottom:12px;",
               icon("user-doctor", style = "color:#185FA5;"),
               " Please consult a domain expert before removing these variables — 
-              high missingness may be informative or structurally expected."
+              they might be important variables that should stay no matter what."
             ),
             DT::dataTableOutput(ns("excl_vars_tbl"))
           )
