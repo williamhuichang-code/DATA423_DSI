@@ -246,7 +246,7 @@ server <- function(input, output, session) {
   transform <- miss_transform_server("miss_transform", impute$data, roles)
   
   # get data for different purposes (training and diagnose respectively)
-  get_train_data    <- out_response$data
+  get_model_data    <- out_response$data
   get_diagnose_data <- transform$data
   
   # download df at any stage
@@ -289,9 +289,9 @@ server <- function(input, output, session) {
   # ── PIPELINE (AUTO) ───────────────────────────────────────────────────────
   
   # OOP for recipe-based preprocessing and training
-  precipe    <- prep_recipe_server("prep_recipe", get_train_data, roles, seed_in_use)
-  model_tune <- model_tune_server("model_tune",   get_train_data, roles, precipe$recipe)
-  model_reg  <- model_reg_server("model_reg",     get_train_data, roles, precipe$recipe, model_tune, get_raw)
+  precipe    <- prep_recipe_server("prep_recipe", get_model_data, roles, seed_in_use)
+  model_tune <- model_tune_server("model_tune",   get_model_data, roles, precipe$recipe)
+  model_reg  <- model_reg_server("model_reg",     get_model_data, roles, precipe$recipe, model_tune, get_raw)
   
   
 }
