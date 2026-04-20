@@ -39,7 +39,7 @@ file_choices_with_none    <- c("(none)", csv_files)
 default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "(none)"
 
 
-# ── LOAD MODULE ──────────────────────────────────────────────────────────────
+# ── MODULE LOADING LOGIC ─────────────────────────────────────────────────────
 
 # look inside "modules" folder and its subs, load all files with .R according to their full paths
 list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
@@ -83,10 +83,7 @@ ui <- dashboardPage(
       id = "sidebar",
       
       menuItem("Config", tabName = "config", icon = icon("sliders"),
-               menuSubItem("Global Seed",    tabName = "config_seed"),
-               menuSubItem("Split Setting",  tabName = "config_split"),
                menuSubItem("Data Roles",     tabName = "data_roles"),
-               menuSubItem("Important Vars", tabName = "config_important"),
                menuSubItem("Download Data",  tabName = "data_download", icon = icon("download"))
                # more future subtabs here
       ),
@@ -149,10 +146,7 @@ ui <- dashboardPage(
     tabItems(
       
       # Config
-      tabItem(tabName = "config_seed",      config_seed_ui("config_seed")),
-      tabItem(tabName = "config_split",     split_ui("split")),
       tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
-      tabItem(tabName = "config_important", config_important_ui("config_important")),
       tabItem(tabName = "data_download",    data_download_ui("data_download")),
       
       # EDA
@@ -226,17 +220,17 @@ server <- function(input, output, session) {
   
   # ── DOMAIN CONFIGS ───────────────────────────────────────────────────────
   
-  global_seed    <- config_seed_server("config_seed")
-  split          <- split_server("split", get_raw, global_seed = global_seed)
-  roles          <- data_roles_server("data_roles", split$data)
-  important_vars <- config_important_server("config_important", split$data)
+  config         <- data_roles_server("data_roles", get_raw)
+  roles          <- config$roles           # reactive named list of role assignments
+  important_vars <- config$important_vars  # reactive character vector
+  seed_in_use    <- config$seed            # reactive integer
   
   
   # ── PIPELINE ──────────────────────────────────────────────────────────────
   
   # manual ones
   # missingness ones
-  variant   <- miss_variants_server("miss_variants",   split$data)
+  variant <- miss_variants_server("miss_variants",     config$data)
   shadow    <- miss_shadow_server("miss_shadow",       variant$data)
   napp      <- miss_napp_server("miss_napp",           shadow$data)
   excessive <- miss_excessive_server("miss_excessive", napp$data, important_vars)
@@ -247,9 +241,36 @@ server <- function(input, output, session) {
   transform <- miss_transform_server("miss_transform", impute$data, roles)
   
   
+  # ── DEBUG ─────────────────────────────────────────────────────────────────
+  observe({
+    df <- out_response$data()
+    cat("\n── out_response rows feeding recipe:", nrow(df), "\n")
+    
+    r  <- roles()
+    sv <- names(r)[r == "split"]
+    if (length(sv) > 0 && sv %in% names(df)) {
+      cat("── split distribution in recipe input:\n")
+      print(table(df[[sv]], useNA = "always"))
+    }
+  })
+  # ── DEBUG ─────────────────────────────────────────────────────────────────
+  
+  
   # recipe ones
   # preprocessing one
-  precipe   <- prep_recipe_server("prep_recipe",       out_response$data, roles, split)
+  precipe   <- prep_recipe_server("prep_recipe",       out_response$data, roles, seed_in_use)
+  
+  
+  # ── DEBUG ─────────────────────────────────────────────────────────────────
+  observe({
+    df <- out_response$data()
+    cat("\n── out_response$data rows:", nrow(df), "\n")
+    cat("── impute$data rows:       ", nrow(impute$data()), "\n")
+    cat("── transform$data rows:    ", nrow(transform$data()), "\n")
+  })
+  # ── DEBUG ─────────────────────────────────────────────────────────────────
+  
+  
   # model ones
   model_tune <- model_tune_server("model_tune", out_response$data, roles, precipe$recipe)
   model_reg <- model_reg_server("model_reg", out_response$data, roles, precipe$recipe, model_tune, get_raw)
@@ -257,6 +278,27 @@ server <- function(input, output, session) {
   
   get_data <- impute$data   # current end of pipeline
   
+  
+  # ── DEBUG ─────────────────────────────────────────────────────────────────
+  observe({
+    df <- out_response$data()
+    r  <- roles()
+    
+    outcome_col <- names(r)[r == "outcome"]
+    split_col   <- names(r)[r == "split"]
+    
+    cat("\n── df rows:", nrow(df), "\n")
+    cat("── outcome col:", outcome_col, "\n")
+    cat("── split col:  ", split_col, "\n")
+    
+    if (length(split_col) > 0 && split_col %in% names(df)) {
+      cat("── split col values:\n")
+      print(table(df[[split_col]], useNA = "always"))
+    } else {
+      cat("── NO split col found in df\n")
+    }
+  })
+  # ── DEBUG ─────────────────────────────────────────────────────────────────
   
   
   # ── DOWNLOAD AT ANY STAGE ─────────────────────────────────────────────────

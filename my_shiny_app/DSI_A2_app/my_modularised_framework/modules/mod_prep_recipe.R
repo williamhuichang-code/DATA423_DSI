@@ -233,7 +233,7 @@ prep_recipe_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-prep_recipe_server <- function(id, get_data, roles, split, seed = 2026) {
+prep_recipe_server <- function(id, get_data, roles, seed = reactive(42)) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -333,7 +333,7 @@ prep_recipe_server <- function(id, get_data, roles, split, seed = 2026) {
       
       tryCatch({
         library(recipes)
-        set.seed(seed)
+        set.seed(seed())
         
         # use train split if available, otherwise full df
         train_df <- df
@@ -462,7 +462,7 @@ prep_recipe_server <- function(id, get_data, roles, split, seed = 2026) {
         df       <- get_data()
         train_df <- df
         
-        set.seed(seed)
+        set.seed(seed())
         prepped  <- prep(rec, training = train_df, verbose = FALSE)
         print(summary(prepped))
         cat("\n── Baked dimensions ────────────────────\n")

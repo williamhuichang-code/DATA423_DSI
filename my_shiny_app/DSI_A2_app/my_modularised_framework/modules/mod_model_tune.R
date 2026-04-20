@@ -441,15 +441,44 @@ model_tune_server <- function(id, get_data, roles, get_recipe) {
     
     get_xy <- function(df, rec, y_col) {
       library(recipes)
+      
+      
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      cat("\n── get_xy called with nrow(df):", nrow(df), "\n")
+      cat("── recipe outcome var:", y_col, "\n")
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      
+      
       prepped   <- prep(rec, training = df, verbose = FALSE)
       baked     <- bake(prepped, new_data = df)
+      
+      
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      cat("── baked nrow:", nrow(baked), "\n")
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      
+      
       y         <- baked[[y_col]]
+      
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      cat("── y length:", length(y), "\n")
+      cat("── y NAs:", sum(is.na(y)), "\n")
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      
+      
       # use only predictor-role columns — excludes ignored cols like CODE, OBS_TYPE
       pred_cols <- prepped$var_info$variable[prepped$var_info$role == "predictor"]
       pred_cols <- intersect(pred_cols, names(baked))
       x_df      <- baked[, pred_cols, drop = FALSE]
       # model.matrix properly expands factors into dummy columns
       x         <- model.matrix(~ ., data = x_df)[, -1]
+      
+      
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      cat("── x nrow:", nrow(x), "\n")
+      # ── DEBUG ─────────────────────────────────────────────────────────────────
+      
+      
       list(x = x, y = y)
     }
     
