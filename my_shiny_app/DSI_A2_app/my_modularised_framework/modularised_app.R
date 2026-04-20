@@ -7,21 +7,13 @@
 library(shiny)
 library(bs4Dash)
 library(dplyr)
-library(summarytools)
 library(plotly)
-library(visdat)
-library(naniar)
-library(gridExtra)
-library(dbscan)       # LOF
-library(e1071)        # SVM
-library(randomForest) # RF
-library(isotree)      # Isolation Forest
-library(ggrepel)      # label repelling in plots
+library(ggrepel)
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
 # file of interest
-FILE_OF_INTEREST <- "non_exist_file.csv"
+FILE_OF_INTEREST <- "Ass2Data.csv"
 
 # explicit data folder
 DATA_WD <- "."
