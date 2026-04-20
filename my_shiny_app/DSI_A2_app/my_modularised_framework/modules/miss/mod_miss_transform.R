@@ -102,7 +102,7 @@ miss_transform_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-miss_transform_server <- function(id, get_data, roles) {
+miss_transform_server <- function(id, get_data, roles, seed = reactive(42)) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -225,6 +225,7 @@ miss_transform_server <- function(id, get_data, roles) {
                     "scale"       = rec |> step_scale(all_of(cols))
       )
       
+      set.seed(seed())
       trained     <- prep(rec, training = train_df[, cols, drop = FALSE], verbose = FALSE)
       train_baked <- bake(trained, new_data = NULL)
       test_baked  <- if (!is.null(test_df))

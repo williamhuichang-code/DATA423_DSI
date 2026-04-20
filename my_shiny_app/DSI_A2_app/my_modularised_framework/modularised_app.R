@@ -234,8 +234,8 @@ server <- function(input, output, session) {
   out_response <- out_response_server("out_response",     excessive$data, get_raw, roles)
   
   # exploratory diagnostics for imputation and standarisation choices
-  impute    <- miss_impute_server("miss_impute",       out_response$data, roles)
-  transform <- miss_transform_server("miss_transform", impute$data, roles)
+  impute    <- miss_impute_server("miss_impute",       out_response$data, roles, seed_in_use)
+  transform <- miss_transform_server("miss_transform", impute$data,       roles, seed_in_use)
   
   # get data for different purposes (modelling and diagnose respectively)
   get_model_data    <- out_response$data

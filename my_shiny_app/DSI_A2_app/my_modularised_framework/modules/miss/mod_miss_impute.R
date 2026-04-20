@@ -83,7 +83,7 @@ miss_impute_ui <- function(id) {
           "Bagged Tree (step_impute_bag)" = "bag",
           "Mean / Median / Mode"          = "mmm"
         ),
-        selected = "knn"
+        selected = "bag"
       ),
       hr(),
       
@@ -281,7 +281,7 @@ miss_impute_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-miss_impute_server <- function(id, get_data, roles) {
+miss_impute_server <- function(id, get_data, roles, seed = reactive(42)) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -430,6 +430,7 @@ miss_impute_server <- function(id, get_data, roles) {
             if (length(mean_cols)   > 0) rec <- rec |> step_impute_mean(all_of(mean_cols))
             if (length(median_cols) > 0) rec <- rec |> step_impute_median(all_of(median_cols))
             if (length(fac_cols)    > 0) rec <- rec |> step_impute_mode(all_of(fac_cols))
+            set.seed(seed())
             trained     <- prep(rec, training = train_pred, verbose = FALSE)
             train_baked <- bake(trained, new_data = NULL)
             test_baked  <- if (!is.null(test_pred)) bake(trained, new_data = test_pred) else NULL
@@ -446,6 +447,7 @@ miss_impute_server <- function(id, get_data, roles) {
             }
             rec <- recipe(fml, data = train_with_y) |>
               step_impute_knn(all_predictors(), neighbors = input$knn_neighbors)
+            set.seed(seed())
             trained     <- prep(rec, training = train_with_y, verbose = FALSE)
             train_baked <- bake(trained, new_data = NULL)
             test_baked  <- if (!is.null(test_with_y)) bake(trained, new_data = test_with_y) else NULL
@@ -465,6 +467,7 @@ miss_impute_server <- function(id, get_data, roles) {
             }
             rec <- recipe(fml, data = train_with_y) |>
               step_impute_bag(all_predictors(), trees = input$bag_trees)
+            set.seed(seed())
             withProgress(message = paste0("Fitting Bag (", input$bag_trees, " trees)..."), value = 0.2, {
               trained <- prep(rec, training = train_with_y, verbose = FALSE)
               setProgress(0.8, message = "Applying to train/test...")
