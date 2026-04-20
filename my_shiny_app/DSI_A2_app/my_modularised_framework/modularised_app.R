@@ -7,6 +7,7 @@
 library(shiny)
 library(bs4Dash)
 library(dplyr)
+library(waiter)
 library(plotly)
 library(ggrepel)
 
@@ -46,6 +47,14 @@ list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
 # =================================================================================
 
 ui <- dashboardPage(
+  
+  preloader = list(
+    html  = tagList(
+      waiter::spin_flower(),
+      h4("Loading My DSI Studio...", style = "color:#D6DEE6; margin-top:10px;")
+    ),
+    color = "#49545C"
+  ),
   
   # ── HEADER ─────────────────────────────────────────────────────────────────
   
