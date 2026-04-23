@@ -1,0 +1,295 @@
+---
+title: "DATA423 - caret Learning"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+
+
+##### initialise datasets
+# load("Residen.RData")
+# parkinsons <- read.csv("parkinsons.csv")
+
+##### global parameters
+SEED = 2026
+```
+
+```{r global_helper_comparison_table}
+##### function to plot correlation heatmap based on dataset
+# blabla placeholder
+```
+
+<div class="question">
+
+## **Function 1**
+
+featureplot()
+
+</div>
+
+\vspace{2em}
+
+### F1 Code
+
+```{r f1, fig.width=10, fig.height=10}
+##### blabla
+
+library(caret)
+data(iris)
+str(iris)
+featurePlot(x=iris[,1:4], y=iris$Species, plot='pairs')
+
+
+```
+
+
+
+
+<div class="question">
+
+## **Function 2**
+
+preprocess(): imputation
+
+Note: RANN is a dependency needed for knnImpute in caret
+
+</div>
+
+\vspace{2em}
+
+### F2 Code
+
+```{r f2, fig.width=10, fig.height=10}
+##### blabla
+
+Titanic <- read.csv("https://raw.githubusercontent.com/mariocastro73/ML2020-2021/master/datasets/Titanic.csv")
+age.mean <- mean(Titanic$Age, na.rm = TRUE)
+age.sd <- sd(Titanic$Age, na.rm = TRUE)
+pre <- preProcess(Titanic, method = "knnImpute", k = 5)
+Titanic.imputed <- predict(pre, Titanic)
+Titanic$Age[10:15]
+Titanic.imputed$Age[10:15]*age.sd+age.mean
+
+
+```
+
+
+
+<div class="question">
+
+## **Function 3**
+
+preprocess(): dummy
+
+Dummy Vars
+
+When dummy encoding with k levels, we have two choices:
+- Without full rank
+- - create linear dependence (Brown + Blonde + Black + Red + Grey = 1)
+- - Perfect multicollinearity (dummy variable trap)
+- With full rank
+- - create k - 1 dummy variables (fullRank = TRUE)
+- - Matrix is invertible (important for OLS)
+
+</div>
+
+\vspace{2em}
+
+### F3 Code
+
+```{r f3, fig.width=10, fig.height=10}
+##### blabla
+
+data <- data.frame(vars=as.factor(c("Brown","Blonde","Black","Red","Grey")))
+dv <- dummyVars(~vars, data=data, fullRank = T)
+cbind(data, predict(dv, data))
+
+
+```
+
+
+
+
+<div class="question">
+
+## **Function 4**
+
+preprocess(): nearZeroVar
+
+nearZeroVar
+
+</div>
+
+\vspace{2em}
+
+### F4 Code
+
+```{r f4, fig.width=10, fig.height=10}
+##### blabla
+
+data(mdrr)
+dim(mdrrDescr)
+nzv <- nearZeroVar(mdrrDescr, saveMetrics= TRUE)
+filteredDescr <- mdrrDescr[, !nzv$nzv]
+dim(filteredDescr)
+
+
+```
+
+
+
+<div class="question">
+
+## **Function 5**
+
+createDataPartition()
+
+splitting
+
+</div>
+
+\vspace{2em}
+
+### F5 Code
+
+```{r f5, fig.width=10, fig.height=10}
+##### blabla
+
+data(Default, package = "ISLR")
+dim(Default)
+default_idx = createDataPartition(Default$default, p = 0.75, list = FALSE)
+default_trn = Default[default_idx, ]
+default_tst = Default[-default_idx, ]
+str(default_trn) # Training
+
+str(default_tst) # Testing
+
+```
+
+
+
+<div class="question">
+
+## **Function 6**
+
+train()
+predict()
+
+training
+
+</div>
+
+\vspace{2em}
+
+### F6 Code
+
+```{r f6, fig.width=10, fig.height=10}
+##### blabla
+
+# Load the dataset directly from URL
+admision <- read.csv("https://stats.idre.ucla.edu/stat/data/binary.csv")
+
+# This dataset has exactly: admit, gre, gpa, rank
+str(admision)
+
+# Split
+set.seed(42)
+idx <- createDataPartition(admision$admit, p = 0.75, list = FALSE)
+admision.trn <- admision[idx, ]
+admision.tst <- admision[-idx, ]
+
+# Then your original chunk works unchanged:
+admision$admit <- as.factor(admision$admit)
+admision.trn$admit <- as.factor(admision.trn$admit)
+admision.tst$admit <- as.factor(admision.tst$admit)
+
+fit.logistic <- train(admit ~ ., data = admision.trn, method = "glm", family = "binomial")
+fit.knn      <- train(admit ~ ., data = admision.trn, method = "knn")
+pred.logistic <- predict(fit.logistic, admision.tst)
+pred.knn      <- predict(fit.knn, admision.tst)
+table(admision.tst$admit, pred.logistic) # More accurate than knn
+table(admision.tst$admit, pred.knn)
+
+```
+
+
+
+<div class="question">
+
+## **Function 6**
+
+resamples()
+
+model selecting
+
+Kappa is a measure of the difference between observed and expected
+
+- standardized to lie on a -1 to 1 scale, where 1 is perfect agreement
+- 0 is exactly what would be expected by chance
+- negative values indicate agreement less than chance
+
+</div>
+
+\vspace{2em}
+
+### F6 Code
+
+```{r f6, fig.width=8, fig.height=5}
+##### blabla
+
+library(mlbench) # Library to compare fittings with different methods
+results <- resamples(list(LR=fit.logistic, KNN=fit.knn))
+dotplot(results)
+
+
+```
+
+
+
+
+
+
+## **Appendix: AI Use Declaration**
+
+</div>
+
+GPT bla
+
+<div class="question">
+
+## **References**
+
+</div>
+
+<blank>
