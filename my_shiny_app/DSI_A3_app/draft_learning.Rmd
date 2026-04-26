@@ -1,0 +1,194 @@
+---
+title: "DATA423 - caret Learning"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+library(caret)
+
+##### initialise datasets
+dat <- read.csv('Ass3Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
+##### global parameters
+SEED = 2026
+```
+
+```{r global_helper_comparison_table}
+##### function to plot correlation heatmap based on dataset
+# blabla placeholder
+```
+
+<div class="question">
+
+## **Splitting Based on Categorical Outcome**
+
+featureplot()
+
+</div>
+
+\vspace{2em}
+
+### F1 Code
+
+```{r f1, fig.width=10, fig.height=10}
+##### assuming blood type is that categorical outcome
+# list = FALSE, avoids returning the data as a list
+# times, can create multiple splits at once
+
+
+set.seed(SEED)
+train_idx_cat <- createDataPartition(dat$BloodType, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+
+head(train_idx_cat)
+
+# train_cat_y <- dat[train_idx_cat, ]
+# test_cat_y  <- dat[-train_idx_cat, ]
+
+```
+
+
+
+<div class="question">
+
+## **Splitting Based on the Predictors**
+
+maxDissim()
+
+</div>
+
+\vspace{2em}
+
+### F2 Code
+
+```{r f2, fig.width=10, fig.height=10}
+##### 
+library(mlbench)
+data(BostonHousing)
+
+testing <- scale(BostonHousing[, c("age", "nox")])
+set.seed(5)
+## A random sample of 5 data points
+startSet <- sample(1:dim(testing)[1], 5)
+samplePool <- testing[-startSet,]
+start <- testing[startSet,]
+newSamp <- maxDissim(start, samplePool, n = 20)
+head(newSamp)
+
+```
+
+
+
+<div class="question">
+
+## **Data Splitting for Time Series**
+
+createTimeSlices
+
+</div>
+
+\vspace{2em}
+
+### F3 Code
+
+```{r f3, fig.width=10, fig.height=10}
+##### 
+
+# treat data as date
+dat$ObservationDate <- as.Date(dat$ObservationDate)
+
+# Sort by time first - critical for time series splitting
+dat <- dat[order(dat$ObservationDate), ]
+
+# Create time slices
+slices <- createTimeSlices(
+  y             = seq_len(nrow(dat)),  # just indices
+  initialWindow = 200,   # train on first 200 obs
+  horizon       = 50,    # predict next 50
+  fixedWindow   = FALSE  # growing window
+)
+
+# Example: train/test on the first fold
+train_idx <- slices$train[[1]]
+test_idx  <- slices$test[[1]]
+
+train_dat <- dat[train_idx, ]
+test_dat  <- dat[test_idx, ]
+
+# Quick check
+cat("Training rows:", nrow(train_dat), "\n")
+cat("Test rows:",     nrow(test_dat),  "\n")
+cat("Train period:", as.character(range(train_dat$ObservationDate)), "\n")
+cat("Test period:",  as.character(range(test_dat$ObservationDate)),  "\n")
+
+# Fit a model on one fold (example with lm)
+model <- train(
+  Response ~ Alcohol + Coffee + Exercise + ChemoTreatments + BloodType,
+  data      = train_dat,
+  method    = "lm",
+  na.action = na.omit
+)
+
+pred <- predict(model, newdata = test_dat)
+RMSE <- sqrt(mean((pred - test_dat$Response)^2, na.rm = TRUE))
+cat("Test RMSE:", RMSE, "\n")
+
+```
+
+
+
+<div class="question">
+
+## **Simple Splitting with Important Groups**
+
+groupKFold
+
+</div>
+
+\vspace{2em}
+
+### F4 Code
+
+```{r f4, fig.width=10, fig.height=10}
+##### 
+
+set.seed(SEED)
+subjects <- sample(1:20, size = 80, replace = TRUE)
+table(subjects)
+
+# the results in folds can be used as inputs into the index argument of the trainControl function
+folds <- groupKFold(subjects, k = 15)
+
+```
