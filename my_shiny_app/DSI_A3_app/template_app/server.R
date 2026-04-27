@@ -1,3 +1,7 @@
+# =================================================================================
+# server.R
+# =================================================================================
+
 shinyServer(function(input, output, session) {
   
   # initialisation ----
@@ -19,41 +23,25 @@ shinyServer(function(input, output, session) {
     d
   })
   
-  # output BoxPlots ----
-  output$BoxPlots <- renderPlot({
-    d <- getData()
-    numeric <- sapply(d, FUN = is.numeric)
-    req(d, input$Multiplier, length(numeric) > 0)
-    d <- scale(d[,numeric], center = input$Normalise, scale = input$Normalise)
-    boxplot(d, outline = TRUE, main = paste("Boxplot using IQR multiplier of", input$Multiplier), range = input$Multiplier, las = 2)
+  # reactive getRaw ----
+  getRaw <- reactive({
+    read.csv(file = "Ass3Data.csv", stringsAsFactors = TRUE)
   })
+  
+  # module: eda summary ----
+  eda_summary_server("eda_summary", getData)
+  
+  # output BoxPlots ----
+  eda_boxplot_server("eda_boxplot", getData)
   
   # output Missing ----
-  output$Missing <- renderPlot({
-    d <- getData()
-    vis_dat(d)
-  })
+  eda_vis_server("eda_vis", getData)
   
   # output Corr ----
-  output$Corr <- renderPlot({
-    d <- getData()
-    numeric <- sapply(d, FUN = is.numeric)
-    req(d, length(numeric) > 0)
-    corrgram::corrgram(d, order = "OLO", main = "Numeric Data Correlation")
-  })
-  
-  # output DataSummary ----
-  output$DataSummary <- renderPrint({
-    str(getData())
-  })
+  eda_heatmap_server("eda_heatmap", getData)
   
   # output Table ----
-  output$Table <- DT::renderDataTable({
-    d <- getData()
-    numeric <- c(FALSE, sapply(d, is.numeric)) # never round rownames which are the first column (when shown)
-    DT::datatable(d) %>%
-      formatRound(columns = numeric, digits = 3)
-  })
+  eda_datatable_server("eda_datatable", getData, getRaw)
   
   # reactive get Split
   getSplit <- reactive({

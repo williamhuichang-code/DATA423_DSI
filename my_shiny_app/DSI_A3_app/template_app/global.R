@@ -1,3 +1,9 @@
+# =================================================================================
+# global.R
+# =================================================================================
+
+# ── LIBRARY ──────────────────────────────────────────────────────────────────
+
 library(shiny)
 library(shinyBS) # Additional Bootstrap Controls (tooltips)
 library(DT)
@@ -21,15 +27,24 @@ library(rlist)
 library(ggplot2)
 library(butcher)
 
+
+# ── MODULE LOADING LOGIC ─────────────────────────────────────────────────────
+
+# look inside "A3_modules" folder and its subs, load all files with .R according to their full paths
+list.files("A3_modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
+  lapply(source)
+
+
+# ── CONFIGS ──────────────────────────────────────────────────────────────────
+
+# sets R to display numbers with 3 significant digits globally
 options(digits = 3)
 
-glmnet_initial <- c("naomit", "month", "dummy") # <-- These are arbitrary starting values. Set these to your best recommendation
-pls_initial <- c("impute_knn", "dow", "dummy")   # <-- These are arbitrary starting values. Set these to your best recommendation
-rpart_initial <- c("dow", "month") # <-- These are arbitrary starting values. Set these to your best recommendation
-# maintenance point ---------------------------------------------------------------------------------------------------------------------------
+# default preprocessing selections shown in each method's dropdown (make sure to set these to my best recommendation)
+glmnet_initial <- c("naomit", "month", "dummy") 
+pls_initial <- c("impute_knn", "dow", "dummy")
+rpart_initial <- c("dow", "month")
 # add further preprocessing choices for the new methods here
-
-
 
 
 startMode <- function(Parallel = TRUE) {

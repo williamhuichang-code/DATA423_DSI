@@ -1,23 +1,40 @@
+# =================================================================================
+# ui.R
+# =================================================================================
+
 shinyUI(fluidPage(
   
   # Application title
-  titlePanel("Assignment 3 - Your Name Here"),
+  titlePanel("Assignment 3 - William Hui Chang (69051925)"),
   tabsetPanel(
+    
+    # ── UI DATA ───────────────────────────────────────────────────────────────
+    
     tabPanel("Data",
-             verbatimTextOutput(outputId = "DataSummary"),
-             fluidRow(
-               column(width = 4,
-                      sliderInput(inputId = "Multiplier", label = "IQR multiplier", min = 0, max = 10, step = 0.1, value = 1.5)
-               ),
-               column(width = 3,
-                      checkboxInput(inputId = "Normalise", label = "Standardise chart", value = TRUE)
+             mainPanel(width = 12,
+               tabsetPanel(id = "DataTabs",
+                           tabPanel("Summary",
+                                    eda_summary_ui("eda_summary")
+                           ),
+                           tabPanel("Boxplots",
+                                    eda_boxplot_ui("eda_boxplot")
+                           ),
+                           tabPanel("Missing",
+                                    eda_vis_ui("eda_vis")
+                           ),
+                           tabPanel("Correlation",
+                                    eda_heatmap_ui("eda_heatmap")
+                           ),
+                           tabPanel("Table",
+                                    eda_datatable_ui("eda_datatable")
+                           )
                )
-             ),
-             plotOutput(outputId = "BoxPlots"),
-             plotOutput(outputId = "Missing"),
-             plotOutput(outputId = "Corr"),
-             DT::dataTableOutput(outputId = "Table")
-    ), 
+             )
+    ),
+    
+    
+    # ── UI SPLIT ──────────────────────────────────────────────────────────────
+    
     tabPanel("Split",
              sliderInput(inputId = "Split", label = "Train proportion", min = 0, max = 1, value = 0.8),
              verbatimTextOutput(outputId = "SplitSummary")
