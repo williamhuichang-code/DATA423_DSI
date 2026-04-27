@@ -100,7 +100,8 @@ ui <- dashboardPage(
                menuSubItem("Tabplot",      tabName = "eda_tabplot"),
                menuSubItem("Heatmap",      tabName = "eda_heatmap"),
                menuSubItem("GGPairs",      tabName = "eda_ggpairs"),
-               menuSubItem("Bar Chart",    tabName = "eda_bar")
+               menuSubItem("Bar Chart",    tabName = "eda_bar"),
+               menuSubItem("Box Plot",     tabName = "eda_boxplot")
                # more future subtabs here
       ),
       
@@ -162,6 +163,7 @@ ui <- dashboardPage(
       tabItem(tabName = "eda_heatmap",   eda_heatmap_ui("eda_heatmap")),
       tabItem(tabName = "eda_ggpairs",   eda_ggpairs_ui("eda_ggpairs")),
       tabItem(tabName = "eda_bar",       eda_bar_ui("eda_bar")),
+      tabItem(tabName = "eda_boxplot",   eda_boxplot_ui("eda_boxplot")),
       
       # Miss Strategy
       tabItem(tabName = "miss_variants",   miss_variants_ui("miss_variants")),
@@ -268,6 +270,7 @@ server <- function(input, output, session) {
   eda_heatmap_server("eda_heatmap",     get_diagnose_data, roles)
   eda_ggpairs_server("eda_ggpairs",     get_diagnose_data, roles)
   eda_bar_server("eda_bar",             get_diagnose_data)
+  eda_boxplot_server("eda_boxplot",     get_diagnose_data)
   
   # diagnostics visualisations
   miss_rpart_server("miss_rpart",                  get_diagnose_data, roles)

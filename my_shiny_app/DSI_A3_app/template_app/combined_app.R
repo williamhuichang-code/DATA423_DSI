@@ -202,7 +202,8 @@ deleteRds <- function(name) {
 # ui.R
 # =================================================================================
 
-shinyUI(fluidPage(
+# shinyUI(fluidPage(
+ui <- fluidPage(
   
   # Application title
   titlePanel("Assignment 3 - William Hui Chang (69051925)"),
@@ -456,7 +457,8 @@ shinyUI(fluidPage(
              sliderInput(inputId = "IqrM", label = "IQR multiplier", min = 0, max = 5, value = 1.5, step = 0.1),
     )
   )
-))
+)
+# )
 
 
 
@@ -466,7 +468,8 @@ shinyUI(fluidPage(
 # server.R
 # =================================================================================
 
-shinyServer(function(input, output, session) {
+# shinyServer(function(input, output, session) {
+server <- function(input, output, session) {
   
   # initialisation ----
   models <- reactiveValues()  # this is a collection of the models
@@ -1205,7 +1208,8 @@ shinyServer(function(input, output, session) {
   
   
   
-})
+}
+# )
 
 
 
@@ -1215,4 +1219,4 @@ shinyServer(function(input, output, session) {
 # Run
 # =================================================================================
 
-shinyApp(ui, server)
+shinyApp(ui = ui, server = server)
