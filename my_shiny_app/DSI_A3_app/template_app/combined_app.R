@@ -17,6 +17,7 @@ library(rlang)
 #library(rJava)
 library(devtools)
 library(BiocManager)
+library(plyr)
 library(dplyr)
 library(cli)
 if (!library("mixOmics", logical.return = TRUE)) {
