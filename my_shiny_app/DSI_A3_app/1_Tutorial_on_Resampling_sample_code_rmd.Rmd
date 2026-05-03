@@ -1,0 +1,238 @@
+---
+title: "DATA423 - Tutorial_on_Method_Selection_sample_code_rmd"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+
+
+##### initialise datasets
+# dat <- read.csv('Ass3Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
+##### global parameters
+SEED = 2026
+```
+
+```{r global_helper_comparison_table}
+##### blablabla
+# blabla placeholder
+```
+
+
+
+```{r f0, fig.width=10, fig.height=10}
+##### Introduction
+
+library(caret)
+
+# Independent Observartions
+#   Simple Random Sampling
+#   Simple Cross-Validation
+#   Stratified Random sampling
+#   Simple Bootstrap sampling
+#   Stratified Bootstrap sampling
+
+# Group Dependent Observations
+#   Leave Group Out Sampling
+
+# Time Dependent Observations
+#   Time Series Sampling
+
+# Down Sampling with diversity
+#   Diversity Down-Sampling
+
+```
+
+
+```{r f1, fig.width=10, fig.height=10}
+##### Data
+
+data(iris, package = "datasets")
+summary(iris)
+
+
+```
+
+
+
+
+```{r f2, fig.width=10, fig.height=10}
+##### Independent Observartions - Sampling into 2 partitions (train + test)
+
+# the frequencies of the outcome variable Species can be tallied (or tabulated) using the table() function
+table(iris$Species)
+
+# a Simple Random Sampling not guaranteed with original class proportion
+set.seed(61)
+N <- nrow(iris)
+trainIndex <- base::sample(x = N, size = 0.8 * N, replace = FALSE)
+table(iris[trainIndex, "Species"])
+
+# a Stratified Random Sampling can do better by preserving class balance
+#   for classification, stratification is straightforward
+#   for regression, artificial groups using quartiles
+set.seed(61)
+trainIndex <- caret::createDataPartition(y = iris$Species, p = 0.8, list = FALSE)
+table(iris[trainIndex, "Species"])
+
+```
+
+
+```{r f3, fig.width=10, fig.height=10}
+##### Independent Observartions - Sampling into 3 partitions (train + val + test)
+set.seed(61)
+subIndex <- caret::createDataPartition(y = iris$Species, p = 0.6, list = FALSE)
+train <- iris[subIndex,]
+s40 <- iris[-subIndex,]
+cat("There are", nrow(train), "observations in the train data")
+subIndex <- caret::createDataPartition(y = s40$Species, p = 15/40, list = FALSE)
+validation <- s40[-subIndex,]
+cat("There are", nrow(validation), "observations in the validation data")
+test <- s40[subIndex,]
+cat("There are", nrow(test), "observations in the test data\n")
+
+```
+
+
+
+```{r f4, fig.width=10, fig.height=10}
+##### Independent Observartions - Stratified Bootstrap Sampling
+
+data(BostonHousing, package = "mlbench")
+
+# createResample() function performs stratified bootstrapping based on the outcome variable
+set.seed(61)
+resamples <- caret::createResample(y = BostonHousing$medv, times = 15, list = TRUE)
+str(resamples)
+
+# compute the actual proportion of unique observations in the resamples
+calcPerc <- function(x) {
+  x %>% 
+    unique() %>% 
+    length() -> unqCount
+  propUnq <- unqCount / length(x) 
+  cat("Unique =", round(propUnq * 100), "%\n")
+}
+invisible(mapply(resamples, FUN = calcPerc))
+
+```
+
+
+
+
+```{r f5, fig.width=10, fig.height=10}
+# Group Dependent Observations - Leave Group Out Sampling
+
+# create some artificial data
+set.seed(357)
+patients <- sample(LETTERS, size = 100, replace = TRUE)
+patients
+
+table(as.factor(patients))
+
+# Patient T has three observations while patient X has 9 observations
+# a good splitting strategy would be to create 5 cross-validation folds using the patient identity as the “group”
+set.seed(135)
+folds <- caret::groupKFold(group = patients, k = 5) 
+folds
+
+# the parameter k sets the number of folds
+# since we have 26 levels for patients, we can expect 265/5 letters to be held-out (on average)
+inGroups <- sort(patients[folds$Fold1])
+inGroups
+
+# there are 26 possible letters, how many are present in fold1
+distinct <- length(unique(inGroups))
+cat("Distinct groups in train for fold1:", distinct)
+
+# the hold-out set relating to fold1 would be the test data
+outGroups <- sort(patients[-folds$Fold1])
+outGroups
+
+# how many letters (i.e. patients) are present in the hold-out set relating to fold1
+distinct <- length(unique(outGroups))
+cat("Distinct groups in test for fold1:", distinct)
+
+
+```
+
+
+
+```{r f6, fig.width=10, fig.height=10}
+# Time Dependent Observations - Time Series Sampling
+
+# need to carefully research the parameters initialWindow, horizon, and fixedWindow to achieve the sampling you want
+tsSamples <- caret::createTimeSlices(y = 1:25, initialWindow = 5, horizon = 3, fixedWindow = FALSE)
+print(str(tsSamples$train))
+print(str(tsSamples$test))
+
+```
+
+
+
+```{r f7, fig.width=10, fig.height=10}
+# Down Sampling with Diversity - Diversity Down-Sampling
+
+# K-Mediods Method
+features <- BostonHousing[, c("age", "nox")]
+clusters <- cluster::pam(features, k = 80, metric = "euclidean", stand = TRUE)
+trainIndex <- clusters$id.med  # the ids of the medoids of the clusters 
+BostonHousing$Type <- NA
+BostonHousing$Type[-trainIndex] <- "not sampled"
+BostonHousing$Type[trainIndex] <- "sampled"
+ggplot() +
+  geom_point(data = BostonHousing, mapping = aes(x = age, y = nox, color = Type)) +
+  labs(title = "Boston Data (sampled for diversity)")
+
+# an exercise, generalised to use all of the BostonHousing variables
+features <- BostonHousing
+clusters <- cluster::pam(features, k = 80, metric = "euclidean", stand = TRUE)
+trainIndex <- clusters$id.med  # the ids of the medoids of the clusters 
+BostonHousing$Type <- NA
+BostonHousing$Type[-trainIndex] <- "not sampled"
+BostonHousing$Type[trainIndex] <- "sampled"
+ggplot() +
+  geom_point(data = BostonHousing, mapping = aes(x = age, y = nox, color = Type)) +
+  labs(title = "Boston Data (sampled for diversity)")
+
+```
+
+
+# Wrap Up
+
+The process of extracting train and test datasets is a sampling process.
+The process of down-sampling data is also a sampling process.
+The correct sampling strategy is not always Simple Random sampling.
+Using the wrong sampling strategy can lead to Data Leakage.
+The key to deciding on the best sampling strategy is to consider the dependencies (or lack of independence) between the observations.

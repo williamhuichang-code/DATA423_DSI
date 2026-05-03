@@ -1,0 +1,142 @@
+---
+title: "DATA423 - Tutorial_on_Method_Selection_sample_code_rmd"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+
+
+##### initialise datasets
+# dat <- read.csv('Ass3Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
+##### global parameters
+SEED = 2026
+```
+
+```{r global_helper_comparison_table}
+##### blablabla
+# blabla placeholder
+```
+
+
+
+```{r f0, fig.width=10, fig.height=10}
+##### Introduction
+
+library(caret)
+
+# explore the concept of a NULL model, and 
+# how to visualise a set of candidate models
+
+```
+
+
+```{r f1, fig.width=10, fig.height=10}
+##### Method Selection - Null model
+
+# regression null: attributes everything on a constant intercept, without any feature
+# classification null: a most frequent class
+
+
+```
+
+
+
+
+```{r f2, fig.width=10, fig.height=10}
+##### Method Selection - different methods compared to NULL
+
+# define mutual split, and resampling strategy
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 2, classProbs = TRUE, verboseIter = TRUE)
+
+# Null Method
+NullModel <- caret::train(Species ~ ., data = train, method = "null", trControl = control)
+NullModel
+
+# Rpart2 Method
+Rpart2Model <- caret::train(Species ~ ., data = train, method = "rpart2", trControl = control)
+Rpart2Model
+
+# Random Forest Method
+RfModel <- caret::train(Species ~ ., data = train, method = "rf", trControl = control)
+RfModel
+
+
+```
+
+
+```{r f3, fig.width=10, fig.height=10}
+##### Method Selection - Comparison Charts 1
+
+# visual difference
+list("null" = NullModel, "rpart2" = Rpart2Model, "rf" = RfModel) %>%
+resamples() %>%
+bwplot(notch = FALSE)
+
+# statistically difference
+list("null" = NullModel, "rpart2" = Rpart2Model, "rf" = RfModel) %>%
+resamples() %>%
+bwplot(notch = TRUE)
+
+```
+
+
+
+```{r f4, fig.width=10, fig.height=10}
+##### Method Selection - Comparison Charts 2
+
+# multiclass metrics difference
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 2, classProbs = TRUE, summaryFunction = multiClassSummary)
+myMetric <- "AUC"
+NullModel <- caret::train(Species ~ ., data = train, method = "null", trControl = control, metric = myMetric)
+Rpart2Model <- caret::train(Species ~ ., data = train, method = "rpart2", trControl = control, metric = myMetric)
+RfModel <- caret::train(Species ~ ., data = train, method = "rf", trControl = control, metric = myMetric)
+models <- list("null" = NullModel, "rpart2" = Rpart2Model, "rf" = RfModel)
+bwplot(resamples(models), notch = TRUE)
+
+```
+
+
+
+# Wrap Up
+
+Whatever choices you settle on for the train control specification, it is important that this is used consistently for all the candidate models being trained. In other words if you want to compare models fairly they should have the same Train-Control specification.
+The null model provides a sense of scale by which we can judge visually whether we doing well or not.
+Each model’s metric distribution can be reviewed. Outliers are a worry. The narrower the boxplot, the less uncertainty there is.
+Notches are a means of informally checking whether the boxplot means/medians are statistically different. The notch covers the 95 percentile range of the mean.
+Any models whose metric is worse than the null model is poorer than the simplest possible model. That is, it is truly useless.
+The available metrics are determined by the selectionFunction value.
+The metric that drives the hyper-parameter optimisation can be supplied in the train() function’s metric parameter - see last example.
