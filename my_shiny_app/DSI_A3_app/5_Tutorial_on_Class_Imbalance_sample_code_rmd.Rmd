@@ -1,5 +1,5 @@
 ---
-title: "DATA423 - Tutorial_on_Method_Selection_sample_code_rmd"
+title: "DATA423 - Tutorial_on_Class_Imbalance_sample_code_rmd"
 author: |
   William Hui Chang (69051925)
 date: "`r Sys.Date()`"
@@ -56,9 +56,29 @@ SEED = 2026
 
 library(caret)
 
-# explore the concept of a NULL model, and 
-# how to visualise a set of candidate models
-
+# several approaches to dealing with class imbalance
+#   Rebalancing (data-level fix, change the dataset itself)
+#     the process of creating and deleting observations 
+#     either upsampling (duplicate or synthesize) or downsampling (remove data)
+#     risk: upsampling -> overfitting; downsampling -> lose information
+#   Coalescing (label-level fix, change the labels)
+#     the process of reassigning the target categories more evenly 
+#     from A, B, C, D (multi-class) to {A, B} vs {C, D}
+#     cardinality merging
+#     risk: lose granularity
+#   Cost-sensitive methods (objective-level fix, penalize mistakes differently)
+#     models are not distracted by the more populous target levels 
+#     make the model care more about minority errors
+#   Weighted methods (data weighting, assign weights to observations)
+#     methods that weight observations so as to ensure that models are not distracted by the more populous target levels
+#     similar to rebalancing, but cleaner
+#   Appropriate metrics (evaluation fix, change how you measure performance)
+#     model metrics that are not distracted by the more populous target levels
+#     do not use Accuracy
+#   Anomaly detection (problem reformulation)
+#     treat minority class as anomalies
+#     turn the problem, fully or partly, into an anomaly detection problem
+#     instead of classification, detect deviations from normal
 ```
 
 
