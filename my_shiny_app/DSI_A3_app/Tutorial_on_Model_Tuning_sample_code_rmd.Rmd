@@ -45,7 +45,7 @@ SEED = 2026
 ```
 
 ```{r global_helper_comparison_table}
-##### function to plot correlation heatmap based on dataset
+##### blablabla
 # blabla placeholder
 ```
 
