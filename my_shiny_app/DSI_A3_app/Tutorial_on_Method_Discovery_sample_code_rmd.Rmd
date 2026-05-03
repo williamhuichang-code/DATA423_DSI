@@ -1,5 +1,5 @@
 ---
-title: "DATA423 - Tutorial_on_Method_Selection_sample_code_rmd"
+title: "DATA423 - Tutorial_on_Method_Discovery_sample_code_rmd"
 author: |
   William Hui Chang (69051925)
 date: "`r Sys.Date()`"
