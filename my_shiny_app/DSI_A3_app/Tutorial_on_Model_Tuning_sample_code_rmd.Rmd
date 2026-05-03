@@ -1,0 +1,231 @@
+---
+title: "DATA423 - Tutorial_on_Method_Selection_sample_code_rmd"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+
+
+##### initialise datasets
+# dat <- read.csv('Ass3Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
+##### global parameters
+SEED = 2026
+```
+
+```{r global_helper_comparison_table}
+##### function to plot correlation heatmap based on dataset
+# blabla placeholder
+```
+
+
+
+```{r f0, fig.width=10, fig.height=10}
+##### Introduction
+
+library(caret)
+
+# the concept of the final model
+#   represents the best model that the given method can produce
+#   if you have 10 methods, there will be 10 final models to compare
+
+# we need not be distracted by pre-processing the data
+# we ignore recipes entirely in this tutorial
+
+```
+
+
+```{r f1, fig.width=10, fig.height=10}
+##### Introduction - we use the iris data to explore the issue of model tuning
+
+data(iris, package = "datasets")
+str(iris)
+
+
+```
+
+
+
+```{r f2, fig.width=10, fig.height=10}
+##### Train-Control - Default train-control
+
+# caret::train() without reference to the trControl parameter, the default train-control will be applied
+
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly", )
+mod
+
+
+```
+
+
+
+```{r f3, fig.width=10, fig.height=10}
+##### Train-Control - Resampling method
+
+# train method and the trainControl method are quite different things though they have the same parameter names
+
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+control <- trainControl(method = "cv", number = 25)
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly", trControl = control)
+mod
+
+
+```
+
+
+
+```{r f4, fig.width=10, fig.height=10}
+##### Train-Control - Resampling method
+
+# a better comparison towards bootstrap resampling 
+#   bootstrap resampling will hold out 37% of the data in each of 25 resamples
+#   (not compariable) cross-validation will hold-out 1/25 (4%) of the data in each of 25 resamples
+#   (compariable) CV with 4 fold repeated 6 times, yielding hold-outs of 25% of the data in each of 24 resamples
+
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+control <- trainControl(method = "repeatedcv", number = 4, repeats = 6)
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly", trControl = control)
+mod
+
+```
+
+
+
+```{r f5, fig.width=10, fig.height=10}
+##### Search space - Grid search
+
+# Grid search: try all combinations, expensive, explodes exponentially
+
+```
+
+
+
+
+```{r f6, fig.width=10, fig.height=10}
+##### Search space - Random Search
+
+# Random Search: instead of covering everything, you fix number of trials, not number of combinations
+
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+control <- trainControl(search = "random")
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly", trControl = control, tuneLength = 20)
+mod
+
+```
+
+
+
+
+```{r f7, fig.width=10, fig.height=10}
+##### Search space - Bayesian Search
+
+# Bayesian Search: an excellent technique, instead of blind sampling, learns while searching, try promising regions more
+
+```
+
+
+
+
+```{r f8, fig.width=10, fig.height=10}
+##### Search space - best, oneSE, tolerance()
+
+# best: pick highest accuracy, Problem is might overfit
+# oneSE: pick simplest model within 1 standard error of best, good enough, but safer
+# tolerance: accept models within X% of best, then choose simplest
+
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+control <- trainControl(selectionFunction = "oneSE")
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly", trControl = control, tuneLength = 3)
+mod
+
+```
+
+
+
+```{r f9, fig.width=10, fig.height=10}
+##### Visualisation
+
+# p-dimensional chart is easier to see patterns than a table
+# in this graph for example
+#   scale matters a LOT; degree has diminishing returns; C has smaller effect
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly")
+plot(mod)
+
+
+```
+
+
+
+```{r f10, fig.width=10, fig.height=10}
+##### Parallel processing
+
+# how many core does this computer have
+cat("Cores =", parallel::detectCores())
+
+# train models at the same time on multiple CPU cores
+#   try many combinations of (degree, scale, C)
+#   using bootstrapping (25 times)
+#   and do it in parallel
+cores <- min(c(3,parallel::detectCores()))
+# cluster <- parallel::makePSOCKcluster(parallel::detectCores())
+cluster <- parallel::makePSOCKcluster(cores)
+doParallel::registerDoParallel(cluster)
+trIndex <- caret::createDataPartition(y = iris$Species, p = 0.7, list = FALSE)
+train <- iris[trIndex,]
+mod <- caret::train(Species ~ ., data = train, method = "svmPoly")
+parallel::stopCluster(cluster)
+foreach::registerDoSEQ()
+mod
+```
+
+
+# Wrap Up
+Increasing the value of the tuneLength parameter of train() or the number or repeats parameters of the trainControl() will cause more model training operations to be performed. This will slow things down. Using parallel processing enables these models to be trained in parallel.
+Methods with fewer hyper-parameters are faster to tune.
+Of all the models trained using resampling, the model with the optimal metric (in the sense defined by selectionFunction) is the one that defined the optimal hyper-parameters. These hyper-parameters can then be used to generate a model using all the training data. This is called the “final model”. This represents the best model that the method can produce given the preprocessing.
+If you change the preprocessing the optimal hyper-parameters can change.
+If you have more or fewer observations the optimal hyper-parameters can change.
+Whatever choices you settle on for the train control specification, it is important that this is used consistently for all the candidate methods being trailed. In other words if you want to compare models fairly they should have the same trainControl specification.
+Because resampling involves randomness, you can get slightly different hyper-parameters, models and residuals each time you use train(). You can manage this better by controlling the random seed (i.e. set.seed()) or by using the index parameter of the train control.
+
+
+

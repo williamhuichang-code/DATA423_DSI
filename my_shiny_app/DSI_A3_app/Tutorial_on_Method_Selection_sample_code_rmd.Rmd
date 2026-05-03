@@ -1,0 +1,288 @@
+---
+title: "DATA423 - Tutorial_on_Method_Selection_sample_code_rmd"
+author: |
+  William Hui Chang (69051925)
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+- \usepackage{xcolor}
+- \usepackage{etoolbox}
+- \AtBeginEnvironment{verbatim}{\scriptsize}
+- \AtBeginEnvironment{Shaded}{\scriptsize}
+---
+
+<style>
+body { background-color: #ffffff; }
+.question { 
+  background-color: #2C3E50;
+  color: white; 
+  padding: 12px 15px; 
+  border-radius: 4px; 
+  margin: 15px 0;
+  font-size: 1.4em;
+}
+</style>
+
+```{r setup, include=TRUE, message = FALSE, warning=FALSE}
+##### set global default for all plots
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, 
+  fig.width=5.5, fig.height=3.5, fig.align='left')
+
+##### load libraries
+library(tidyverse)
+
+
+##### initialise datasets
+# dat <- read.csv('Ass3Data.csv', header = TRUE, na.strings = c('NA',' N/A'), stringsAsFactors = TRUE)
+
+##### global parameters
+SEED = 2026
+```
+
+```{r global_helper_comparison_table}
+##### function to plot correlation heatmap based on dataset
+# blabla placeholder
+```
+
+
+
+```{r f0, fig.width=10, fig.height=10}
+##### Introduction
+
+library(caret)
+
+```
+
+
+```{r f1, fig.width=10, fig.height=10}
+##### Method discovery - a complex list of lists
+
+mi <- caret::getModelInfo()
+print(names(mi))
+
+```
+
+
+
+```{r f2, fig.width=10, fig.height=10}
+##### Method discovery - What properties does each method record?
+
+names(mi[[1]]) #note double [[]]
+
+# for now we are interested in the short name, long name, type, description-tags and packages
+names(mi[1]) # note single []
+mi[[1]]$label
+mi[[1]]$type
+mi[[1]]$tags
+mi[[1]]$library
+
+
+```
+
+
+
+```{r f3, fig.width=10, fig.height=10}
+##### Method discovery - transform the method catalogue into a data frame
+caretMethodsDF <- function(useHTML = FALSE) {
+  mi <- caret::getModelInfo()
+  if (useHTML) {
+    breaker <- "<br>"
+  } else {
+    breaker <- "\n"
+  }
+  
+  Label <- vector(mode = "character", length = length(mi))
+  Packages <- vector(mode = "character", length = length(mi))
+  Hyperparams <- vector(mode = "character", length = length(mi))
+  Regression <- vector(mode = "logical", length = length(mi))
+  Classification <- vector(mode = "logical", length = length(mi))
+  Tags <- vector(mode = "character", length = length(mi))
+  ClassProbs <- vector(mode = "logical", length = length(mi))
+  for (row in 1:length(mi)) {
+    Label[row] <- mi[[row]]$label
+    libs <- mi[[row]]$library
+    libs <- na.omit(libs[libs != ""]) # remove blank packages
+    if (length(libs) > 0) {
+      Packages[row] <- paste(collapse = breaker, mi[[row]]$library)
+    }
+    d <- mi[[row]]$parameters
+    Hyperparams[row] <- paste(collapse = breaker, paste0(d$parameter, " - ", d$label, " [", d$class,"]"))
+    Regression[row] <- "Regression" %in% mi[[row]]$type
+    Classification[row] <- "Classification" %in% mi[[row]]$type
+    Tags[row] <- paste(collapse = breaker, mi[[row]]$tags)
+    ClassProbs[row] <- is.function(mi[[row]]$prob)
+  }
+  data.frame(Model = names(mi), Label, Packages, Regression, Classification, Tags, Hyperparams, ClassProbs, stringsAsFactors = FALSE)
+}  
+
+
+df <- caretMethodsDF()
+df
+
+
+```
+
+
+
+
+```{r f4, fig.width=10, fig.height=10}
+##### Method discovery - a better df, html style
+df <- caretMethodsDF(useHTML = TRUE)
+DT::datatable(df, escape = FALSE, rownames = FALSE, extensions = list(Responsive = TRUE))
+
+
+```
+
+
+
+
+```{r f5, fig.width=10, fig.height=10}
+##### Visualising Methods - utility in turning the Tags into a wide data frame
+
+# make the relevant data numeric and 
+# we can calculate distances between methods (i.e. similarity / dissimilarity) based on each tag
+modelInfo <- caret::getModelInfo()
+tags <- vector(mode = "list", length = length(modelInfo))
+Classification <- Regression <- ClassProbs <- rep(NA, length = length(modelInfo))
+for (i in seq(along = modelInfo)){
+  tags[[i]] <- modelInfo[[i]]$tags
+  Classification[i] <- ifelse("Classification" %in% modelInfo[[i]]$type, 1, 0)
+  Regression[i] <- ifelse("Regression" %in% modelInfo[[i]]$type, 1, 0)
+  ClassProbs[i] <- ifelse(is.null(modelInfo[[i]]$prob), 0, 1)
+}
+tabs <- table(unlist(tags))
+tabs <- tabs[order(tolower(names(tabs)))]
+terms <- names(tabs)
+terms <- terms[terms != ""]
+dat <- matrix(0, ncol = length(terms), nrow = length(tags))
+colnames(dat) <- terms
+hasTag <- lapply(tags, function(x, y) which(y %in% x), y = terms)
+for (i in seq(along = hasTag)) {
+  dat[i, hasTag[[i]]] <- 1
+}
+dat <- cbind(Classification, Regression, dat)
+wide <- as.data.frame(dat, row.names = names(modelInfo))
+wide
+
+
+```
+
+
+
+```{r f6, fig.width=10, fig.height=10}
+##### Visualising Methods - Classification Map
+
+# we can restrict ourselves to classification methods only
+wide[wide$Classification == 1, ] %>%
+  stats::dist(method = "manhattan") -> d   # other choices are "euclidean", "binary", "canberra"
+print("Classification distance-matrix produced")
+
+# a dimensional reduction to 2 features so we can plot this as a 2D plot
+# cmdscale() function is just one of many ways to dimensionally reduce this data
+d %>%
+  stats::cmdscale(k = 2) %>%
+  data.frame() -> dd
+
+# plot this 2 dimensional data, a map of classification methods
+ggplot(data = dd, mapping = aes(x = X1, y = X2, label = rownames(dd))) +
+  ggtitle(label = "Classification Methods") +
+  xlab("Coordinate 1") +
+  ylab("Coordinate 2") +
+  geom_point() +
+  ggrepel::geom_text_repel(size = 2, max.overlaps = 50, na.rm = TRUE) +
+  theme(plot.title = element_text(lineheight = 1, face = "bold", hjust = 0.5))
+
+
+# the same for regression methods, this time trying euclidean distance with the stats::dist() function
+# a map of regression methods
+wide[wide$Regression == 1,] %>%
+  stats::dist(method = "euclidean") %>%    # other choices are "euclidean", "binary", "canberra"
+  stats::cmdscale(k = 2) %>%
+  data.frame() -> dd
+
+ggplot(data = dd, mapping = aes(x = X1, y = X2, label = rownames(dd))) +
+  ggtitle(label = "Regression Methods") +
+  xlab("Coordinate 1") +
+  ylab("Coordinate 2") +
+  geom_point() +
+  ggrepel::geom_text_repel(size = 2, max.overlaps = 50, na.rm = TRUE) +
+  theme(plot.title = element_text(lineheight = 1, face = "bold", hjust = 0.5))
+
+```
+
+
+
+```{r f7, fig.width=10, fig.height=10}
+##### Filtering methods - 
+# suppose we want to 
+#   select for regression methods, and 
+#   against linear methods, and 
+#   against robustness, but 
+#   for ensembling
+
+df <- caretMethodsDF()
+matches <- df$Regression == TRUE & !grepl(df$Tags, pattern = "Linear", ignore.case = TRUE) & !grepl(df$Tags, pattern = "\\bRobust Model\\b") & grepl(df$Tags, pattern = "\\bEnsemble Model\\b")
+df[matches,]
+
+```
+
+
+
+List of tags
+
+Accepts Case Weights
+Bagging
+Bayesian Model
+Binary Predictors Only
+Boosting
+Categorical Predictors Only
+Cost Sensitive Learning
+Discriminant Analysis
+Distance Weighted Discrimination
+Ensemble Model
+Feature Extraction
+Feature Selection Wrapper
+Gaussian Process
+Generalized Additive Model
+Generalized Linear Model
+Handle Missing Predictor Data
+Implicit Feature Selection
+Kernel Method
+L1 Regularization
+L2 Regularization
+Linear Classifier
+Linear Regression
+Logic Regression
+Logistic Regression
+Mixture Model
+Model Tree
+Multivariate Adaptive Regression Splines
+Neural Network
+Oblique Tree
+Ordinal Outcomes
+Partial Least Squares
+Patient Rule Induction Method
+Polynomial Model
+Prototype Models
+Quantile Regression
+Radial Basis Function
+Random Forest
+Regularization
+Relevance Vector Machines
+Ridge Regression
+Robust Methods
+Robust Model
+ROC Curves
+Rule-Based Model
+Self-Organising Maps
+String Kernel
+Support Vector Machines
+Supports Class Probabilities
+Text Mining
+Tree-Based Model
+Two Class Only
