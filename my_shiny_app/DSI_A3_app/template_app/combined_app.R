@@ -238,8 +238,7 @@ ui <- fluidPage(
     # ── UI SPLIT ──────────────────────────────────────────────────────────────
     
     tabPanel("Split",
-             sliderInput(inputId = "Split", label = "Train proportion", min = 0, max = 1, value = 0.8),
-             verbatimTextOutput(outputId = "SplitSummary")
+             split_ui("split")
     ),
     tabPanel("Available methods",
              h3("Regression methods in caret"),
@@ -511,11 +510,11 @@ server <- function(input, output, session) {
   # output Table ----
   eda_datatable_server("eda_datatable", getData, getRaw)
   
-  # reactive get Split
-  getSplit <- reactive({
-    set.seed(199)
-    createDataPartition(y = getData()$Response, p = input$Split, list = FALSE)
-  })
+  # split module — returns train indices from whichever tab is active
+  splitIndices <- split_server("split", getData)
+  
+  # getSplit reads from the module — feeds getTrainData and getTestData downstream
+  getSplit <- reactive({ splitIndices() })
   
   # reactive getMethods ----
   getMethods <- reactive({
@@ -585,9 +584,7 @@ server <- function(input, output, session) {
   })
   
   # output SplitSummary ----
-  output$SplitSummary <- renderPrint({
-    cat(paste("Training observations:", nrow(getTrainData()), "\n", "Testing observations:", nrow(getTestData())))
-  })
+  # using module now
   
   # reactive getResamples ----
   getResamples <- reactive({
