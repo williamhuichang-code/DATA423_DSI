@@ -1,15 +1,16 @@
 # =================================================================================
-# mod_available.R
-# Available Methods tab — faithful to Tutorial 2 (Method Discovery)
-# Sections: datatable (f3/f4), tag filter (f7), method map (f5/f6)
+# mod_available.R  (v2)
+# Available Methods tab
+# Tab 1: Filterable method table
+# Tab 2: Method map — filtered methods highlighted automatically
+# Shared right sidebar controls both tabs
 # =================================================================================
 
-# ── LIBRARIES ─────────────────────────────────────────────────────────────────
 library(DT)
 library(ggplot2)
 library(ggrepel)
 
-# ── SHARED STYLE HELPERS ──────────────────────────────────────────────────────
+# ── STYLE HELPERS ─────────────────────────────────────────────────────────────
 
 .av_sidebar_style <- "background-color: #f4f6fb; border-left: 3px solid #6a9fd8;
                       min-height: 100vh; padding: 16px 14px;"
@@ -19,14 +20,13 @@ library(ggrepel)
     style = "font-size: 13px; color: #343a40; background-color: white;
              padding: 10px; border-left: 4px solid #0d6efd; border-radius: 6px;
              margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);",
-    icon("info-circle", style = "color:#0d6efd;"),
-    HTML("&nbsp;"),
-    ...
+    icon("info-circle", style = "color:#0d6efd;"), HTML("&nbsp;"), ...
   )
 }
 
 .av_ctrl_label <- function(text) {
-  tags$label(text, style = "font-weight:600; font-size:13px; color:#343a40;")
+  tags$label(text, style = "font-weight:600; font-size:13px; color:#343a40;
+                             display:block; margin-bottom:4px; margin-top:10px;")
 }
 
 .av_section_head <- function(text) {
@@ -36,33 +36,11 @@ library(ggrepel)
 
 .av_label_fix <- tags$style(HTML("
   .shiny-input-container label,
-  .radio label,
-  .checkbox label {
+  .radio label, .checkbox label {
     font-weight: 400 !important;
     font-size: 13px;
   }
 "))
-
-# full list of caret tags (from tutorial)
-.all_tags <- c(
-  "Accepts Case Weights", "Bagging", "Bayesian Model", "Binary Predictors Only",
-  "Boosting", "Categorical Predictors Only", "Cost Sensitive Learning",
-  "Discriminant Analysis", "Distance Weighted Discrimination", "Ensemble Model",
-  "Feature Extraction", "Feature Selection Wrapper", "Gaussian Process",
-  "Generalized Additive Model", "Generalized Linear Model",
-  "Handle Missing Predictor Data", "Implicit Feature Selection", "Kernel Method",
-  "L1 Regularization", "L2 Regularization", "Linear Classifier",
-  "Linear Regression", "Logic Regression", "Logistic Regression", "Mixture Model",
-  "Model Tree", "Multivariate Adaptive Regression Splines", "Neural Network",
-  "Oblique Tree", "Ordinal Outcomes", "Partial Least Squares",
-  "Patient Rule Induction Method", "Polynomial Model", "Prototype Models",
-  "Quantile Regression", "Radial Basis Function", "Random Forest",
-  "Regularization", "Relevance Vector Machines", "Ridge Regression",
-  "Robust Methods", "Robust Model", "ROC Curves", "Rule-Based Model",
-  "Self-Organising Maps", "String Kernel", "Support Vector Machines",
-  "Supports Class Probabilities", "Text Mining", "Tree-Based Model",
-  "Two Class Only"
-)
 
 
 # =================================================================================
@@ -74,161 +52,95 @@ available_ui <- function(id) {
   
   tagList(
     .av_label_fix,
-    tabsetPanel(
-      type = "pills",
+    sidebarLayout(
+      position = "right",
       
-      # ── TAB A: Method table ───────────────────────────────────────────────
-      tabPanel("Method table",
-               br(),
-               sidebarLayout(
-                 position = "right",
-                 sidebarPanel(
-                   width = 3,
-                   style = .av_sidebar_style,
-                   .av_info_box(HTML("<strong>Tab note:</strong><br>
-              Full caret method catalogue as a searchable table. Ban icon
-              indicates the package is not yet installed. Use column search
-              and filters to explore.")),
-                   hr(),
-                   .av_ctrl_label("Show methods"),
-                   radioButtons(ns("tbl_type"), label = NULL,
-                                choices = c("Regression only"      = "reg",
-                                            "Classification only"  = "cls",
-                                            "Both"                 = "both"),
-                                selected = "reg"),
-                   hr(),
-                   .av_ctrl_label("Show columns"),
-                   checkboxGroupInput(ns("tbl_cols"), label = NULL,
-                                      choices  = c("Label", "Packages", "Tags",
-                                                   "Hyperparams", "Regression",
-                                                   "Classification", "ClassProbs"),
-                                      selected = c("Label", "Packages", "Tags",
-                                                   "Hyperparams")),
-                   hr(),
-                   .av_ctrl_label("Rows per page"),
-                   selectInput(ns("tbl_pagesize"), label = NULL,
-                               choices = c(5, 10, 15, 25, 50), selected = 10)
-                 ),
-                 mainPanel(
-                   width = 9,
-                   .av_section_head("Caret method catalogue"),
+      # ── RIGHT SIDEBAR — shared across both subtabs ────────────────────────
+      sidebarPanel(
+        width = 3,
+        style = .av_sidebar_style,
+        
+        .av_info_box(HTML("<strong>How to use:</strong><br>
+          Filter methods using the controls below. The table updates
+          instantly. Switch to the map tab to see where filtered
+          methods sit relative to all others.")),
+        
+        # ── Type ──────────────────────────────────────────────────────────
+        .av_ctrl_label("Method type"),
+        radioButtons(ns("type"), label = NULL,
+                     choices  = c("Regression only"     = "reg",
+                                  "Classification only" = "cls",
+                                  "Both"                = "both"),
+                     selected = "reg"),
+        hr(),
+        
+        # ── Tag filters ───────────────────────────────────────────────────
+        .av_ctrl_label("Include tags (ALL must match)"),
+        selectizeInput(ns("flt_include"), label = NULL,
+                       choices  = NULL, multiple = TRUE,
+                       options  = list(placeholder = "e.g. Ensemble Model")),
+        
+        .av_ctrl_label("Exclude tags (ANY disqualifies)"),
+        selectizeInput(ns("flt_exclude"), label = NULL,
+                       choices  = NULL, multiple = TRUE,
+                       options  = list(placeholder = "e.g. Linear Regression")),
+        hr(),
+        
+        # ── Quick checkboxes ──────────────────────────────────────────────
+        .av_ctrl_label("Handle missing predictors"),
+        checkboxInput(ns("flt_missing"), label = NULL, value = FALSE),
+        
+        .av_ctrl_label("Implicit feature selection"),
+        checkboxInput(ns("flt_implicit"), label = NULL, value = FALSE),
+        hr(),
+        
+        # ── Map controls ──────────────────────────────────────────────────
+        .av_ctrl_label("Map distance metric"),
+        selectInput(ns("map_dist"), label = NULL,
+                    choices  = c("euclidean", "manhattan", "binary", "canberra"),
+                    selected = "euclidean"),
+        
+        .av_ctrl_label("Label size"),
+        sliderInput(ns("map_label_size"), label = NULL,
+                    min = 1, max = 5, value = 2, step = 0.5, width = "100%"),
+        
+        .av_ctrl_label("Max label overlaps"),
+        sliderInput(ns("map_overlaps"), label = NULL,
+                    min = 10, max = 100, value = 50, step = 5, width = "100%"),
+        hr(),
+        
+        # ── Live filter summary ───────────────────────────────────────────
+        .av_ctrl_label("Matching methods"),
+        verbatimTextOutput(ns("filter_summary"))
+      ),
+      
+      # ── MAIN PANEL — two subtabs ──────────────────────────────────────────
+      mainPanel(
+        width = 9,
+        tabsetPanel(
+          type = "pills",
+          id   = ns("subtabs"),
+          
+          # Subtab 1: table
+          tabPanel("Method table",
+                   br(),
+                   .av_section_head("Filtered caret methods"),
                    shinycssloaders::withSpinner(
                      DT::dataTableOutput(ns("method_table"))
                    )
-                 )
-               )
-      ),
-      
-      # ── TAB B: Tag filter ─────────────────────────────────────────────────
-      tabPanel("Tag filter",
-               br(),
-               sidebarLayout(
-                 position = "right",
-                 sidebarPanel(
-                   width = 3,
-                   style = .av_sidebar_style,
-                   .av_info_box(HTML("<strong>Tab note:</strong><br>
-              Filter methods by combining tag rules — mirrors the tutorial's
-              <code>grepl()</code> approach. Use Include/Exclude lists to
-              narrow down candidate methods for your assignment.")),
-                   hr(),
-                   .av_ctrl_label("Must be regression"),
-                   checkboxInput(ns("flt_regression"), label = NULL, value = TRUE),
-                   hr(),
-                   .av_ctrl_label("Include tags (ALL must match)"),
-                   selectizeInput(ns("flt_include"), label = NULL,
-                                  choices  = .all_tags,
-                                  multiple = TRUE,
-                                  options  = list(placeholder = "e.g. Ensemble Model")),
-                   hr(),
-                   .av_ctrl_label("Exclude tags (ANY will disqualify)"),
-                   selectizeInput(ns("flt_exclude"), label = NULL,
-                                  choices  = .all_tags,
-                                  multiple = TRUE,
-                                  options  = list(placeholder = "e.g. Linear Regression")),
-                   hr(),
-                   .av_ctrl_label("Must handle missing predictors"),
-                   checkboxInput(ns("flt_missing"), label = NULL, value = FALSE),
-                   hr(),
-                   .av_ctrl_label("Must support implicit feature selection"),
-                   checkboxInput(ns("flt_implicit"), label = NULL, value = FALSE),
-                   hr(),
-                   actionButton(ns("flt_apply"), "Apply filters",
-                                icon  = icon("filter"), width = "100%",
-                                style = "background:#534AB7; color:white;
-                                  border:none; font-size:13px;")
-                 ),
-                 mainPanel(
-                   width = 9,
-                   .av_section_head("Filtered methods"),
-                   verbatimTextOutput(ns("flt_summary")),
-                   shinycssloaders::withSpinner(
-                     DT::dataTableOutput(ns("flt_table"))
-                   )
-                 )
-               )
-      ),
-      
-      # ── TAB C: Method map ─────────────────────────────────────────────────
-      tabPanel("Method map",
-               br(),
-               sidebarLayout(
-                 position = "right",
-                 sidebarPanel(
-                   width = 3,
-                   style = .av_sidebar_style,
-                   .av_info_box(HTML("<strong>Tab note:</strong><br>
-              Builds a wide binary tag matrix (f5), computes distances between
-              methods, then reduces to 2D with <code>cmdscale()</code> (f6).
-              Similar methods cluster together — use this to choose a
-              <em>diverse</em> set of candidate models.")),
-                   hr(),
-                   .av_ctrl_label("Method type"),
-                   radioButtons(ns("map_type"), label = NULL,
-                                choices = c("Regression"     = "reg",
-                                            "Classification" = "cls"),
-                                selected = "reg"),
-                   hr(),
-                   .av_ctrl_label("Distance metric"),
-                   selectInput(ns("map_dist"), label = NULL,
-                               choices  = c("euclidean", "manhattan",
-                                            "binary", "canberra"),
-                               selected = "euclidean"),
-                   hr(),
-                   .av_ctrl_label("Label size"),
-                   sliderInput(ns("map_label_size"), label = NULL,
-                               min = 1, max = 5, value = 2, step = 0.5),
-                   .av_ctrl_label("Max label overlaps"),
-                   sliderInput(ns("map_overlaps"), label = NULL,
-                               min = 10, max = 100, value = 50, step = 5),
-                   hr(),
-                   .av_ctrl_label("Highlight methods (by short name)"),
-                   selectizeInput(ns("map_highlight"), label = NULL,
-                                  choices  = NULL,
-                                  multiple = TRUE,
-                                  options  = list(placeholder = "e.g. glmnet, rpart")),
-                   hr(),
-                   actionButton(ns("map_build"), "Build map",
-                                icon  = icon("map"), width = "100%",
-                                style = "background:#534AB7; color:white;
-                                  border:none; font-size:13px;")
-                 ),
-                 mainPanel(
-                   width = 9,
-                   .av_section_head("Method similarity map"),
+          ),
+          
+          # Subtab 2: map
+          tabPanel("Method map",
+                   br(),
+                   .av_section_head("Similarity map — filtered methods highlighted in purple"),
                    shinycssloaders::withSpinner(
                      plotOutput(ns("map_plot"), height = "650px")
-                   ),
-                   hr(),
-                   .av_section_head("Wide tag matrix (basis for distances)"),
-                   shinycssloaders::withSpinner(
-                     DT::dataTableOutput(ns("wide_table"))
                    )
-                 )
-               )
+          )
+        )
       )
-      
-    ) # end tabsetPanel
+    )
   )
 }
 
@@ -242,281 +154,236 @@ available_server <- function(id) {
     
     ns <- session$ns
     
-    # ── Core data: caretMethodsDF (tutorial f3) ───────────────────────────────
-    # Built once on startup — expensive, so cached in a reactive
-    methods_df <- reactive({
-      mi <- caret::getModelInfo()
+    # ── Model info — built once ───────────────────────────────────────────────
+    mi <- caret::getModelInfo()
+    
+    # Plain data frame (no HTML) — used for filtering
+    methods_plain <- reactive({
+      n <- length(mi)
+      Label <- Tags_plain <- Packages_plain <- Hyperparams <-
+        character(n)
+      Regression <- Classification <- ClassProbs <- logical(n)
       
-      Label          <- vector(mode = "character", length = length(mi))
-      Packages       <- vector(mode = "character", length = length(mi))
-      Packages_plain <- vector(mode = "character", length = length(mi))
-      Hyperparams    <- vector(mode = "character", length = length(mi))
-      Regression     <- vector(mode = "logical",   length = length(mi))
-      Classification <- vector(mode = "logical",   length = length(mi))
-      Tags           <- vector(mode = "character", length = length(mi))
-      ClassProbs     <- vector(mode = "logical",   length = length(mi))
-      
-      for (row in seq_along(mi)) {
-        Label[row] <- mi[[row]]$label
-        libs       <- mi[[row]]$library
-        libs       <- na.omit(libs[libs != ""])
-        
-        if (length(libs) > 0) {
-          # plain version for filtering
-          Packages_plain[row] <- paste(libs, collapse = "\n")
-          # HTML version with ban icon for uninstalled packages
-          present <- suppressWarnings(
-            sapply(libs, function(l)
-              require(package = l, warn.conflicts = FALSE,
-                      character.only = TRUE, quietly = TRUE))
-          )
-          check        <- ifelse(present, "", as.character(icon(name = "ban")))
-          Packages[row] <- paste(paste(libs, check), collapse = "<br/>")
-        }
-        
-        d              <- mi[[row]]$parameters
-        Hyperparams[row] <- paste(
+      for (i in seq_len(n)) {
+        m               <- mi[[i]]
+        Label[i]        <- m$label
+        libs            <- na.omit(m$library[m$library != ""])
+        Packages_plain[i] <- paste(libs, collapse = "\n")
+        Tags_plain[i]   <- paste(m$tags, collapse = "|")
+        d               <- m$parameters
+        Hyperparams[i]  <- paste(
           paste0(d$parameter, " - ", d$label, " [", d$class, "]"),
-          collapse = "<br/>")
-        Regression[row]     <- "Regression"     %in% mi[[row]]$type
-        Classification[row] <- "Classification" %in% mi[[row]]$type
-        Tags[row]           <- paste(mi[[row]]$tags, collapse = "<br/>")
-        ClassProbs[row]     <- is.function(mi[[row]]$prob)
+          collapse = "\n")
+        Regression[i]     <- "Regression"     %in% m$type
+        Classification[i] <- "Classification" %in% m$type
+        ClassProbs[i]     <- is.function(m$prob)
       }
       
       data.frame(
-        Model          = names(mi),
-        Label,
-        Packages,
-        Packages_plain,
-        Regression,
-        Classification,
-        Tags,
-        Hyperparams,
-        ClassProbs,
+        Model = names(mi), Label, Packages_plain, Tags_plain,
+        Hyperparams, Regression, Classification, ClassProbs,
         stringsAsFactors = FALSE
       )
     })
     
-    # ── Wide tag matrix (tutorial f5) ─────────────────────────────────────────
+    # HTML packages column (ban icon) — merged in for display only
+    packages_html <- reactive({
+      df <- methods_plain()
+      html <- character(nrow(df))
+      for (i in seq_len(nrow(df))) {
+        libs <- strsplit(df$Packages_plain[i], "\n")[[1]]
+        libs <- libs[nchar(libs) > 0]
+        if (length(libs) > 0) {
+          present <- suppressWarnings(
+            sapply(libs, function(l)
+              require(l, warn.conflicts = FALSE,
+                      character.only = TRUE, quietly = TRUE))
+          )
+          check  <- ifelse(present, "", as.character(icon("ban")))
+          html[i] <- paste(paste(libs, check), collapse = "<br/>")
+        }
+      }
+      data.frame(Model = df$Model, Packages_html = html,
+                 stringsAsFactors = FALSE)
+    })
+    
+    # Wide binary tag matrix for cmdscale
     wide_matrix <- reactive({
-      modelInfo      <- caret::getModelInfo()
-      tags           <- vector(mode = "list", length = length(modelInfo))
-      Classification <- Regression <- ClassProbs <- rep(NA, length(modelInfo))
+      tags <- lapply(mi, `[[`, "tags")
+      Reg  <- sapply(mi, function(m) as.integer("Regression"     %in% m$type))
+      Cls  <- sapply(mi, function(m) as.integer("Classification" %in% m$type))
       
-      for (i in seq_along(modelInfo)) {
-        tags[[i]]        <- modelInfo[[i]]$tags
-        Classification[i] <- ifelse("Classification" %in% modelInfo[[i]]$type, 1, 0)
-        Regression[i]    <- ifelse("Regression"     %in% modelInfo[[i]]$type, 1, 0)
-        ClassProbs[i]    <- ifelse(is.null(modelInfo[[i]]$prob), 0, 1)
+      all_tags <- sort(unique(unlist(tags)))
+      all_tags <- all_tags[nchar(all_tags) > 0]
+      
+      dat <- matrix(0L, nrow = length(mi), ncol = length(all_tags),
+                    dimnames = list(names(mi), all_tags))
+      for (i in seq_along(tags)) {
+        matched <- intersect(tags[[i]], all_tags)
+        if (length(matched) > 0) dat[i, matched] <- 1L
       }
       
-      tabs  <- table(unlist(tags))
-      tabs  <- tabs[order(tolower(names(tabs)))]
-      terms <- names(tabs)
-      terms <- terms[terms != ""]
-      
-      dat <- matrix(0, ncol = length(terms), nrow = length(tags))
-      colnames(dat) <- terms
-      hasTag <- lapply(tags, function(x, y) which(y %in% x), y = terms)
-      for (i in seq_along(hasTag)) dat[i, hasTag[[i]]] <- 1
-      
-      dat  <- cbind(Classification, Regression, dat)
-      wide <- as.data.frame(dat, row.names = names(modelInfo))
-      wide
+      as.data.frame(cbind(Regression = Reg, Classification = Cls, dat))
     })
     
-    # Populate map highlight selector with method short names
+    # Populate tag selectors
     observe({
-      df <- methods_df()
-      updateSelectizeInput(session, "map_highlight",
-                           choices  = df$Model,
-                           selected = c("glmnet", "pls", "rpart"),
-                           server   = TRUE)
+      all_tags <- sort(unique(unlist(lapply(mi, `[[`, "tags"))))
+      all_tags <- all_tags[nchar(all_tags) > 0]
+      updateSelectizeInput(session, "flt_include",
+                           choices = all_tags, server = TRUE)
+      updateSelectizeInput(session, "flt_exclude",
+                           choices = all_tags, server = TRUE)
     })
     
-    
-    # ── TAB A: Method table ───────────────────────────────────────────────────
-    
-    output$method_table <- DT::renderDataTable({
-      df <- methods_df()
+    # ── Shared filter reactive ────────────────────────────────────────────────
+    filtered_df <- reactive({
+      df <- methods_plain()
       
-      # filter by type
-      df <- switch(input$tbl_type,
-                   "reg"  = df[df$Regression == TRUE, ],
-                   "cls"  = df[df$Classification == TRUE, ],
+      # type
+      df <- switch(input$type,
+                   "reg"  = df[df$Regression,     ],
+                   "cls"  = df[df$Classification, ],
                    "both" = df
       )
       
-      # choose columns — always keep Model
-      show_cols <- c("Model", intersect(input$tbl_cols,
-                                        c("Label", "Packages", "Tags",
-                                          "Hyperparams", "Regression",
-                                          "Classification", "ClassProbs")))
-      df <- df[, show_cols, drop = FALSE]
+      # include tags
+      for (tag in input$flt_include) {
+        df <- df[grepl(tag, df$Tags_plain, ignore.case = TRUE), ]
+      }
+      
+      # exclude tags
+      for (tag in input$flt_exclude) {
+        df <- df[!grepl(tag, df$Tags_plain, ignore.case = TRUE), ]
+      }
+      
+      # missing predictor handling
+      if (isTRUE(input$flt_missing)) {
+        df <- df[grepl("Handle Missing Predictor Data",
+                       df$Tags_plain, ignore.case = TRUE), ]
+      }
+      
+      # implicit feature selection
+      if (isTRUE(input$flt_implicit)) {
+        df <- df[grepl("Implicit Feature Selection",
+                       df$Tags_plain, ignore.case = TRUE), ]
+      }
+      
+      df
+    })
+    
+    # ── Sidebar summary ───────────────────────────────────────────────────────
+    output$filter_summary <- renderPrint({
+      df <- filtered_df()
+      cat(nrow(df), "method(s)\n")
+      if (nrow(df) > 0 && nrow(df) <= 30) {
+        cat(paste(sort(df$Model), collapse = ", "))
+      }
+    })
+    
+    # ── Subtab 1: Method table ────────────────────────────────────────────────
+    output$method_table <- DT::renderDataTable({
+      filt <- filtered_df()
+      html <- packages_html()
+      df   <- merge(filt, html, by = "Model")
+      
+      # tidy for display
+      display <- data.frame(
+        Model          = df$Model,
+        Label          = df$Label,
+        Packages       = df$Packages_html,
+        Tags           = gsub("\\|", ", ", df$Tags_plain),
+        Hyperparameters = df$Hyperparams,
+        Regression     = df$Regression,
+        Classification = df$Classification,
+        ClassProbs     = df$ClassProbs,
+        stringsAsFactors = FALSE
+      )
       
       DT::datatable(
-        df,
+        display,
         escape    = FALSE,
         rownames  = FALSE,
         selection = "none",
         options   = list(
-          pageLength = as.integer(input$tbl_pagesize),
-          lengthMenu = c(5, 10, 15, 25, 50),
+          pageLength = 10,
+          lengthMenu = c(5, 10, 25, 50),
           scrollX    = TRUE
         )
       )
     })
     
-    
-    # ── TAB B: Tag filter ─────────────────────────────────────────────────────
-    
-    flt_result <- eventReactive(input$flt_apply, {
-      df <- methods_df()
-      
-      # use plain tags for grepl matching (no HTML)
-      mi    <- caret::getModelInfo()
-      Tags_plain <- sapply(mi, function(m) paste(m$tags, collapse = "|"))
-      df$Tags_plain <- Tags_plain
-      
-      # regression filter
-      if (isTRUE(input$flt_regression)) df <- df[df$Regression == TRUE, ]
-      
-      # include tags — ALL must match
-      for (tag in input$flt_include) {
-        df <- df[grepl(tag, df$Tags_plain, ignore.case = TRUE, fixed = TRUE), ]
-      }
-      
-      # exclude tags — ANY disqualifies
-      for (tag in input$flt_exclude) {
-        df <- df[!grepl(tag, df$Tags_plain, ignore.case = TRUE, fixed = TRUE), ]
-      }
-      
-      # handle missing
-      if (isTRUE(input$flt_missing)) {
-        df <- df[grepl("Handle Missing Predictor Data", df$Tags_plain,
-                       fixed = TRUE), ]
-      }
-      
-      # implicit feature selection
-      if (isTRUE(input$flt_implicit)) {
-        df <- df[grepl("Implicit Feature Selection", df$Tags_plain,
-                       fixed = TRUE), ]
-      }
-      
-      df[, c("Model", "Label", "Packages", "Tags", "Hyperparams",
-             "Regression", "Classification", "ClassProbs")]
-    }, ignoreNULL = FALSE)
-    
-    output$flt_summary <- renderPrint({
-      df <- flt_result()
-      cat(nrow(df), "method(s) match the current filters.\n")
-      if (nrow(df) > 0) cat("Models:", paste(df$Model, collapse = ", "), "\n")
-    })
-    
-    output$flt_table <- DT::renderDataTable({
-      df <- flt_result()
-      DT::datatable(
-        df,
-        escape    = FALSE,
-        rownames  = FALSE,
-        selection = "none",
-        options   = list(pageLength = 10, scrollX = TRUE)
-      )
-    })
-    
-    
-    # ── TAB C: Method map ─────────────────────────────────────────────────────
-    
-    map_data <- eventReactive(input$map_build, {
+    # ── Subtab 2: Method map ──────────────────────────────────────────────────
+    output$map_plot <- renderPlot({
       wide <- wide_matrix()
       
-      # filter to chosen type
-      if (input$map_type == "reg") {
-        wide <- wide[wide$Regression == 1, ]
-      } else {
-        wide <- wide[wide$Classification == 1, ]
-      }
+      # restrict map to chosen type
+      wide_sub <- switch(input$type,
+                         "reg"  = wide[wide$Regression == 1,     ],
+                         "cls"  = wide[wide$Classification == 1, ],
+                         "both" = wide
+      )
       
-      # compute distances and reduce to 2D (tutorial f6)
-      d  <- stats::dist(wide, method = input$map_dist)
+      req(nrow(wide_sub) >= 3)
+      
+      # distance + cmdscale
+      d  <- stats::dist(wide_sub, method = input$map_dist)
       dd <- stats::cmdscale(d, k = 2)
-      df <- data.frame(
-        Model = rownames(dd),
-        X1    = dd[, 1],
-        X2    = dd[, 2],
+      
+      df_map <- data.frame(
+        Model     = rownames(dd),
+        X1        = dd[, 1],
+        X2        = dd[, 2],
         stringsAsFactors = FALSE
       )
       
-      # mark highlighted methods
-      df$Highlight <- df$Model %in% input$map_highlight
-      df
-    }, ignoreNULL = FALSE)
-    
-    output$map_plot <- renderPlot({
-      df    <- map_data()
-      title <- if (input$map_type == "reg") "Regression Methods" else "Classification Methods"
+      # highlighted = current filter result
+      df_map$Highlight <- df_map$Model %in% filtered_df()$Model
+      df_hi <- df_map[df_map$Highlight, ]
+      df_lo <- df_map[!df_map$Highlight, ]
       
-      # split into highlighted and normal
-      df_hi <- df[df$Highlight, ]
-      df_lo <- df[!df$Highlight, ]
+      type_label <- switch(input$type,
+                           "reg"  = "Regression",
+                           "cls"  = "Classification",
+                           "both" = "All"
+      )
       
       p <- ggplot(mapping = aes(x = X1, y = X2, label = Model)) +
-        ggtitle(label = title) +
-        xlab("Coordinate 1") +
-        ylab("Coordinate 2") +
+        ggtitle(paste(type_label,
+                      "Methods — purple = filtered, grey = all others")) +
+        xlab("Coordinate 1") + ylab("Coordinate 2") +
         theme_minimal(base_size = 13) +
         theme(plot.title = element_text(face = "bold", hjust = 0.5))
       
-      # normal points — grey, small labels
+      # grey background — all methods
       if (nrow(df_lo) > 0) {
         p <- p +
-          geom_point(data = df_lo, color = "#aaaaaa", size = 1.5) +
+          geom_point(data = df_lo, color = "#cccccc", size = 1.5) +
           ggrepel::geom_text_repel(
             data         = df_lo,
             size         = input$map_label_size,
-            color        = "#888888",
+            color        = "#aaaaaa",
             max.overlaps = input$map_overlaps,
             na.rm        = TRUE
           )
       }
       
-      # highlighted points — purple, larger labels
+      # purple foreground — filtered methods
       if (nrow(df_hi) > 0) {
         p <- p +
           geom_point(data = df_hi, color = "#534AB7", size = 3) +
           ggrepel::geom_text_repel(
             data         = df_hi,
-            size         = input$map_label_size + 1,
+            size         = input$map_label_size + 1.5,
             color        = "#534AB7",
             fontface     = "bold",
             max.overlaps = input$map_overlaps,
+            box.padding  = 0.4,
             na.rm        = TRUE
           )
       }
       
       p
-    })
-    
-    # wide tag matrix table
-    output$wide_table <- DT::renderDataTable({
-      wide <- wide_matrix()
-      # filter to chosen type for context
-      if (input$map_type == "reg") {
-        wide <- wide[wide$Regression == 1, ]
-      } else {
-        wide <- wide[wide$Classification == 1, ]
-      }
-      DT::datatable(
-        wide,
-        rownames  = TRUE,
-        selection = "none",
-        options   = list(
-          pageLength = 10,
-          scrollX    = TRUE,
-          scrollY    = "300px"
-        )
-      )
     })
     
   })
