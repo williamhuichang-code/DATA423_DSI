@@ -241,8 +241,7 @@ ui <- fluidPage(
              split_ui("split")
     ),
     tabPanel("Available methods",
-             h3("Regression methods in caret"),
-             shinycssloaders::withSpinner(DT::dataTableOutput(outputId = "Available"))
+             available_ui("available")
     ),
     tabPanel("Methods",
              checkboxInput(inputId = "Parallel", label = "Use parallel processing", value = TRUE),
@@ -516,46 +515,8 @@ server <- function(input, output, session) {
   # getSplit reads from the module — feeds getTrainData and getTestData downstream
   getSplit <- reactive({ splitIndices() })
   
-  # reactive getMethods ----
-  getMethods <- reactive({
-    mi <- caret::getModelInfo()
-    Label <- vector(mode = "character", length = length(mi))
-    Package <- vector(mode = "character", length = length(mi))
-    Hyperparams <- vector(mode = "character", length = length(mi))
-    Regression <- vector(mode = "logical", length = length(mi))
-    Classification <- vector(mode = "logical", length = length(mi))
-    Tags <- vector(mode = "character", length = length(mi))
-    ClassProbs <- vector(mode = "character", length = length(mi))
-    for (row in 1:length(mi)) {
-      Label[row] <- mi[[row]]$label
-      libs <- mi[[row]]$library
-      libs <- na.omit(libs[libs != ""]) # remove blank libraries
-      if (length(libs) > 0) {
-        present <- vector(mode = "logical", length = length(libs))
-        suppressWarnings({
-          for (lib in 1:length(libs)) {
-            present[lib] <- require(package = libs[lib], warn.conflicts = FALSE, character.only = TRUE, quietly = TRUE)
-          }
-        })
-        check <- ifelse(present, "", as.character(icon(name = "ban")))
-        Package[row] <- paste(collapse = "<br/>", paste(mi[[row]]$library, check))
-      }
-      d <- mi[[row]]$parameters
-      Hyperparams[row] <- paste(collapse = "<br/>", paste0(d$parameter, " - ", d$label, " [", d$class,"]"))
-      Regression[row] <- ifelse("Regression" %in% mi[[row]]$type, as.character(icon("check-square", class = "fa-3x")), "")
-      Classification[row] <- ifelse("Classification" %in% mi[[row]]$type , as.character(icon("check-square", class = "fa-3x")),"")
-      Tags[row] <- paste(collapse = "<br/>", mi[[row]]$tags)
-      ClassProbs[row] <- ifelse(is.function(mi[[row]]$prob), as.character(icon("check-square", class = "fa-3x")), "")
-    }
-    data.frame(Model = names(mi), Label, Package, Regression, Classification, Tags, Hyperparams, ClassProbs, stringsAsFactors = FALSE)
-  })
-  
-  # output Available ----
-  output$Available <- DT::renderDataTable({
-    m <- getMethods()
-    m <- m[m$Regression != "", !colnames(m) %in% c("Regression", "Classification", "ClassProbs")]  # hide columns because we are looking at regression methods only
-    DT::datatable(m, escape = FALSE, options = list(pageLength = 5, lengthMenu = c(5,10,15)), rownames = FALSE, selection = "none")
-  })
+  # replace reactive getMethods and output Available with discovery module ----
+  available_server("available")
   
   # reactive getTrainData ----
   getTrainData <- reactive({
