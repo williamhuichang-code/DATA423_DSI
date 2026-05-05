@@ -169,6 +169,7 @@ dat <- cbind(Classification, Regression, dat)
 wide <- as.data.frame(dat, row.names = names(modelInfo))
 wide
 
+write.csv(wide, "models_tag_discovery.csv", row.names = TRUE)
 
 ```
 

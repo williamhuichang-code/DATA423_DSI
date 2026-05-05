@@ -515,6 +515,7 @@ ui <- fluidPage(
                )
              )
     ),
+    
     tabPanel("Available methods",
              tagList(
                tags$style(HTML("
@@ -529,26 +530,93 @@ ui <- fluidPage(
                  sidebarPanel(
                    width = 3,
                    style = "background-color:#f4f6fb; border-left:3px solid #6a9fd8; min-height:100vh; padding:16px 14px;",
+                   
+                   # Info box
                    div(style="font-size:13px;color:#343a40;background-color:white;padding:10px;border-left:4px solid #0d6efd;border-radius:6px;margin-bottom:12px;",
                        icon("info-circle", style="color:#0d6efd;"), HTML("&nbsp;"),
-                       HTML("<strong>How to use:</strong><br>Filter methods using the controls below. The table updates instantly. Switch to the map tab to see where filtered methods sit relative to all others.")),
+                       HTML("<strong>How to use:</strong><br>
+              Filter methods using the controls below.
+              The table updates instantly. Switch to the map
+              tab to see coloured clusters.")),
+                   
+                   # ── 1st: Model Constraints ────────────────────────────────────────────────
+                   div(style="background:#f8d7da;border-left:3px solid #dc3545;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("1st — Model Constraints",
+                                  style="font-weight:700;font-size:13px;color:#842029;")),
+                   div(style="font-size:11px;color:#6c757d;margin-bottom:6px;",
+                       "Determines which model points appear on the map"),
+                   
                    tags$label("Method type", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
                    radioButtons("av_type", label=NULL,
-                                choices=c("Regression only"="reg", "Classification only"="cls", "Both"="both"),
+                                choices=c("Regression only"="reg",
+                                          "Classification only"="cls",
+                                          "Both"="both"),
                                 selected="reg"),
-                   hr(),
-                   tags$label("Include tags (ALL must match)", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
-                   selectizeInput("av_flt_include", label=NULL, choices=NULL, multiple=TRUE,
-                                  options=list(placeholder="e.g. Ensemble Model")),
+                   
                    tags$label("Exclude tags (ANY disqualifies)", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
                    selectizeInput("av_flt_exclude", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. Two Class Only")),
+                   hr(),
+                   
+                   # ── 2nd: Literature-Informed Highlights ──────────────────────────────────
+                   div(style="background:#fff3cd;border-left:3px solid #ffc107;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("2nd — Literature-Informed Highlights",
+                                  style="font-weight:700;font-size:13px;color:#664d03;")),
+                   div(style="font-size:11px;color:#6c757d;margin-bottom:6px;",
+                       "Or logic for bold highlighting based on domain research"),
+                   selectizeInput("av_flt_any", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. Regularization")
+                                  ),
+                   hr(),
+                   
+                   # ── 3rd: Sample Model Flavours ────────────────────────────────────────────
+                   div(style="background:#d1ecf1;border-left:3px solid #0dcaf0;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("3rd — Sample Model Flavours",
+                                  style="font-weight:700;font-size:13px;color:#055160;")),
+                   div(style="font-size:11px;color:#6c757d;margin-bottom:6px;",
+                       "Colours model points on the map by group"),
+                   
+                   # Group 1 — Purple
+                   div(style="border-left:3px solid #534AB7;padding-left:8px;margin-bottom:2px;margin-top:10px;",
+                       tags$label("Group 1", style="font-weight:600;font-size:13px;color:#534AB7;")),
+                   selectizeInput("av_g1", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. Neural Network")),
+                   
+                   # Group 2 — Teal
+                   div(style="border-left:3px solid #0F6E56;padding-left:8px;margin-bottom:2px;margin-top:10px;",
+                       tags$label("Group 2", style="font-weight:600;font-size:13px;color:#0F6E56;")),
+                   selectizeInput("av_g2", label=NULL, choices=NULL, multiple=TRUE,
                                   options=list(placeholder="e.g. Linear Regression")),
+                   
+                   # Group 3 — Amber
+                   div(style="border-left:3px solid #BA7517;padding-left:8px;margin-bottom:2px;margin-top:10px;",
+                       tags$label("Group 3", style="font-weight:600;font-size:13px;color:#BA7517;")),
+                   selectizeInput("av_g3", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. Tree-Based Model")),
+                   
+                   # Group 4 — Coral
+                   div(style="border-left:3px solid #993C1D;padding-left:8px;margin-bottom:2px;margin-top:10px;",
+                       tags$label("Group 4", style="font-weight:600;font-size:13px;color:#993C1D;")),
+                   selectizeInput("av_g4", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. Kernel Method")),
+                   
+                   # Group 5 — Blue
+                   div(style="border-left:3px solid #1a6ebd;padding-left:8px;margin-bottom:2px;margin-top:10px;",
+                       tags$label("Group 5", style="font-weight:600;font-size:13px;color:#1a6ebd;")),
+                   selectizeInput("av_g5", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. Ensemble Model")),
+                   
+                   # Group 6 — Pink (wildcard)
+                   div(style="border-left:3px solid #d63384;padding-left:8px;margin-bottom:2px;margin-top:10px;",
+                       tags$label("Group 6 — Wildcard", style="font-weight:600;font-size:13px;color:#d63384;")),
+                   selectizeInput("av_g6", label=NULL, choices=NULL, multiple=TRUE,
+                                  options=list(placeholder="e.g. anything...")),
                    hr(),
-                   tags$label("Handle missing predictors", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
-                   checkboxInput("av_flt_missing", label=NULL, value=FALSE),
-                   tags$label("Implicit feature selection", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
-                   checkboxInput("av_flt_implicit", label=NULL, value=FALSE),
-                   hr(),
+                   
+                   # ── Map Configs ───────────────────────────────────────────────────────────
+                   div(style="background:#e2e3e5;border-left:3px solid #6c757d;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("Map Configs",
+                                  style="font-weight:700;font-size:13px;color:#41464b;")),
                    tags$label("Map distance metric", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
                    selectInput("av_map_dist", label=NULL,
                                choices=c("euclidean","manhattan","binary","canberra"),
@@ -558,29 +626,37 @@ ui <- fluidPage(
                    tags$label("Max label overlaps", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
                    sliderInput("av_map_overlaps", label=NULL, min=10, max=100, value=50, step=5, width="100%"),
                    hr(),
+                   
+                   # ── 6. Matching summary ───────────────────────────────────────────
                    tags$label("Matching methods", style="font-weight:600;font-size:13px;color:#343a40;display:block;margin-bottom:4px;margin-top:10px;"),
                    verbatimTextOutput("av_filter_summary")
                  ),
+                 
                  mainPanel(
                    width = 9,
                    tabsetPanel(
                      type = "pills",
                      id   = "av_subtabs",
+                     
                      tabPanel("Method table",
                               br(),
-                              h4("Filtered caret methods", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                              h4("Filtered caret methods",
+                                 style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
                               shinycssloaders::withSpinner(DT::dataTableOutput("av_method_table"))
                      ),
+                     
                      tabPanel("Method map",
                               br(),
-                              h4("Similarity map — filtered methods highlighted in purple", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                              shinycssloaders::withSpinner(plotOutput("av_map_plot", height="650px"))
+                              h4("Similarity map — colour groups highlighted",
+                                 style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                              shinycssloaders::withSpinner(plotOutput("av_map_plot", height="80vh"))
                      )
                    )
                  )
                )
              )
     ),
+    
     tabPanel("Methods",
              checkboxInput(inputId = "Parallel", label = "Use parallel processing", value = TRUE),
              bsTooltip(id = "Parallel", title = paste("This will utilise all", detectCores(), "available CPUs during training")),
@@ -1251,6 +1327,17 @@ server <- function(input, output, session) {
     
     av_mi <- caret::getModelInfo()
     
+    # Group colours — order matches priority (first match wins on map)
+    av_group_colours <- c(
+      "1" = "#534AB7",   # purple  — Group 1
+      "2" = "#0F6E56",   # teal    — Group 2
+      "3" = "#BA7517",   # amber   — Group 3
+      "4" = "#993C1D",   # coral   — Group 4
+      "5" = "#1a6ebd",   # blue    — Group 5
+      "6" = "#d63384",   # pink    — Group 6
+      "none" = "#cccccc" # grey    — unmatched
+    )
+    
     av_methods_plain <- reactive({
       n <- length(av_mi)
       Label <- Tags_plain <- Packages_plain <- Hyperparams <- character(n)
@@ -1262,7 +1349,8 @@ server <- function(input, output, session) {
         Packages_plain[i] <- paste(libs, collapse = "\n")
         Tags_plain[i]     <- paste(m$tags, collapse = "|")
         d                 <- m$parameters
-        Hyperparams[i]    <- paste(paste0(d$parameter, " - ", d$label, " [", d$class, "]"), collapse = "\n")
+        Hyperparams[i]    <- paste(paste0(d$parameter, " - ", d$label,
+                                          " [", d$class, "]"), collapse = "\n")
         Regression[i]     <- "Regression"     %in% m$type
         Classification[i] <- "Classification" %in% m$type
         ClassProbs[i]     <- is.function(m$prob)
@@ -1281,13 +1369,15 @@ server <- function(input, output, session) {
         if (length(libs) > 0) {
           present <- suppressWarnings(
             sapply(libs, function(l)
-              require(l, warn.conflicts = FALSE, character.only = TRUE, quietly = TRUE))
+              require(l, warn.conflicts = FALSE,
+                      character.only = TRUE, quietly = TRUE))
           )
           check   <- ifelse(present, "", as.character(icon("ban")))
           html[i] <- paste(paste(libs, check), collapse = "<br/>")
         }
       }
-      data.frame(Model = df$Model, Packages_html = html, stringsAsFactors = FALSE)
+      data.frame(Model = df$Model, Packages_html = html,
+                 stringsAsFactors = FALSE)
     })
     
     av_wide_matrix <- reactive({
@@ -1305,31 +1395,122 @@ server <- function(input, output, session) {
       as.data.frame(cbind(Regression = Reg, Classification = Cls, dat))
     })
     
+    # Observer 1 — populate exclude selector with ALL tags (runs once)
     observe({
       all_tags <- sort(unique(unlist(lapply(av_mi, `[[`, "tags"))))
       all_tags <- all_tags[nchar(all_tags) > 0]
-      updateSelectizeInput(session, "av_flt_include", choices = all_tags, server = TRUE)
-      updateSelectizeInput(session, "av_flt_exclude", choices = all_tags, server = TRUE)
+      updateSelectizeInput(session, "av_flt_exclude", choices = all_tags,
+                           server = TRUE,
+                           selected = c("Two Class Only", "ROC Curves",
+                                        "Text Mining", "String Kernel",
+                                        "Self-Organising Maps",
+                                        "Binary Predictors Only",
+                                        "Categorical Predictors Only",
+                                        "Cost Sensitive Learning",
+                                        "Ordinal Outcomes"))
     })
     
-    av_filtered_df <- reactive({
+    # Observer 2 — populate sections 2 & 3 with only non-excluded tags (re-runs when exclusions change)
+    observe({
+      all_tags <- sort(unique(unlist(lapply(av_mi, `[[`, "tags"))))
+      all_tags <- all_tags[nchar(all_tags) > 0]
+      available_tags <- all_tags[!all_tags %in% input$av_flt_exclude]
+      
+      default_lit_tags <- intersect(available_tags, c(
+        "Regularization",
+        "L1 Regularization",
+        "L2 Regularization",
+        "L1 Regularization Models",
+        "L2 Regularization Models",
+        "Feature Extraction",
+        "Feature Extraction Models",
+        "Partial Least Squares"
+      ))
+      
+      current_lit_tags <- isolate(input$av_flt_any)
+      
+      updateSelectizeInput(
+        session,
+        "av_flt_any",
+        choices = available_tags,
+        selected = if (length(current_lit_tags) > 0) current_lit_tags else default_lit_tags,
+        server = TRUE
+      )
+      
+      updateSelectizeInput(session, "av_g1", choices = available_tags, server = TRUE)
+      updateSelectizeInput(session, "av_g2", choices = available_tags, server = TRUE)
+      updateSelectizeInput(session, "av_g3", choices = available_tags, server = TRUE)
+      updateSelectizeInput(session, "av_g4", choices = available_tags, server = TRUE)
+      updateSelectizeInput(session, "av_g5", choices = available_tags, server = TRUE)
+      updateSelectizeInput(session, "av_g6", choices = available_tags, server = TRUE)
+    })
+    
+    # Helper: does a method's Tags_plain match ALL tags in a group?
+    .matches_group <- function(tags_plain, group_tags) {
+      if (length(group_tags) == 0) return(FALSE)
+      all(sapply(group_tags, function(t)
+        grepl(t, tags_plain, ignore.case = TRUE)))
+    }
+    
+    # ── Shared filter reactive (exclude + any + type) ─────────────────────────
+    # Returns the base-filtered df before group colouring
+    av_base_df <- reactive({
       df <- av_methods_plain()
+      
+      # type filter
       df <- switch(input$av_type,
                    "reg"  = df[df$Regression,     ],
                    "cls"  = df[df$Classification, ],
                    "both" = df
       )
-      for (tag in input$av_flt_include)
-        df <- df[grepl(tag, df$Tags_plain, ignore.case = TRUE), ]
+      
+      # exclude tags — global grey-out
       for (tag in input$av_flt_exclude)
         df <- df[!grepl(tag, df$Tags_plain, ignore.case = TRUE), ]
-      if (isTRUE(input$av_flt_missing))
-        df <- df[grepl("Handle Missing Predictor Data", df$Tags_plain, ignore.case = TRUE), ]
-      if (isTRUE(input$av_flt_implicit))
-        df <- df[grepl("Implicit Feature Selection", df$Tags_plain, ignore.case = TRUE), ]
+      
       df
     })
     
+    # Assign group membership to each method (first match wins)
+    av_grouped_df <- reactive({
+      df <- av_base_df()
+      
+      g_inputs <- list(
+        "1" = input$av_g1,
+        "2" = input$av_g2,
+        "3" = input$av_g3,
+        "4" = input$av_g4,
+        "5" = input$av_g5,
+        "6" = input$av_g6
+      )
+      
+      df$Group <- sapply(df$Tags_plain, function(tp) {
+        matched <- "none"
+        for (g in names(g_inputs)) {
+          if (.matches_group(tp, g_inputs[[g]])) {
+            matched <- g
+            break
+          }
+        }
+        matched
+      })
+      
+      df
+    })
+    
+    # The filtered df for the table — only show methods matching at least one
+    # active group (if any groups have tags set), or all base-filtered methods
+    av_filtered_df <- reactive({
+      df <- av_grouped_df()
+      # if all groups are empty, show everything that passed base filter
+      any_group_active <- any(sapply(
+        list(input$av_g1, input$av_g2, input$av_g3, input$av_g4, input$av_g5, input$av_g6),
+        function(x) length(x) > 0
+      ))
+      if (any_group_active) df[df$Group != "none", ] else df
+    })
+    
+    # Sidebar summary
     output$av_filter_summary <- renderPrint({
       df <- av_filtered_df()
       cat(nrow(df), "method(s)\n")
@@ -1337,10 +1518,12 @@ server <- function(input, output, session) {
         cat(paste(sort(df$Model), collapse = ", "))
     })
     
+    # ── Method table ──────────────────────────────────────────────────────────
     output$av_method_table <- DT::renderDataTable({
       filt <- av_filtered_df()
       html <- av_packages_html()
       df   <- merge(filt, html, by = "Model")
+      
       display <- data.frame(
         Model          = df$Model,
         Label          = df$Label,
@@ -1350,45 +1533,156 @@ server <- function(input, output, session) {
         Regression     = df$Regression,
         Classification = df$Classification,
         ClassProbs     = df$ClassProbs,
+        Group          = df$Group,
         stringsAsFactors = FALSE
       )
-      DT::datatable(display, escape = FALSE, rownames = FALSE, selection = "none",
-                    options = list(pageLength = 10, lengthMenu = c(5,10,25,50), scrollX = TRUE))
+      
+      DT::datatable(display, escape = FALSE, rownames = FALSE,
+                    selection = "none",
+                    options = list(pageLength = 10,
+                                   lengthMenu = c(5,10,25,50),
+                                   scrollX = TRUE))
     })
     
+    # ── Method map ────────────────────────────────────────────────────────────
     output$av_map_plot <- renderPlot({
       wide <- av_wide_matrix()
+      
+      # restrict to method type
       wide_sub <- switch(input$av_type,
                          "reg"  = wide[wide$Regression == 1,     ],
                          "cls"  = wide[wide$Classification == 1, ],
                          "both" = wide
       )
       req(nrow(wide_sub) >= 3)
+      lit_size_boost <- 3   # font size boost for literature-informed highlights
+      
+      # cmdscale
       d  <- stats::dist(wide_sub, method = input$av_map_dist)
       dd <- stats::cmdscale(d, k = 2)
-      df_map <- data.frame(Model = rownames(dd), X1 = dd[,1], X2 = dd[,2],
-                           stringsAsFactors = FALSE)
-      df_map$Highlight <- df_map$Model %in% av_filtered_df()$Model
-      df_hi <- df_map[df_map$Highlight, ]
-      df_lo <- df_map[!df_map$Highlight, ]
-      type_label <- switch(input$av_type, "reg"="Regression", "cls"="Classification", "both"="All")
+      df_map <- data.frame(
+        Model = rownames(dd), X1 = dd[, 1], X2 = dd[, 2],
+        stringsAsFactors = FALSE
+      )
+      
+      # attach group from grouped_df (only methods that survived base filter)
+      grp_df <- av_grouped_df()[, c("Model", "Group")]
+      df_map <- merge(df_map, grp_df, by = "Model", all.x = TRUE)
+      df_map$Group[is.na(df_map$Group)] <- "none"
+      
+      # methods excluded by base filter get grey too
+      base_models <- av_base_df()$Model
+      df_map$Group[!df_map$Model %in% base_models] <- "none"
+      
+      type_label <- switch(input$av_type,
+                           "reg"  = "Regression",
+                           "cls"  = "Classification",
+                           "both" = "All"
+      )
+      
       p <- ggplot(mapping = aes(x = X1, y = X2, label = Model)) +
-        ggtitle(paste(type_label, "Methods — purple = filtered, grey = all others")) +
+        ggtitle(paste(type_label, "Methods — coloured by group")) +
         xlab("Coordinate 1") + ylab("Coordinate 2") +
         theme_minimal(base_size = 13) +
         theme(plot.title = element_text(face = "bold", hjust = 0.5))
-      if (nrow(df_lo) > 0)
-        p <- p +
-        geom_point(data = df_lo, color = "#cccccc", size = 1.5) +
-        ggrepel::geom_text_repel(data = df_lo, size = input$av_map_label_size,
-                                 color = "#aaaaaa", max.overlaps = input$av_map_overlaps, na.rm = TRUE)
-      if (nrow(df_hi) > 0)
-        p <- p +
-        geom_point(data = df_hi, color = "#534AB7", size = 3) +
-        ggrepel::geom_text_repel(data = df_hi, size = input$av_map_label_size + 1.5,
-                                 color = "#534AB7", fontface = "bold",
-                                 max.overlaps = input$av_map_overlaps,
-                                 box.padding = 0.4, na.rm = TRUE)
+      
+      # grey background — split into lit-highlighted vs plain grey
+      df_grey <- df_map[df_map$Group == "none", ]
+      if (nrow(df_grey) > 0) {
+        # determine which grey methods match the literature highlight
+        if (length(input$av_flt_any) > 0) {
+          pattern <- paste(input$av_flt_any, collapse = "|")
+          # need Tags_plain to check — join from base_df
+          tags_lookup <- av_base_df()[, c("Model", "Tags_plain")]
+          df_grey <- merge(df_grey, tags_lookup, by = "Model", all.x = TRUE)
+          df_grey$LitHit <- grepl(pattern, df_grey$Tags_plain, ignore.case = TRUE)
+        } else {
+          df_grey$LitHit <- FALSE
+        }
+        
+        df_grey_plain <- df_grey[!df_grey$LitHit, ]
+        df_grey_lit   <- df_grey[df_grey$LitHit,  ]
+        
+        # plain grey — normal weight
+        if (nrow(df_grey_plain) > 0) {
+          p <- p +
+            geom_point(data = df_grey_plain, color = "#cccccc", size = 1.5) +
+            ggrepel::geom_text_repel(data = df_grey_plain,
+                                     size = input$av_map_label_size,
+                                     color = "#aaaaaa",
+                                     max.overlaps = input$av_map_overlaps,
+                                     na.rm = TRUE)
+        }
+        
+        # lit-highlighted grey — bold, same size as plain grey
+        if (nrow(df_grey_lit) > 0) {
+          p <- p +
+            geom_point(data = df_grey_lit, color = "#888888", size = 2) +
+            ggrepel::geom_text_repel(data = df_grey_lit,
+                                     size = input$av_map_label_size + lit_size_boost,
+                                     color = "#555555",
+                                     fontface = "bold",
+                                     max.overlaps = input$av_map_overlaps,
+                                     box.padding = 0.4,
+                                     na.rm = TRUE)
+        }
+      }
+      
+      # coloured groups on top (groups 6 → 1 so group 1 renders last = on top)
+      for (g in c("6", "5", "4", "3", "2", "1")) {
+        df_g <- df_map[df_map$Group == g, ]
+        if (nrow(df_g) > 0) {
+          col <- av_group_colours[g]
+          
+          # check which methods in this group also match the lit highlight
+          if (length(input$av_flt_any) > 0) {
+            pattern <- paste(input$av_flt_any, collapse = "|")
+            tags_lookup <- av_base_df()[, c("Model", "Tags_plain")]
+            df_g <- merge(df_g, tags_lookup, by = "Model", all.x = TRUE)
+            df_g$LitHit <- grepl(pattern, df_g$Tags_plain, ignore.case = TRUE)
+          } else {
+            df_g$LitHit <- FALSE
+          }
+          
+          df_g_plain <- df_g[!df_g$LitHit, ]
+          df_g_lit   <- df_g[df_g$LitHit,  ]
+          
+          # colour only — plain weight
+          if (nrow(df_g_plain) > 0) {
+            p <- p +
+              geom_point(data = df_g_plain, color = col, size = 2) +
+              ggrepel::geom_text_repel(data = df_g_plain,
+                                       size = input$av_map_label_size,
+                                       color = col,
+                                       fontface = "plain",
+                                       max.overlaps = input$av_map_overlaps,
+                                       box.padding = 0.4, na.rm = TRUE)
+          }
+          
+          # colour + bold (lit-highlighted within group)
+          if (nrow(df_g_lit) > 0) {
+            p <- p +
+              geom_point(data = df_g_lit, color = col, size = 2.5) +
+              ggrepel::geom_text_repel(data = df_g_lit,
+                                       size = input$av_map_label_size + lit_size_boost,
+                                       color = col,
+                                       fontface = "bold",
+                                       max.overlaps = input$av_map_overlaps,
+                                       box.padding = 0.4, na.rm = TRUE)
+          }
+        }
+      }
+      
+      # caption legend — avoids aes() conflict with manual colour assignments
+      active_groups <- sort(unique(df_map$Group[df_map$Group != "none"]))
+      if (length(active_groups) > 0) {
+        group_names <- c("1"="Neural Network","2"="OLS","3"="Tree-Based",
+                         "4"="Kernel","5"="Ensemble","6"="Wildcard")
+        caption_lines <- sapply(active_groups, function(g)
+          paste0("Group ", g, " (", group_names[g], ")"))
+        p <- p + labs(caption = paste(caption_lines, collapse = "   "))
+      }
+      
       p
     })
     
