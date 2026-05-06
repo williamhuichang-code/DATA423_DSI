@@ -40,9 +40,16 @@ library(ggrepel)
 options(digits = 3)
 
 # default preprocessing selections shown in each method's dropdown (make sure to set these to my best recommendation)
-glmnet_initial <- c("naomit", "month", "dummy")
-pls_initial <- c("impute_knn", "dow", "dummy")
-rpart_initial <- c("dow", "month")
+glmnet_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+                    "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale", "corr")
+
+pls_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+                 "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
+
+rpart_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+                   "other", "zv", "nzv")
+
+
 # maintenance point ---------------------------------------------------------------------------------------------------------------------------
 # add further preprocessing choices for the new methods here
 
@@ -87,9 +94,9 @@ dynamicSteps <- function(recipe, preprocess) {
   }
   for (s in preprocess) {
     if (s == "impute_knn") {
-      recipe <- step_impute_knn(recipe, all_numeric_predictors(), all_nominal_predictors(), neighbors = 5) # 5 is a reasonable guess
+      recipe <- step_impute_knn(recipe, all_numeric_predictors(), all_nominal_predictors(), neighbors = 2) # 5 is a reasonable guess
     } else if (s == "impute_bag") {
-      recipe <- step_impute_bag(recipe, all_numeric_predictors(), all_nominal_predictors(), trees = 25) # 25 is a reasonable guess
+      recipe <- step_impute_bag(recipe, all_numeric_predictors(), all_nominal_predictors(), trees = 4) # 25 is a reasonable guess
     } else if (s == "impute_median") {
       recipe <- step_impute_median(recipe, all_numeric_predictors())  # use with "impute_mode"
     } else if (s == "impute_mode") {
