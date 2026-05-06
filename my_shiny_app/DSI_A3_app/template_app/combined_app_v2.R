@@ -40,8 +40,11 @@ library(ggrepel)
 options(digits = 3)
 
 # default preprocessing selections shown in each method's dropdown (make sure to set these to my best recommendation)
-glmnet_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
-                    "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale", "corr")
+general_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+                     "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
+
+glmnet_initial <- c("impute_knn", "impute_mode", "dateDecimal", "quarter", "month", "week", "dow", 
+                    "other", "dummy", "YeoJohnson", "interact", "zv", "nzv", "center", "scale")
 
 pls_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
                  "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
@@ -83,68 +86,125 @@ stopMode <- function(obj) {
 # ── PREPROCESSING LOGIC ──────────────────────────────────────────────────────
 
 ppchoices <- c("impute_knn", "impute_bag", "impute_median", "impute_mode", "YeoJohnson", "naomit", 
-               "pca", "pls", "ica", "center", "scale", "month", "dow", "dateDecimal", "nzv", "zv", "other", 
-               "dummy", "poly", "interact", "indicate_na", "corr")
+               "pca", "pls", "ica", "center", "scale", "year", "quarter","month", "week", "dow", "dateDecimal",
+               "nzv", "zv", "other", "dummy", "poly", "interact", "indicate_na", "corr")
 
 # This function turns the method's selected preprocessing into a recipe that honours the same order. 
 # You are allowed to add more recipe steps to this.
-dynamicSteps <- function(recipe, preprocess) {
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0) {
+    y
+  } else if (length(x) == 1 && is.na(x)) {
+    y
+  } else {
+    x
+  }
+}
+
+
+dynamicSteps <- function(recipe, preprocess, cfg = list()) {
   if (is.null(preprocess)) {
     stop("The preprocess list is NULL - check that you are using the correct control identifier")
   }
+  
   for (s in preprocess) {
     if (s == "impute_knn") {
-      recipe <- step_impute_knn(recipe, all_numeric_predictors(), all_nominal_predictors(), neighbors = 2) # 5 is a reasonable guess
+      recipe <- step_impute_knn(recipe, all_numeric_predictors(), all_nominal_predictors(),
+                                neighbors = cfg$impute_knn_neighbors %||% 2)
+      
     } else if (s == "impute_bag") {
-      recipe <- step_impute_bag(recipe, all_numeric_predictors(), all_nominal_predictors(), trees = 4) # 25 is a reasonable guess
+      recipe <- step_impute_bag(recipe, all_numeric_predictors(), all_nominal_predictors(),
+                                trees = cfg$impute_bag_trees %||% 4)
+      
     } else if (s == "impute_median") {
-      recipe <- step_impute_median(recipe, all_numeric_predictors())  # use with "impute_mode"
+      recipe <- recipes::step_impute_median(recipe, all_numeric_predictors())
+      
     } else if (s == "impute_mode") {
-      recipe <- recipes::step_impute_mode(recipe, all_nominal_predictors())  # use with "impute_median"
+      recipe <- recipes::step_impute_mode(recipe, all_nominal_predictors())
+      
     } else if (s == "YeoJohnson") {
-      recipe <- recipes::step_YeoJohnson(recipe, all_numeric_predictors()) 
+      recipe <- recipes::step_YeoJohnson(recipe, all_numeric_predictors())
+      
     } else if (s == "naomit") {
-      recipe <- recipes::step_naomit(recipe, all_predictors(), skip = TRUE)  
+      recipe <- recipes::step_naomit(recipe, all_predictors(), skip = TRUE)
+      
     } else if (s == "pca") {
-      recipe <- recipes::step_pca(recipe, all_numeric_predictors(), num_comp = 25) # 25 is a big enough guess
+      recipe <- recipes::step_pca(recipe, all_numeric_predictors(),
+                                  num_comp = cfg$pca_num_comp %||% 25)
+      
     } else if (s == "pls") {
-      recipe <- recipes::step_pls(recipe, all_numeric_predictors(), outcome = "Response", num_comp = 25) # 25 is a big enough guess
+      recipe <- recipes::step_pls(recipe, all_numeric_predictors(), outcome = "Response",
+                                  num_comp = cfg$pls_num_comp %||% 25)
+      
     } else if (s == "ica") {
-      recipe <- recipes::step_ica(recipe, all_numeric_predictors(), num_comp = 25) # 25 is a big enough guess
+      recipe <- recipes::step_ica(recipe, all_numeric_predictors(),
+                                  num_comp = cfg$ica_num_comp %||% 25)
+      
     } else if (s == "center") {
-      recipe <- recipes::step_center(recipe, all_numeric_predictors()) # this needs to be after any reshaping
+      recipe <- recipes::step_center(recipe, all_numeric_predictors())
+      
     } else if (s == "scale") {
       recipe <- recipes::step_scale(recipe, all_numeric_predictors())
+      
+    } else if (s == "year") {
+      recipe <- recipes::step_date(recipe, has_type("date"), features = c("year"), ordinal = FALSE)
+      
+    } else if (s == "quarter") {
+      recipe <- recipes::step_date(recipe, has_type("date"), features = c("quarter"), ordinal = FALSE)
+      
     } else if (s == "month") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("month"), ordinal = FALSE)  # uses step_date to generate month-of-year
+      recipe <- recipes::step_date(recipe, has_type("date"), features = c("month"), ordinal = FALSE)
+      
+    } else if (s == "week") {
+      recipe <- recipes::step_date(recipe, has_type("date"), features = c("week"), ordinal = FALSE)
+      
     } else if (s == "dow") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("dow"), ordinal = FALSE)   # uses step_date to generate day-of-week
+      recipe <- recipes::step_date(recipe, has_type("date"), features = c("dow"), ordinal = FALSE)
+      
     } else if (s == "dateDecimal") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("decimal"), ordinal = FALSE)   # uses step_date to generate decimal date
+      recipe <- recipes::step_date(recipe, has_type("date"), features = c("decimal"), ordinal = FALSE)
+      
     } else if (s == "zv") {
       recipe <- recipes::step_zv(recipe, all_predictors())
+      
     } else if (s == "nzv") {
-      recipe <- recipes::step_nzv(recipe, all_predictors(), freq_cut = 95/5, unique_cut = 10)
+      recipe <- recipes::step_nzv(recipe, all_predictors(),
+                                  freq_cut = cfg$nzv_freq_cut %||% 95/5,
+                                  unique_cut = cfg$nzv_unique_cut %||% 10)
+      
     } else if (s == "other") {
-      recipe <- recipes::step_other(recipe, all_nominal_predictors())
+      recipe <- recipes::step_other(recipe, all_nominal_predictors(),
+                                    threshold = cfg$other_threshold %||% 0.05,
+                                    other = cfg$other_label %||% "other")
+      
     } else if (s == "dummy") {
-      recipe <- recipes::step_dummy(recipe, all_nominal_predictors(), one_hot = FALSE) # this needs to follow dealing with missing values
+      recipe <- recipes::step_dummy(recipe, all_nominal_predictors(), one_hot = FALSE)
+      
     } else if (s == "poly") {
-      recipe <- recipes::step_poly(recipe, all_numeric_predictors(), degree = 2)
+      recipe <- recipes::step_poly(recipe, all_numeric_predictors(),
+                                   degree = cfg$poly_degree %||% 2)
+      
     } else if (s == "interact") {
-      recipe <- recipes::step_interact(recipe, terms = ~ all_numeric_predictors():all_numeric_predictors())  # only numeric predictors allowed (this needs to follow dealing with categorical variables)
-    } else if (s == "corr") {
-      recipe <- recipes::step_corr(recipe, all_numeric_predictors(), threshold = 0.9)
+      recipe <- recipes::step_interact(recipe, terms = ~ all_numeric_predictors():all_numeric_predictors())
+      
     } else if (s == "indicate_na") {
-      recipe <- recipes::step_indicate_na(recipe, all_predictors()) #shadow variables (this needs to precede dealing with NA)
+      recipe <- recipes::step_indicate_na(recipe, all_predictors())
+      
+    } else if (s == "corr") {
+      recipe <- recipes::step_corr(recipe, all_numeric_predictors(),
+                                   threshold = cfg$corr_threshold %||% 0.9)
+      
     } else if (s == "rm") {
       # intentionally blank
+      
     } else {
       stop(paste("Attempting to use an unknown recipe step:", s))
     }
   }
+  
   recipe
 }
+
 
 
 
@@ -232,7 +292,16 @@ deleteRds <- function(name) {
 ui <- fluidPage(
   
   # Application title
-  titlePanel("Assignment 3 - William Hui Chang (69051925)"),
+  fluidRow(
+    column(width = 8, tags$h2("Assignment 3 - William Hui Chang (69051925)", style = "margin-top:0;")),
+    column(width = 4,
+           div(style = "display:flex;justify-content:flex-end;align-items:flex-start;padding-top:4px;",
+               div(style = "width:180px;",
+                   numericInput(inputId = "GlobalSeed", label = "Global random seed", value = 2026, min = 1, width = "100%")
+               )
+           )
+    )
+  ),
   tabsetPanel(
     tabPanel("Data",
              verbatimTextOutput(outputId = "DataSummary"),
@@ -279,9 +348,6 @@ ui <- fluidPage(
                               tags$label("Stratify by (y =)", style="font-weight:600;font-size:13px;color:#343a40;"),
                               selectInput("p1_y", label=NULL, choices=NULL),
                               hr(),
-                              tags$label("Random seed", style="font-weight:600;font-size:13px;color:#343a40;"),
-                              numericInput("p1_seed", label=NULL, value=199, min=1),
-                              hr(),
                               span("Independent observations", style="font-size:11px;padding:2px 8px;border-radius:99px;display:inline-block;margin-bottom:6px;background:#EEEDFE;color:#3C3489;"),
                               div(style="font-size:11px;color:#6c757d;margin-top:4px;", "Uses ", code("base::sample()"), " and ", code("caret::createDataPartition()")),
                               hr(),
@@ -325,9 +391,6 @@ ui <- fluidPage(
                               tags$label("Stratify by (y =)", style="font-weight:600;font-size:13px;color:#343a40;"),
                               selectInput("p2_y", label=NULL, choices=NULL),
                               hr(),
-                              tags$label("Random seed", style="font-weight:600;font-size:13px;color:#343a40;"),
-                              numericInput("p2_seed", label=NULL, value=199, min=1),
-                              hr(),
                               span("Independent observations", style="font-size:11px;padding:2px 8px;border-radius:99px;display:inline-block;margin-bottom:6px;background:#EEEDFE;color:#3C3489;"),
                               div(style="font-size:11px;color:#6c757d;margin-top:4px;", "Uses ", code("caret::createDataPartition()"), " twice"),
                               hr(),
@@ -363,9 +426,6 @@ ui <- fluidPage(
                               tags$label("Stratify by (y =)", style="font-weight:600;font-size:13px;color:#343a40;"),
                               selectInput("p3_y", label=NULL, choices=NULL),
                               hr(),
-                              tags$label("Random seed", style="font-weight:600;font-size:13px;color:#343a40;"),
-                              numericInput("p3_seed", label=NULL, value=199, min=1),
-                              hr(),
                               span("Independent observations", style="font-size:11px;padding:2px 8px;border-radius:99px;display:inline-block;margin-bottom:6px;background:#EEEDFE;color:#3C3489;"),
                               div(style="font-size:11px;color:#6c757d;margin-top:4px;", "Uses ", code("caret::createResample()")),
                               hr(),
@@ -400,9 +460,6 @@ ui <- fluidPage(
                               hr(),
                               tags$label("Number of folds (k)", style="font-weight:600;font-size:13px;color:#343a40;"),
                               sliderInput("p4_k", label=NULL, min=2, max=3, value=2, step=1, width="100%"),
-                              hr(),
-                              tags$label("Random seed", style="font-weight:600;font-size:13px;color:#343a40;"),
-                              numericInput("p4_seed", label=NULL, value=199, min=1),
                               hr(),
                               span("Group dependent observations", style="font-size:11px;padding:2px 8px;border-radius:99px;display:inline-block;margin-bottom:6px;background:#E1F5EE;color:#085041;"),
                               div(style="font-size:11px;color:#6c757d;margin-top:4px;", "Uses ", code("caret::groupKFold()")),
@@ -665,193 +722,212 @@ ui <- fluidPage(
     ),
     
     tabPanel("Methods",
-             checkboxInput(inputId = "Parallel", label = "Use parallel processing", value = TRUE),
-             bsTooltip(id = "Parallel", title = paste("This will utilise all", detectCores(), "available CPUs during training")),
-             "The preprocessing steps and their order are important.",
-             HTML("See function <code>dynamicSteps</code> in global.R for interpretation of preprocessing options. "),
-             "Documentation", tags$a("here", href = "https://www.rdocumentation.org/packages/recipes/versions/0.1.16", target = "_blank"),
-             
-             tabsetPanel(type = "pills",
-                         tabPanel("NULL Model",
-                                  br(),
-                                  fluidRow(
-                                    column(width = 4),
-                                    column(width = 1,
-                                           actionButton(inputId = "null_Go", label = "Train", icon = icon("play")),
-                                           bsTooltip(id = "null_Go", title = "This will train or retrain your model (and save it)")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "null_Load", label = "Load", icon = icon("file-arrow-up")),
-                                           bsTooltip(id = "null_Load", title = "This will reload your saved model")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "null_Delete", label = "Forget", icon = icon("trash-can")),
-                                           bsTooltip(id = "null_Delete", title = "This will remove your model from memory")
-                                    )
-                                  ),
-                                  hr(),
-                                  h3("Resampled performance:"),
-                                  tableOutput(outputId = "null_Metrics")
-                         ),
-                         tabPanel("GLMnet Model",
-                                  verbatimTextOutput(outputId = "glmnet_MethodSummary"),
-                                  fluidRow(
-                                    column(width = 4,
-                                           # The id of the recipe preprocessing steps control MUST be:  "<method>_Preprocess" in order to correctly load from the saved models
-                                           selectizeInput(inputId = "glmnet_Preprocess",
-                                                          label = "Pre-processing",
-                                                          choices = unique(c(glmnet_initial, ppchoices)),
-                                                          multiple = TRUE,
-                                                          selected = glmnet_initial),  # <-- These are suggested starting values. Set these to your best recommendation
-                                           bsTooltip(id = "glmnet_Preprocess", title = "These entries will be populated in the correct order from a saved model once it loads", placement = "top")
-                                           
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "glmnet_Go", label = "Train", icon = icon("play")), # name this control <method>_Go
-                                           bsTooltip(id = "glmnet_Go", title = "This will train or retrain your model (and save it)")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "glmnet_Load", label = "Load", icon = icon("file-arrow-up")),
-                                           bsTooltip(id = "glmnet_Load", title = "This will reload your saved model")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "glmnet_Delete", label = "Forget", icon = icon("trash-can")),
-                                           bsTooltip(id = "glmnet_Delete", title = "This will remove your model from memory")
-                                    )
-                                  ),
-                                  hr(),
-                                  h3("Resampled performance:"),
-                                  tableOutput(outputId = "glmnet_Metrics"),
-                                  hr(),
-                                  h3("Hyperparameter Tuning:"),
-                                  plotOutput(outputId = "glmnet_ModelTune"),
-                                  hr(),
-                                  h3("Recipe:"),
-                                  htmlOutput(outputId = "glmnet_RecipePrint"),
-                                  h3("Outputs"),
-                                  tableOutput(outputId = "glmnet_RecipeOutput"),
-                                  
-                                  fluidRow(
-                                    column(width=6,
-                                           h3("Training Summary:"),
-                                           verbatimTextOutput(outputId = "glmnet_TrainSummary")
-                                    ),
-                                    column(width=6,
-                                           h3("Coefficients"),   # Not all method can produce coefficients
-                                           wellPanel(
-                                             tableOutput(outputId = "glmnet_Coef")
+             tagList(
+               tags$style(HTML("
+      .shiny-input-container label,
+      .radio label, .checkbox label {
+        font-weight: 400 !important;
+        font-size: 13px;
+      }
+    ")),
+               sidebarLayout(
+                 position = "right",
+                 
+                 sidebarPanel(
+                   width = 3,
+                   style = "background-color:#f4f6fb; border-left:3px solid #6a9fd8; min-height:100vh; padding:16px 14px;",
+                   
+                   div(style="font-size:13px;color:#343a40;background-color:white;padding:10px;border-left:4px solid #0d6efd;border-radius:6px;margin-bottom:12px;",
+                       icon("info-circle", style="color:#0d6efd;"), HTML("&nbsp;"),
+                       HTML("<strong>Training controls:</strong><br>Choose preprocessing, tune settings, then train or load the selected model.")),
+                   
+                   div(style="background:#e2e3e5;border-left:3px solid #6c757d;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("General Configs", style="font-weight:700;font-size:13px;color:#41464b;")),
+                   
+                   checkboxInput(inputId = "Parallel", label = "Use parallel processing", value = TRUE),
+                   bsTooltip(id = "Parallel", title = paste("This will utilise all", detectCores(), "available CPUs during training")),
+                   
+                   selectInput("cfg_resampling", label = "Resampling method",
+                               choices = c("Bootstrap" = "boot",
+                                           "Cross-validation" = "cv",
+                                           "Repeated cross-validation" = "repeatedcv"),
+                               selected = "boot"),
+                   conditionalPanel(
+                     condition = "input.cfg_resampling == 'boot'",
+                     sliderInput("cfg_boot_n", label = "Bootstrap resamples", min = 5, max = 50, value = 25, step = 5, width = "100%")
+                   ),
+                   conditionalPanel(
+                     condition = "input.cfg_resampling == 'cv'",
+                     sliderInput("cfg_cv_folds", label = "CV folds", min = 3, max = 25, value = 10, step = 1, width = "100%")
+                   ),
+                   conditionalPanel(
+                     condition = "input.cfg_resampling == 'repeatedcv'",
+                     sliderInput("cfg_repeatedcv_folds", label = "Repeated CV folds", min = 3, max = 10, value = 4, step = 1, width = "100%"),
+                     sliderInput("cfg_repeatedcv_repeats", label = "Repeated CV repeats", min = 1, max = 10, value = 6, step = 1, width = "100%")
+                   ),
+                   selectInput("cfg_search", label = "Search type",
+                               choices = c("Grid search" = "grid", "Random search" = "random"),
+                               selected = "grid"),
+                   
+                   hr(),
+                   
+                   div(style="background:#fff3cd;border-left:3px solid #ffc107;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("Config Mode", style="font-weight:700;font-size:13px;color:#664d03;")),
+                   
+                   radioButtons("method_config_mode", label = NULL,
+                                choices = c("General configs" = "general",
+                                            "Model specific configs" = "specific"),
+                                selected = "general"),
+                   
+                   hr(),
+                   
+                   div(style="background:#d1ecf1;border-left:3px solid #0dcaf0;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("Preprocessing", style="font-weight:700;font-size:13px;color:#055160;")),
+                   
+                   uiOutput("method_preprocess_ui"),
+                   uiOutput("preprocess_config_ui"),
+                   
+                   hr(),
+                   
+                   div(style="background:#f8d7da;border-left:3px solid #dc3545;padding:6px 10px;border-radius:4px;margin-bottom:6px;",
+                       tags$label("Model Specific Configs", style="font-weight:700;font-size:13px;color:#842029;")),
+                   
+                   uiOutput("model_specific_config_ui"),
+                   
+                   hr(),
+                   
+                   uiOutput("method_action_buttons")
+                 ),
+                 
+                 mainPanel(
+                   width = 9,
+                   
+                   tabsetPanel(
+                     id = "active_method",
+                     type = "pills",
+                     
+                     tabPanel("NULL", value = "null",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "null_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         h4("Hyperparameter tuning", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         verbatimTextOutput("null_TuningNote")
+                                ),
+                                tabPanel("Recipe",
+                                         h4("Recipe output", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "null_Recipe")
+                                ),
+                                tabPanel("Model Output",
+                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         verbatimTextOutput(outputId = "null_TrainSummary")
+                                )
+                              )
+                     ),
+                     
+                     tabPanel("GLMnet", value = "glmnet",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "glmnet_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "glmnet_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "glmnet_ModelTune")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "glmnet_RecipePrint"),
+                                         tableOutput(outputId = "glmnet_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         fluidRow(
+                                           column(width = 6,
+                                                  h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  verbatimTextOutput(outputId = "glmnet_TrainSummary")
+                                           ),
+                                           column(width = 6,
+                                                  h4("Coefficients", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  wellPanel(tableOutput(outputId = "glmnet_Coef"))
                                            )
-                                    )
-                                  )
-                         ),
-                         tabPanel("PLS Model",
-                                  verbatimTextOutput(outputId = "pls_MethodSummary"),
-                                  fluidRow(
-                                    column(width = 4,
-                                           # The id of the recipe preprocessing steps control MUST be:  "<method>_Preprocess" in order to correctly load from the saved models
-                                           selectizeInput(inputId = "pls_Preprocess",
-                                                          label = "Pre-processing",
-                                                          choices = unique(c(pls_initial, ppchoices)),
-                                                          multiple = TRUE,
-                                                          selected = pls_initial), # <-- These are suggested starting values. Set these to your best recommendation
-                                           bsTooltip(id = "pls_Preprocess", title = "These entries will be populated in the correct order from a saved model once it loads", placement = "top")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "pls_Go", label = "Train", icon = icon("play")), # name this control <method>_Go
-                                           bsTooltip(id = "pls_Go", title = "This will train or retrain your model (and save it)")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "pls_Load", label = "Load", icon = icon("file-arrow-up")),
-                                           bsTooltip(id = "pls_Load", title = "This will reload your saved model")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "pls_Delete", label = "Forget", icon = icon("trash-can")),
-                                           bsTooltip(id = "pls_Delete", title = "This will remove your model from memory")
-                                    )
-                                  ),
-                                  hr(),
-                                  h3("Resampled performance:"),
-                                  tableOutput(outputId = "pls_Metrics"),
-                                  hr(),
-                                  h3("Hyperparameter Tuning:"),
-                                  plotOutput(outputId = "pls_ModelTune"),
-                                  hr(),
-                                  h3("Recipe:"),
-                                  htmlOutput(outputId = "pls_RecipePrint"),
-                                  h3("Outputs"),
-                                  tableOutput(outputId = "pls_RecipeOutput"),
-                                  fluidRow(
-                                    column(width=6,
-                                           h3("Training Summary:"),
-                                           verbatimTextOutput(outputId = "pls_TrainSummary"),
-                                    ),
-                                    column(width=6,
-                                           h3("Coefficients"),   # Not all method can produce coefficients
-                                           wellPanel(
-                                             tableOutput(outputId = "pls_Coef")
+                                         )
+                                )
+                              )
+                     ),
+                     
+                     tabPanel("PLS", value = "pls",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "pls_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "pls_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "pls_ModelTune")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "pls_RecipePrint"),
+                                         tableOutput(outputId = "pls_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         fluidRow(
+                                           column(width = 6,
+                                                  h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  verbatimTextOutput(outputId = "pls_TrainSummary")
+                                           ),
+                                           column(width = 6,
+                                                  h4("Coefficients", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  wellPanel(tableOutput(outputId = "pls_Coef"))
                                            )
-                                    )
-                                  )
-                         ),
-                         tabPanel("Rpart Model",
-                                  verbatimTextOutput(outputId = "rpart_MethodSummary"),
-                                  fluidRow(
-                                    column(width = 4,
-                                           # The id of the recipe preprocessing steps control MUST be:  "<method>_Preprocess" in order to correctly load from the saved models                                 selectizeInput(inputId = "rpart_Preprocess",
-                                           selectizeInput(inputId = "rpart_Preprocess",
-                                                          label = "Pre-processing",
-                                                          choices = unique(c(rpart_initial, ppchoices)),
-                                                          multiple = TRUE,
-                                                          selected = rpart_initial), # <-- These are suggested starting values. Set these to your best recommendation
-                                           bsTooltip(id = "rpart_Preprocess", title = "These entries will be populated in the correct order from a saved model once it loads", placement = "top")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "rpart_Go", label = "Train", icon = icon("play")), # name this control <method>_Go
-                                           bsTooltip(id = "rpart_Go", title = "This will train or retrain your model (and save it)")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "rpart_Load", label = "Load", icon = icon("file-arrow-up")),
-                                           bsTooltip(id = "rpart_Load", title = "This will reload your saved model")
-                                    ),
-                                    column(width = 1,
-                                           actionButton(inputId = "rpart_Delete", label = "Forget", icon = icon("trash-can")),
-                                           bsTooltip(id = "rpart_Delete", title = "This will remove your model from memory")
-                                    )
-                                  ),
-                                  hr(),
-                                  h3("Resampled performance:"),
-                                  tableOutput(outputId = "rpart_Metrics"),
-                                  hr(),
-                                  h3("Hyperparameter Tuning:"),
-                                  plotOutput(outputId = "rpart_ModelTune"),
-                                  hr(),
-                                  h3("Model tree:"), #  <- this tree-plot is unique to the rpart method
-                                  plotOutput(outputId = "rpart_ModelTree"),
-                                  hr(),
-                                  h3("Recipe:"),
-                                  htmlOutput(outputId = "rpart_RecipePrint"),
-                                  h3("Outputs"),
-                                  tableOutput(outputId = "rpart_RecipeOutput"),
-                                  fluidRow(
-                                    column(width=6,
-                                           h3("Training Summary:"),
-                                           verbatimTextOutput(outputId = "rpart_TrainSummary")
-                                    )
-                                  )
-                         )
-                         
-                         
-                         
-                         # maintenance point ------------------------------------------------------------------------------
-                         # add further tabs (with controls) here
-                         
-                         
-                         
-                         
-                         
-                         # end of maintenance point ---------------------------------------------------------------------------------------------------------------------------
+                                         )
+                                )
+                              )
+                     ),
+                     
+                     tabPanel("Rpart", value = "rpart",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "rpart_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "rpart_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "rpart_ModelTune")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "rpart_RecipePrint"),
+                                         tableOutput(outputId = "rpart_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         fluidRow(
+                                           column(width = 6,
+                                                  h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  verbatimTextOutput(outputId = "rpart_TrainSummary")
+                                           ),
+                                           column(width = 6,
+                                                  h4("Model tree", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  plotOutput(outputId = "rpart_ModelTree")
+                                           )
+                                         )
+                                )
+                              )
+                     )
+                   )
+                 )
+               )
              )
     ),
+    
+    
     tabPanel("Model Selection",
              tags$h5("Cross validation results:"),
              checkboxInput(inputId = "Notch", label = "Show notch", value = FALSE),
@@ -893,6 +969,256 @@ server <- function(input, output, session) {
     
     # initialisation ----
     models <- reactiveValues()  # this is a collection of the models
+    training_times <- reactiveValues()
+    
+    getGlobalSeed <- reactive({
+      seed <- input$GlobalSeed %||% 2026
+      as.integer(seed)
+    })
+    
+    .preprocess_defaults <- function(method) {
+      if (method == "glmnet") {
+        list(knn = 2, bag = 4, pca = 25, pls = 25, ica = 25,
+             nzv_freq = 95/5, nzv_unique = 10, other = 0.05,
+             poly = 2, corr = 0.90, tune = 10)
+      } else if (method == "pls") {
+        list(knn = 2, bag = 4, pca = 25, pls = 25, ica = 25,
+             nzv_freq = 95/5, nzv_unique = 10, other = 0.05,
+             poly = 2, corr = 0.90, tune = 25)
+      } else if (method == "rpart") {
+        list(knn = 2, bag = 4, pca = 10, pls = 10, ica = 10,
+             nzv_freq = 95/5, nzv_unique = 10, other = 0.05,
+             poly = 2, corr = 0.90, tune = 5)
+      } else {
+        list(knn = 2, bag = 4, pca = 25, pls = 25, ica = 25,
+             nzv_freq = 95/5, nzv_unique = 10, other = 0.05,
+             poly = 2, corr = 0.90, tune = 5)
+      }
+    }
+    
+    .config_scope <- reactive({
+      if (is.null(input$method_config_mode) || input$method_config_mode == "general") {
+        "general"
+      } else {
+        input$active_method %||% "glmnet"
+      }
+    })
+    
+    .config_id <- function(scope, name) {
+      paste0("cfg_", scope, "_", name)
+    }
+    
+    getSelectedPreprocess <- reactive({
+      method <- input$active_method %||% "null"
+      mode   <- input$method_config_mode %||% "general"
+      
+      if (mode == "general") {
+        input$general_Preprocess %||% general_initial
+      } else if (method == "glmnet") {
+        input$glmnet_Preprocess %||% glmnet_initial
+      } else if (method == "pls") {
+        input$pls_Preprocess %||% pls_initial
+      } else if (method == "rpart") {
+        input$rpart_Preprocess %||% rpart_initial
+      } else {
+        NULL
+      }
+    })
+    
+    
+    output$method_preprocess_ui <- renderUI({
+      method <- input$active_method %||% "null"
+      mode   <- input$method_config_mode %||% "general"
+      
+      if (method == "null") {
+        return(div(style="font-size:12px;color:#6c757d;", "The null model has no preprocessing choices."))
+      }
+      
+      if (mode == "general") {
+        return(
+          selectizeInput(inputId = "general_Preprocess",
+                         label = "Pre-processing",
+                         choices = unique(c(general_initial, ppchoices)),
+                         multiple = TRUE,
+                         selected = general_initial)
+        )
+      }
+      
+      if (method == "glmnet") {
+        selectizeInput(inputId = "glmnet_Preprocess",
+                       label = "Pre-processing",
+                       choices = unique(c(glmnet_initial, ppchoices)),
+                       multiple = TRUE,
+                       selected = glmnet_initial)
+      } else if (method == "pls") {
+        selectizeInput(inputId = "pls_Preprocess",
+                       label = "Pre-processing",
+                       choices = unique(c(pls_initial, ppchoices)),
+                       multiple = TRUE,
+                       selected = pls_initial)
+      } else if (method == "rpart") {
+        selectizeInput(inputId = "rpart_Preprocess",
+                       label = "Pre-processing",
+                       choices = unique(c(rpart_initial, ppchoices)),
+                       multiple = TRUE,
+                       selected = rpart_initial)
+      }
+    })
+    
+    
+    output$preprocess_config_ui <- renderUI({
+      method <- input$active_method %||% "null"
+      if (method == "null") return(NULL)
+      
+      selected_steps <- getSelectedPreprocess()
+      
+      scope <- .config_scope()
+      defs <- if (.config_scope() == "general") {
+        .preprocess_defaults("general")
+      } else {
+        .preprocess_defaults(method)
+      }
+      
+      
+      controls <- list()
+      
+      if ("impute_knn" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "impute_knn_neighbors"), "KNN neighbours",
+                      min = 1, max = 10, value = defs$knn, step = 1, width = "100%")
+        ))
+      }
+      
+      if ("impute_bag" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "impute_bag_trees"), "Bagged imputation trees",
+                      min = 2, max = 50, value = defs$bag, step = 1, width = "100%")
+        ))
+      }
+      
+      if ("pca" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "pca_num_comp"), "PCA components",
+                      min = 1, max = 50, value = defs$pca, step = 1, width = "100%")
+        ))
+      }
+      
+      if ("pls" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "pls_num_comp"), "PLS components",
+                      min = 1, max = 50, value = defs$pls, step = 1, width = "100%")
+        ))
+      }
+      
+      if ("ica" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "ica_num_comp"), "ICA components",
+                      min = 1, max = 50, value = defs$ica, step = 1, width = "100%")
+        ))
+      }
+      
+      if ("nzv" %in% selected_steps) {
+        controls <- c(controls, list(
+          numericInput(.config_id(scope, "nzv_freq_cut"), "NZV frequency cut", value = defs$nzv_freq, min = 1),
+          numericInput(.config_id(scope, "nzv_unique_cut"), "NZV unique cut", value = defs$nzv_unique, min = 1)
+        ))
+      }
+      
+      if ("other" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "other_threshold"), "Rare level threshold",
+                      min = 0.01, max = 0.20, value = defs$other, step = 0.01, width = "100%")
+        ))
+      }
+      
+      if ("poly" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "poly_degree"), "Polynomial degree",
+                      min = 2, max = 5, value = defs$poly, step = 1, width = "100%")
+        ))
+      }
+      
+      if ("corr" %in% selected_steps) {
+        controls <- c(controls, list(
+          sliderInput(.config_id(scope, "corr_threshold"), "Correlation threshold",
+                      min = 0.50, max = 0.99, value = defs$corr, step = 0.01, width = "100%")
+        ))
+      }
+      
+      if (length(controls) == 0) {
+        div(style="font-size:12px;color:#6c757d;", "No configurable preprocessing steps selected.")
+      } else {
+        tagList(controls)
+      }
+    })
+    
+    output$model_specific_config_ui <- renderUI({
+      method <- input$active_method %||% "null"
+      if (method == "null") {
+        return(div(style="font-size:12px;color:#6c757d;", "The null model has no tuning parameters."))
+      }
+      
+      scope <- .config_scope()
+      defs <- if (.config_scope() == "general") {
+        .preprocess_defaults("general")
+      } else {
+        .preprocess_defaults(method)
+      }
+      
+      
+      sliderInput(.config_id(scope, "tuneLength"), "Tune length",
+                  min = 1, max = 50, value = defs$tune, step = 1, width = "100%")
+    })
+    
+    output$method_action_buttons <- renderUI({
+      method <- input$active_method %||% "null"
+      
+      tagList(
+        actionButton(inputId = paste0(method, "_Go"), label = "Train", icon = icon("play"),
+                     width = "100%", style = "background:#534AB7;color:white;border:none;font-size:13px;margin-bottom:6px;"),
+        actionButton(inputId = paste0(method, "_Load"), label = "Load", icon = icon("file-arrow-up"),
+                     width = "100%", style = "font-size:13px;margin-bottom:6px;"),
+        actionButton(inputId = paste0(method, "_Delete"), label = "Forget", icon = icon("trash-can"),
+                     width = "100%", style = "font-size:13px;")
+      )
+    })
+    
+    getPreprocessConfig <- reactive({
+      method <- input$active_method %||% "glmnet"
+      scope  <- .config_scope()
+      defs   <- .preprocess_defaults(method)
+      
+      val <- function(name, default) {
+        input[[.config_id(scope, name)]] %||% default
+      }
+      
+      list(
+        impute_knn_neighbors = val("impute_knn_neighbors", defs$knn),
+        impute_bag_trees     = val("impute_bag_trees", defs$bag),
+        pca_num_comp         = val("pca_num_comp", defs$pca),
+        pls_num_comp         = val("pls_num_comp", defs$pls),
+        ica_num_comp         = val("ica_num_comp", defs$ica),
+        nzv_freq_cut         = val("nzv_freq_cut", defs$nzv_freq),
+        nzv_unique_cut       = val("nzv_unique_cut", defs$nzv_unique),
+        other_threshold      = val("other_threshold", defs$other),
+        other_label          = "other",
+        poly_degree          = val("poly_degree", defs$poly),
+        corr_threshold       = val("corr_threshold", defs$corr)
+      )
+    })
+    
+    getTuneLength <- reactive({
+      method <- input$active_method %||% "glmnet"
+      scope  <- .config_scope()
+      
+      if (scope == "general") {
+        input$cfg_general_tuneLength %||% 10
+      } else {
+        defs <- .preprocess_defaults(method)
+        input[[.config_id(scope, "tuneLength")]] %||% defs$tune
+      }
+    })
+    
     
     
     # Ensure the "SavedModels folder exists
@@ -1014,14 +1340,14 @@ server <- function(input, output, session) {
     
     p1_simple <- reactive({
       df <- getData()
-      set.seed(input$p1_seed)
+      set.seed(getGlobalSeed())
       base::sample(x = nrow(df), size = floor(input$p1_train * nrow(df)), replace = FALSE)
     })
     
     p1_strat <- reactive({
       df <- getData()
       req(input$p1_y %in% names(df))
-      set.seed(input$p1_seed)
+      set.seed(getGlobalSeed())
       caret::createDataPartition(y = df[[input$p1_y]], p = input$p1_train, list = FALSE)
     })
     
@@ -1066,10 +1392,10 @@ server <- function(input, output, session) {
     
     p2_split <- reactive({
       df <- getData(); req(input$p2_y %in% names(df))
-      set.seed(input$p2_seed)
+      set.seed(getGlobalSeed())
       train_idx <- caret::createDataPartition(y = df[[input$p2_y]], p = input$p2_train, list = FALSE)
       remainder <- df[-train_idx, ]
-      set.seed(input$p2_seed + 1)
+      set.seed(getGlobalSeed() + 1)
       val_idx_in_rem <- caret::createDataPartition(y = remainder[[input$p2_y]], p = input$p2_val, list = FALSE)
       list(train = train_idx,
            val   = as.integer(rownames(remainder)[val_idx_in_rem]),
@@ -1096,7 +1422,7 @@ server <- function(input, output, session) {
     
     p3_resamples <- reactive({
       df <- getData(); req(input$p3_y %in% names(df))
-      set.seed(input$p3_seed)
+      set.seed(getGlobalSeed())
       caret::createResample(y = df[[input$p3_y]], times = input$p3_times, list = TRUE)
     })
     
@@ -1118,7 +1444,7 @@ server <- function(input, output, session) {
       n_groups <- length(unique(grp))
       safe_k   <- max(2, min(as.integer(input$p4_k), n_groups - 1))
       req(safe_k >= 2, n_groups >= 3)
-      set.seed(input$p4_seed)
+      set.seed(getGlobalSeed())
       caret::groupKFold(group = grp, k = safe_k)
     })
     
@@ -1183,7 +1509,7 @@ server <- function(input, output, session) {
       nums <- df[, feat_cols, drop = FALSE]
       nums <- nums[complete.cases(nums), ]
       req(nrow(nums) >= input$p6_k)
-      set.seed(199)
+      set.seed(getGlobalSeed())
       cluster::pam(nums, k = input$p6_k,
                    metric = input$p6_metric,
                    stand  = as.logical(input$p6_stand))
@@ -1218,7 +1544,7 @@ server <- function(input, output, session) {
     
     applied_indices <- reactiveVal({
       df <- isolate(getData())
-      set.seed(199)
+      set.seed(isolate(getGlobalSeed()))
       as.integer(caret::createDataPartition(y = df$Response, p = 0.8, list = FALSE))
     })
     
@@ -1706,18 +2032,35 @@ server <- function(input, output, session) {
     
     # reactive getTrControl ----
     getTrControl <- reactive({
-      # shared bootstrap specification i.e. 25 x bootstrap
+      # Shared resampling specification for fair model comparison.
       y <- getTrainData()[,"Response"]
-      n <- 25
-      set.seed(673)
-      seeds <- vector(mode = "list", length = n + 1)
-      for (i in 1:n) {
+      resampling <- input$cfg_resampling %||% "boot"
+      search <- input$cfg_search %||% "grid"
+      set.seed(getGlobalSeed())
+      
+      if (resampling == "cv") {
+        n <- input$cfg_cv_folds %||% 10
+        idx <- caret::createFolds(y = y, k = n, returnTrain = TRUE)
+        reps <- NA
+      } else if (resampling == "repeatedcv") {
+        n <- input$cfg_repeatedcv_folds %||% 4
+        reps <- input$cfg_repeatedcv_repeats %||% 6
+        idx <- caret::createMultiFolds(y = y, k = n, times = reps)
+      } else {
+        resampling <- "boot"
+        n <- input$cfg_boot_n %||% 25
+        idx <- caret::createResample(y = y, times = n)
+        reps <- NA
+      }
+      
+      seeds <- vector(mode = "list", length = length(idx) + 1)
+      for (i in seq_along(idx)) {
         seeds[[i]] <- as.integer(c(runif(n = 55, min = 1000, max = 5000)))
       }
-      seeds[[n + 1]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
-      trainControl(method = "boot", number = n, repeats = NA, allowParallel = TRUE, search = "grid", 
-                   index = caret::createResample(y = y, times = n), savePredictions = "final", seeds = seeds, 
-                   trim = TRUE)
+      seeds[[length(idx) + 1]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
+      
+      trainControl(method = resampling, number = n, repeats = reps, allowParallel = TRUE, search = search,
+                   index = idx, savePredictions = "final", seeds = seeds, trim = TRUE)
     })
     
     # # output SplitSummary ----
@@ -1890,7 +2233,10 @@ server <- function(input, output, session) {
         showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
         obj <- startMode(input$Parallel)
         tryCatch({
+          timing <- system.time({
           model <- caret::train(getNullRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl())
+          })
+          training_times[[method]] <- timing[["elapsed"]]
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -1930,6 +2276,21 @@ server <- function(input, output, session) {
       mod$results[ which.min(mod$results[, "RMSE"]), ]
     })
     
+    output$null_TuningNote <- renderPrint({
+      cat("The null model has no hyperparameters. It is used as a baseline for model selection.")
+    })
+    
+    output$null_TrainSummary <- renderPrint({
+      method <- "null"
+      mod <- models[[method]]
+      req(mod)
+      if (!is.null(training_times[[method]])) {
+        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      }
+      print(mod)
+    })
+    
+    
     # output null_Recipe (table) ----
     output$null_Recipe <- renderTable({
       method <- "null"
@@ -1954,9 +2315,11 @@ server <- function(input, output, session) {
     getGlmnetRecipe <- reactive({
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(input$glmnet_Preprocess) %>%           # use <method>_Preprocess 
-        step_rm(has_type("date"))   # remove original date variables
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
     })
+    
+    
     
     # observe GO event ----
     observeEvent(
@@ -1967,7 +2330,10 @@ server <- function(input, output, session) {
         showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
         obj <- startMode(input$Parallel)
         tryCatch({
-          model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl(), tuneLength = 5, na.action = na.pass)
+          timing <- system.time({
+          model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na.pass)
+          })
+          training_times[[method]] <- timing[["elapsed"]]
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -2064,6 +2430,9 @@ server <- function(input, output, session) {
       method <- "glmnet"
       mod <- models[[method]]
       req(mod)
+      if (!is.null(training_times[[method]])) {
+        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      }
       print(mod)
     })
     
@@ -2084,9 +2453,11 @@ server <- function(input, output, session) {
     getPlsRecipe <- reactive({
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(input$pls_Preprocess) %>%   # use <method>_Preprocess
-        step_rm(has_type("date"))   # remove original date variables
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
     })
+    
+    
     
     # observe GO event ----
     observeEvent(
@@ -2097,8 +2468,11 @@ server <- function(input, output, session) {
         showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
         obj <- startMode(input$Parallel)
         tryCatch({
+          timing <- system.time({
           model <- caret::train(getPlsRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl(), 
-                                tuneLength = 25, na.action = na.pass)
+                                tuneLength = getTuneLength(), na.action = na.pass)
+          })
+          training_times[[method]] <- timing[["elapsed"]]
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -2194,6 +2568,9 @@ server <- function(input, output, session) {
       method <- "pls"
       mod <- models[[method]]
       req(mod)
+      if (!is.null(training_times[[method]])) {
+        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      }
       print(mod)
     })
     
@@ -2213,9 +2590,11 @@ server <- function(input, output, session) {
     getRpartRecipe <- reactive({
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(input$rpart_Preprocess) %>%   # use <method>_Preprocess
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
         step_rm(has_type("date"))
     })
+    
+    
     
     # observe the GO event -----
     observeEvent(
@@ -2226,8 +2605,11 @@ server <- function(input, output, session) {
         showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
         obj <- startMode(input$Parallel)
         tryCatch({
+          timing <- system.time({
           model <- caret::train(getRpartRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = 5, na.action = na.rpart)  #<- note the rpart-specific value for na.action (not needed for other methods)
+                                tuneLength = getTuneLength(), na.action = na.rpart)  #<- note the rpart-specific value for na.action (not needed for other methods)
+          })
+          training_times[[method]] <- timing[["elapsed"]]
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -2332,6 +2714,9 @@ server <- function(input, output, session) {
       method <- "rpart"
       mod <- models[[method]]
       req(mod)
+      if (!is.null(training_times[[method]])) {
+        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      }
       print(mod)
     })
     
@@ -2357,3 +2742,4 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
