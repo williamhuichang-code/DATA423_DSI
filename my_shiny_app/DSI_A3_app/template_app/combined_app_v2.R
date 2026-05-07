@@ -39,17 +39,35 @@ library(ggrepel)
 # sets R to display numbers with 3 significant digits globally
 options(digits = 3)
 
+
+# default outlier strategy
+
+potential_outliers <- c(
+  "tid-57748", "tid-57237", "tid-57537", "tid-57651", "tid-57689",
+  "tid-57361", "tid-57431", "tid-57479", "tid-57487", "tid-57500",
+  "tid-57732", "tid-57739", "tid-57877", "tid-57808", "tid-57845",
+  "tid-57859", "tid-57921", "tid-58028", "tid-58060", "tid-58055",
+  "tid-57470", "tid-57580", "tid-57899"
+)
+
+# potential_outliers <- c(
+#   "tid-57748", "tid-57537", "tid-57689", "tid-57732", 
+#   "tid-57449", "tid-57651", "tid-57787"
+# )
+
+
 # default preprocessing selections shown in each method's dropdown (make sure to set these to my best recommendation)
-general_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+general_initial <- c("impute_median", "month", "dow", "dateDecimal",
                      "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
 
-glmnet_initial <- c("impute_knn", "impute_mode", "dateDecimal", "quarter", "month", "week", "dow", 
-                    "other", "dummy", "YeoJohnson", "interact", "zv", "nzv", "center", "scale")
+glmnet_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                    "other", "YeoJohnson", "dummy", "interact", "lincomb",
+                    "zv", "nzv", "center", "scale")
 
-pls_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+pls_initial <- c("impute_median", "month", "dow", "dateDecimal",
                  "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
 
-rpart_initial <- c("impute_median", "impute_mode", "month", "dow", "dateDecimal",
+rpart_initial <- c("impute_median", "month", "dow", "dateDecimal",
                    "other", "zv", "nzv")
 
 
@@ -85,9 +103,9 @@ stopMode <- function(obj) {
 
 # ── PREPROCESSING LOGIC ──────────────────────────────────────────────────────
 
-ppchoices <- c("impute_knn", "impute_bag", "impute_median", "impute_mode", "YeoJohnson", "naomit", 
-               "pca", "pls", "ica", "center", "scale", "year", "quarter","month", "week", "dow", "dateDecimal",
-               "nzv", "zv", "other", "dummy", "poly", "interact", "indicate_na", "corr")
+ppchoices <- c("impute_knn", "impute_bag", "impute_median", "impute_mode", "YeoJohnson", "BoxCox", "log", "sqrt", "naomit", 
+               "pca", "pls", "ica", "center", "scale", "range", "spatialsign", "year", "quarter","month", "week", "dow", "dateDecimal",
+               "nzv", "zv", "other", "dummy", "poly", "interact", "lincomb", "indicate_na", "corr")
 
 # This function turns the method's selected preprocessing into a recipe that honours the same order. 
 # You are allowed to add more recipe steps to this.
@@ -125,6 +143,15 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     } else if (s == "YeoJohnson") {
       recipe <- recipes::step_YeoJohnson(recipe, all_numeric_predictors())
       
+    } else if (s == "BoxCox") {
+      recipe <- recipes::step_BoxCox(recipe, all_numeric_predictors())
+      
+    } else if (s == "log") {
+      recipe <- recipes::step_log(recipe, all_numeric_predictors())
+      
+    } else if (s == "sqrt") {
+      recipe <- recipes::step_sqrt(recipe, all_numeric_predictors())
+      
     } else if (s == "naomit") {
       recipe <- recipes::step_naomit(recipe, all_predictors(), skip = TRUE)
       
@@ -145,6 +172,12 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       
     } else if (s == "scale") {
       recipe <- recipes::step_scale(recipe, all_numeric_predictors())
+      
+    } else if (s == "range") {
+      recipe <- recipes::step_range(recipe, all_numeric_predictors())
+      
+    } else if (s == "spatialsign") {
+      recipe <- recipes::step_spatialsign(recipe, all_numeric_predictors())
       
     } else if (s == "year") {
       recipe <- recipes::step_date(recipe, has_type("date"), features = c("year"), ordinal = FALSE)
@@ -186,6 +219,9 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       
     } else if (s == "interact") {
       recipe <- recipes::step_interact(recipe, terms = ~ all_numeric_predictors():all_numeric_predictors())
+      
+    } else if (s == "lincomb") {
+      recipe <- recipes::step_lincomb(recipe, all_numeric_predictors())
       
     } else if (s == "indicate_na") {
       recipe <- recipes::step_indicate_na(recipe, all_predictors())
@@ -284,6 +320,534 @@ deleteRds <- function(name) {
 
 
 
+
+# =================================================================================
+# Strategy module: outlier response
+# =================================================================================
+# =================================================================================
+# mod_out_response.R
+# =================================================================================
+
+# ── UI ───────────────────────────────────────────────────────────────────────
+
+out_response_ui <- function(id) {
+  ns <- NS(id)
+  sidebarLayout(
+    position = "right",
+    sidebarPanel(
+      width = 3,
+      style = "background-color:#e8f0fe; border-left:2px solid #a8c0fd;
+         min-height:100vh; padding-left:20px; padding-right:20px;
+         overflow-x:hidden;",
+      
+      div(
+        style = "font-size:13px; color:#343a40; background:white; padding:10px;
+                 border-left:4px solid #0d6efd; border-radius:6px; margin-bottom:12px;
+                 box-shadow:0 1px 2px rgba(0,0,0,0.05);",
+        icon("info-circle", style = "color:#0d6efd;"),
+        HTML("&nbsp; <b>Outlier Response</b><br><br>
+              Statistical methods alone cannot justify treating an observation
+              as an outlier. <b>Always consult a domain expert</b> before
+              taking any action.")
+      ),
+      div(
+        style = "font-size:12px; color:#842029; background:#f8d7da;
+                 border-left:3px solid #f5c2c7; padding:8px 10px;
+                 border-radius:4px; margin-bottom:12px;",
+        icon("user-doctor", style = "color:#842029;"),
+        HTML(" <b>Domain expert confirmation required</b> before modifying
+              or omitting any observation.")
+      ),
+      hr(),
+      
+      # ── Omit by ID ────────────────────────────────────────────────────
+      tags$label("Omit Observations by ID:",
+                 style = "font-size:13px; font-weight:600; color:#343a40;
+                          display:block; margin-bottom:4px;"),
+      div(
+        style = "font-size:11px; color:#842029; background:#f8d7da;
+                 border-left:3px solid #f5c2c7; padding:6px 8px;
+                 border-radius:4px; margin-bottom:8px;",
+        icon("triangle-exclamation", style = "color:#842029;"),
+        HTML(" Only omit if not expected in future unseen data.")
+      ),
+      selectInput(ns("id_col"), "ID / label column:", choices = NULL),
+      selectizeInput(ns("omit_ids"), label = NULL,
+                     choices  = NULL, multiple = TRUE,
+                     options  = list(placeholder = "Select IDs to omit...")),
+      hr(),
+      
+      # ── Global Rules ──────────────────────────────────────────────────
+      tags$label("Global Rules:",
+                 style = "font-size:13px; font-weight:600; color:#343a40;
+                          display:block; margin-bottom:6px;"),
+      helpText("Bad values here are replaced across ALL columns where they appear.
+               Applied before column-specific rules."),
+      div(
+        style = "font-size:11px; color:#856404; background:#fff3cd;
+                 border-left:3px solid #ffc107; padding:5px 8px;
+                 border-radius:4px; margin-bottom:8px;",
+        icon("triangle-exclamation", style = "color:#ffc107;"),
+        HTML(" To set values to <code>NA</code> globally, go to
+              <b>Miss Strategy &gt; Variants</b> instead.")
+      ),
+      tags$div(id = ns("global_rules_container")),
+      actionButton(ns("add_global_rule"), "+ Add Global Rule", icon = icon("plus"),
+                   width = "100%",
+                   style = "margin-top:6px; margin-bottom:6px;"),
+      hr(),
+      
+      # ── Column-Specific Rules ──────────────────────────────────────────
+      tags$label("Column-Specific Rules:",
+                 style = "font-size:13px; font-weight:600; color:#343a40;
+                          display:block; margin-bottom:6px;"),
+      helpText("Select a column, enter bad values (comma-sep), then choose
+               how to replace them."),
+      div(
+        style = "font-size:11px; color:#856404; background:#fff3cd;
+                 border-left:3px solid #ffc107; padding:5px 8px;
+                 border-radius:4px; margin-bottom:8px;",
+        icon("triangle-exclamation", style = "color:#ffc107;"),
+        HTML(" To set column values to <code>NA</code>, go to
+              <b>Miss Strategy &gt; Variants</b> and define a
+              column-specific NA rule there instead.")
+      ),
+      tags$div(id = ns("col_rules_container")),
+      actionButton(ns("add_rule"), "+ Add Column Rule", icon = icon("plus"),
+                   width = "100%",
+                   style = "margin-top:6px; margin-bottom:6px;"),
+      hr(),
+      
+      actionButton(ns("reset"), "Reset All", icon = icon("rotate-left"),
+                   width = "100%")
+    ),
+    
+    mainPanel(
+      width = 9,
+      style = "overflow-x: auto;",
+      uiOutput(ns("main_ui"))
+    )
+  )
+}
+
+
+# ── SERVER ───────────────────────────────────────────────────────────────────
+
+out_response_server <- function(id, get_data, get_raw, roles) {
+  moduleServer(id, function(input, output, session) {
+    
+    ns <- session$ns
+    default_omit_ids <- potential_outliers
+    
+    # ── state ──────────────────────────────────────────────────────────────
+    n_global_rules <- reactiveVal(0)
+    n_rules        <- reactiveVal(0)
+    
+    # ── helper: build one global rule block ────────────────────────────────
+    make_global_rule_ui <- function(i) {
+      tags$div(
+        id    = paste0("grule_block_", i),
+        style = "background:#fff8e1; border-radius:6px; padding:10px;
+                 margin-bottom:10px; border:1px solid #ffe082;",
+        tags$label(paste("Global Rule", i),
+                   style = "font-size:11px; font-weight:600;
+                            color:#6c757d; margin-bottom:6px; display:block;"),
+        textInput(ns(paste0("grule_bad_", i)),
+                  "Bad values (comma-sep):",
+                  placeholder = "e.g. -99, -999, 9999", width = "100%"),
+        textInput(ns(paste0("grule_newval_", i)),
+                  "Replace with (domain-correct value):",
+                  placeholder = "e.g. 0", width = "100%")
+      )
+    }
+    
+    # ── helper: build one column rule block ────────────────────────────────
+    make_col_rule_ui <- function(i, cols) {
+      method_id <- ns(paste0("rule_method_", i))
+      tags$div(
+        id    = paste0("rule_block_", i),
+        style = "background:#f8f9fa; border-radius:6px; padding:10px;
+                 margin-bottom:10px; border:1px solid #dee2e6;",
+        tags$label(paste("Rule", i),
+                   style = "font-size:11px; font-weight:600;
+                            color:#6c757d; margin-bottom:6px; display:block;"),
+        selectInput(ns(paste0("rule_col_", i)), "Column:",
+                    choices = cols, width = "100%"),
+        textInput(ns(paste0("rule_bad_", i)),
+                  "Bad values (comma-sep):",
+                  placeholder = "e.g. -99, 14", width = "100%"),
+        selectInput(ns(paste0("rule_method_", i)), "Replace with:",
+                    choices  = c("Value"     = "value",
+                                 "Winsorise" = "winsorise"),
+                    selected = "value", width = "100%"),
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'value'", method_id),
+          textInput(ns(paste0("rule_newval_", i)),
+                    "New value:", placeholder = "domain-correct value",
+                    width = "100%")
+        ),
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'winsorise'", method_id),
+          selectInput(ns(paste0("rule_winmethod_", i)), "Cap by:",
+                      choices  = c("IQR whisker"  = "iqr",
+                                   "Percentile"   = "percentile",
+                                   "Manual value" = "manual"),
+                      width = "100%"),
+          conditionalPanel(
+            condition = sprintf("input['%s'] == 'iqr'",
+                                ns(paste0("rule_winmethod_", i))),
+            numericInput(ns(paste0("rule_iqrk_", i)), "IQR k:",
+                         value = 1.5, min = 0.1, step = 0.5, width = "100%")
+          ),
+          conditionalPanel(
+            condition = sprintf("input['%s'] == 'percentile'",
+                                ns(paste0("rule_winmethod_", i))),
+            sliderInput(ns(paste0("rule_pct_", i)), "Tail %:",
+                        min = 1, max = 20, value = 5, step = 1, width = "100%")
+          ),
+          conditionalPanel(
+            condition = sprintf("input['%s'] == 'manual'",
+                                ns(paste0("rule_winmethod_", i))),
+            textInput(ns(paste0("rule_manval_", i)), "Cap value:",
+                      placeholder = "e.g. 1.0", width = "100%")
+          )
+        )
+      )
+    }
+    
+    # ── add / reset observers ───────────────────────────────────────────────
+    observeEvent(input$add_global_rule, {
+      i <- n_global_rules() + 1
+      n_global_rules(i)
+      insertUI(
+        selector = paste0("#", ns("global_rules_container")),
+        where    = "beforeEnd",
+        ui       = make_global_rule_ui(i)
+      )
+    })
+    
+    observeEvent(input$add_rule, {
+      req(get_data())
+      i    <- n_rules() + 1
+      cols <- c("(select)" = "", names(get_data()))
+      n_rules(i)
+      insertUI(
+        selector = paste0("#", ns("col_rules_container")),
+        where    = "beforeEnd",
+        ui       = make_col_rule_ui(i, cols)
+      )
+    })
+    
+    observeEvent(input$reset, {
+      for (i in seq_len(n_global_rules()))
+        removeUI(selector = paste0("#grule_block_", i), immediate = TRUE)
+      for (i in seq_len(n_rules()))
+        removeUI(selector = paste0("#rule_block_",  i), immediate = TRUE)
+      n_global_rules(0)
+      n_rules(0)
+      updateSelectizeInput(session, "omit_ids", selected = character(0))
+    })
+    
+    # ── seed one rule of each type on load ──────────────────────────────────
+    observe({
+      req(get_data())
+      if (n_global_rules() == 0) {
+        n_global_rules(1)
+        insertUI(
+          selector = paste0("#", ns("global_rules_container")),
+          where    = "beforeEnd",
+          ui       = make_global_rule_ui(1)
+        )
+      }
+      if (n_rules() == 0) {
+        cols <- c("(select)" = "", names(get_data()))
+        n_rules(1)
+        insertUI(
+          selector = paste0("#", ns("col_rules_container")),
+          where    = "beforeEnd",
+          ui       = make_col_rule_ui(1, cols)
+        )
+      }
+    }) |> bindEvent(get_data(), once = TRUE)
+    
+    # ── populate selectors ──────────────────────────────────────────────────
+    observe({
+      df     <- get_data(); req(df)
+      r      <- roles()
+      id_col <- names(r)[r == "obs_id"]
+      updateSelectInput(session, "id_col",
+                        choices  = c("Patient" = ".rownames", "Row index" = ".rowindex", names(df)),
+                        selected = if (length(id_col) > 0) id_col[1] else ".rownames")
+    })
+    
+    observe({
+      df     <- get_data(); req(df)
+      id_col <- input$id_col
+      req(!is.null(id_col))
+      ids <- if (id_col == ".rownames") {
+        rownames(df)
+      } else if (id_col == ".rowindex") {
+        as.character(seq_len(nrow(df)))
+      } else {
+        req(id_col %in% names(df))
+        as.character(unique(df[[id_col]]))
+      }
+      updateSelectizeInput(session, "omit_ids", choices = ids, selected = intersect(default_omit_ids, ids),
+                           server = TRUE)
+    })
+    
+    # ── collect global rules ────────────────────────────────────────────────
+    r_global_rules <- reactive({
+      rules <- list()
+      for (i in seq_len(n_global_rules())) {
+        bad_str <- trimws(input[[paste0("grule_bad_",    i)]] %||% "")
+        new_val <- trimws(input[[paste0("grule_newval_", i)]] %||% "")
+        if (nchar(bad_str) == 0) next
+        bad_vals <- trimws(strsplit(bad_str, ",")[[1]])
+        rules[[length(rules) + 1]] <- list(
+          bad_vals = bad_vals,
+          new_val  = new_val
+        )
+      }
+      rules
+    })
+    
+    # ── collect column rules ────────────────────────────────────────────────
+    r_col_rules <- reactive({
+      rules <- list()
+      for (i in seq_len(n_rules())) {
+        col      <- input[[paste0("rule_col_",    i)]] %||% ""
+        bad_str  <- trimws(input[[paste0("rule_bad_",    i)]] %||% "")
+        method   <- input[[paste0("rule_method_", i)]] %||% "value"
+        if (col == "" || col == "(select)") next
+        if (nchar(bad_str) == 0) next
+        bad_vals <- trimws(strsplit(bad_str, ",")[[1]])
+        rules[[length(rules) + 1]] <- list(
+          col        = col,
+          bad_vals   = bad_vals,
+          method     = method,
+          new_val    = trimws(input[[paste0("rule_newval_",   i)]] %||% ""),
+          win_method = input[[paste0("rule_winmethod_", i)]] %||% "iqr",
+          iqr_k      = as.numeric(input[[paste0("rule_iqrk_",    i)]] %||% 1.5),
+          pct        = as.numeric(input[[paste0("rule_pct_",     i)]] %||% 5),
+          manual_val = trimws(input[[paste0("rule_manval_",  i)]] %||% "")
+        )
+      }
+      rules
+    })
+    
+    # ── processed data ──────────────────────────────────────────────────────
+    processed <- reactive({
+      df      <- get_data(); req(df)
+      g_rules <- r_global_rules()
+      rules   <- r_col_rules()
+      id_col  <- input$id_col
+      omit    <- input$omit_ids %||% character(0)
+      
+      # 1. omit rows
+      if (length(omit) > 0) {
+        if (id_col == ".rownames") {
+          df <- df[!rownames(df) %in% omit, , drop = FALSE]
+        } else if (id_col == ".rowindex") {
+          omit_idx <- suppressWarnings(as.integer(omit))
+          omit_idx <- omit_idx[!is.na(omit_idx) & omit_idx <= nrow(df)]
+          if (length(omit_idx) > 0)
+            df <- df[-omit_idx, , drop = FALSE]
+        } else if (id_col %in% names(df)) {
+          df <- df[!as.character(df[[id_col]]) %in% omit, , drop = FALSE]
+        }
+      }
+      
+      # 2. global rules — replace bad values across ALL columns
+      for (rule in g_rules) {
+        if (nchar(rule$new_val) == 0) next
+        bad_num <- suppressWarnings(as.numeric(rule$bad_vals))
+        bad_num <- bad_num[!is.na(bad_num)]
+        for (col in names(df)) {
+          x <- df[[col]]
+          target <- if (is.numeric(x) && length(bad_num) > 0)
+            x %in% bad_num
+          else
+            as.character(x) %in% rule$bad_vals
+          if (!any(target, na.rm = TRUE)) next
+          typed <- tryCatch(
+            if (is.numeric(x)) as.numeric(rule$new_val) else rule$new_val,
+            error = function(e) rule$new_val)
+          df[[col]][target] <- typed
+        }
+      }
+      
+      # 3. column-specific rules
+      for (rule in rules) {
+        col <- rule$col
+        if (!col %in% names(df)) next
+        x <- df[[col]]
+        
+        target <- if (is.numeric(x)) {
+          bad_num <- suppressWarnings(as.numeric(rule$bad_vals))
+          x %in% bad_num[!is.na(bad_num)]
+        } else {
+          as.character(x) %in% rule$bad_vals
+        }
+        if (!any(target, na.rm = TRUE)) next
+        
+        if (rule$method == "value") {
+          if (nchar(rule$new_val) == 0) next
+          typed <- tryCatch(
+            if (is.numeric(x)) as.numeric(rule$new_val) else rule$new_val,
+            error = function(e) rule$new_val)
+          df[[col]][target] <- typed
+          
+        } else if (rule$method == "winsorise") {
+          x_ref <- x[!target & !is.na(x)]
+          cap <- switch(rule$win_method,
+                        "iqr" = {
+                          lims <- boxplot.stats(x_ref, coef = rule$iqr_k)$stats
+                          list(lo = lims[1], hi = lims[5])
+                        },
+                        "percentile" = {
+                          p <- rule$pct / 100
+                          list(lo = quantile(x_ref, p,     na.rm = TRUE),
+                               hi = quantile(x_ref, 1 - p, na.rm = TRUE))
+                        },
+                        "manual" = {
+                          v <- suppressWarnings(as.numeric(rule$manual_val))
+                          list(lo = -Inf, hi = if (is.na(v)) max(x_ref, na.rm = TRUE) else v)
+                        }
+          )
+          df[[col]][target] <- pmin(pmax(x[target], cap$lo), cap$hi)
+        }
+      }
+      
+      df
+    })
+    
+    # ── change log ──────────────────────────────────────────────────────────
+    change_log <- reactive({
+      df_orig <- get_data(); req(df_orig)
+      df_new  <- processed()
+      shared  <- intersect(rownames(df_orig), rownames(df_new))
+      rows <- list()
+      for (col in names(df_orig)) {
+        if (!col %in% names(df_new)) next
+        orig <- df_orig[shared, col]
+        new  <- df_new[shared,  col]
+        chg  <- which(
+          (is.na(orig) != is.na(new)) |
+            (!is.na(orig) & !is.na(new) &
+               as.character(orig) != as.character(new))
+        )
+        if (length(chg) == 0) next
+        rows[[length(rows) + 1]] <- data.frame(
+          Row    = shared[chg],
+          Column = col,
+          Before = as.character(orig[chg]),
+          After  = as.character(new[chg]),
+          stringsAsFactors = FALSE
+        )
+      }
+      if (length(rows) == 0) return(data.frame())
+      log_df <- do.call(rbind, rows)
+      log_df[order(log_df$Row, log_df$Column), ]
+    })
+    
+    # ── main UI ─────────────────────────────────────────────────────────────
+    output$main_ui <- renderUI({
+      req(get_data())
+      log_df   <- change_log()
+      n_change <- nrow(log_df)
+      n_omit   <- length(input$omit_ids %||% character(0))
+      
+      card <- function(label, value, color) {
+        tags$div(
+          style = paste0("flex:1; min-width:130px; background:white;
+                          border-radius:10px; border:0.5px solid #dee2e6;
+                          padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.06);"),
+          tags$div(style = "font-size:11px; color:#6c757d; font-weight:500;
+                            text-transform:uppercase; letter-spacing:.5px;", label),
+          tags$div(style = paste0("font-size:28px; font-weight:700; color:", color, ";"), value)
+        )
+      }
+      
+      tagList(
+        tags$div(
+          style = "display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;",
+          card("Cells Modified", n_change,
+               if (n_change > 0) "#185FA5" else "#6c757d"),
+          card("Rows Affected",
+               if (n_change > 0) length(unique(log_df$Row)) else 0,
+               if (n_change > 0) "#0F6E56" else "#6c757d"),
+          card("Cols Affected",
+               if (n_change > 0) length(unique(log_df$Column)) else 0,
+               if (n_change > 0) "#534AB7" else "#6c757d"),
+          card("Rows Omitted", n_omit,
+               if (n_omit > 0) "#C41E3A" else "#6c757d")
+        ),
+        
+        tags$div(
+          style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                   padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+          tags$h5("Change Log",
+                  style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+          if (n_change == 0)
+            tags$p("No values modified yet.", style = "color:#adb5bd; font-size:13px;")
+          else
+            DT::dataTableOutput(ns("change_log_tbl"))
+        ),
+        
+        if (n_change > 0) tags$div(
+          style = "display:grid; grid-template-columns:1fr; gap:16px;",
+          tags$div(
+            style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                     padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+            tags$h5(icon("table", style = "color:#6c757d; margin-right:6px;"),
+                    "Before",
+                    style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+            DT::dataTableOutput(ns("before_tbl"))
+          ),
+          tags$div(
+            style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                     padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+            tags$h5(icon("table", style = "color:#185FA5; margin-right:6px;"),
+                    "After",
+                    style = "font-weight:600; color:#343a40; margin-bottom:12px;"),
+            DT::dataTableOutput(ns("after_tbl"))
+          )
+        )
+      )
+    })
+    
+    # ── tables ──────────────────────────────────────────────────────────────
+    dt_opts <- list(pageLength = 10, scrollX = TRUE, dom = "tip")
+    
+    output$change_log_tbl <- DT::renderDataTable({
+      req(nrow(change_log()) > 0)
+      DT::datatable(change_log(), options = dt_opts, rownames = FALSE) |>
+        DT::formatStyle("After", color = "#185FA5", fontWeight = "bold")
+    })
+    
+    output$before_tbl <- DT::renderDataTable({
+      req(nrow(change_log()) > 0)
+      rows <- unique(change_log()$Row)
+      raw  <- tryCatch(get_raw(), error = function(e) get_data())
+      show <- intersect(rows, rownames(raw))
+      DT::datatable(raw[show, , drop = FALSE], options = dt_opts, rownames = TRUE)
+    })
+    
+    output$after_tbl <- DT::renderDataTable({
+      req(nrow(change_log()) > 0)
+      rows <- unique(change_log()$Row)
+      proc <- processed()
+      show <- intersect(rows, rownames(proc))
+      DT::datatable(proc[show, , drop = FALSE], options = dt_opts, rownames = TRUE)
+    })
+    
+    # ── return ──────────────────────────────────────────────────────────────
+    return(list(data = processed))
+  })
+}
+
+
 # =================================================================================
 # ui.R
 # =================================================================================
@@ -296,8 +860,9 @@ ui <- fluidPage(
     column(width = 8, tags$h2("Assignment 3 - William Hui Chang (69051925)", style = "margin-top:0;")),
     column(width = 4,
            div(style = "display:flex;justify-content:flex-end;align-items:flex-start;padding-top:4px;",
-               div(style = "width:180px;",
-                   numericInput(inputId = "GlobalSeed", label = "Global random seed", value = 2026, min = 1, width = "100%")
+               div(style = "display:flex; gap:10px; width:380px;",
+                   numericInput(inputId = "SplitSeed", label = "Split seed", value = 199, min = 1, width = "100%"),
+                   numericInput(inputId = "TrainSeed", label = "Train/resampling seed", value = 673, min = 1, width = "100%")
                )
            )
     )
@@ -580,7 +1145,26 @@ ui <- fluidPage(
              )
     ),
     
-    tabPanel("Available methods",
+    tabPanel("Strategy",
+             tagList(
+               tags$style(HTML("
+      .shiny-input-container label,
+      .radio label, .checkbox label {
+        font-weight: 400 !important;
+        font-size: 13px;
+      }
+    ")),
+               tabsetPanel(
+                 id = "strategy_active_tab",
+                 type = "pills",
+                 tabPanel("Outlier response",
+                          br(),
+                          out_response_ui("out_response")
+                 )
+               )
+             )
+    ),
+        tabPanel("Available methods",
              tagList(
                tags$style(HTML("
       .shiny-input-container label,
@@ -762,8 +1346,8 @@ ui <- fluidPage(
                    ),
                    conditionalPanel(
                      condition = "input.cfg_resampling == 'repeatedcv'",
-                     sliderInput("cfg_repeatedcv_folds", label = "Repeated CV folds", min = 3, max = 10, value = 4, step = 1, width = "100%"),
-                     sliderInput("cfg_repeatedcv_repeats", label = "Repeated CV repeats", min = 1, max = 10, value = 6, step = 1, width = "100%")
+                     sliderInput("cfg_repeatedcv_folds", label = "Folds per CV run", min = 3, max = 10, value = 4, step = 1, width = "100%"),
+                     sliderInput("cfg_repeatedcv_repeats", label = "Number of CV runs", min = 1, max = 10, value = 6, step = 1, width = "100%")
                    ),
                    selectInput("cfg_search", label = "Search type",
                                choices = c("Grid search" = "grid", "Random search" = "random"),
@@ -839,7 +1423,7 @@ ui <- fluidPage(
                                          tableOutput(outputId = "glmnet_Metrics")
                                 ),
                                 tabPanel("Tuning",
-                                         plotOutput(outputId = "glmnet_ModelTune")
+                                         plotOutput(outputId = "glmnet_ModelTune", height = "650px")
                                 ),
                                 tabPanel("Recipe",
                                          htmlOutput(outputId = "glmnet_RecipePrint"),
@@ -870,7 +1454,7 @@ ui <- fluidPage(
                                          tableOutput(outputId = "pls_Metrics")
                                 ),
                                 tabPanel("Tuning",
-                                         plotOutput(outputId = "pls_ModelTune")
+                                         plotOutput(outputId = "pls_ModelTune", height = "650px")
                                 ),
                                 tabPanel("Recipe",
                                          htmlOutput(outputId = "pls_RecipePrint"),
@@ -901,7 +1485,7 @@ ui <- fluidPage(
                                          tableOutput(outputId = "rpart_Metrics")
                                 ),
                                 tabPanel("Tuning",
-                                         plotOutput(outputId = "rpart_ModelTune")
+                                         plotOutput(outputId = "rpart_ModelTune", height = "650px")
                                 ),
                                 tabPanel("Recipe",
                                          htmlOutput(outputId = "rpart_RecipePrint"),
@@ -933,7 +1517,7 @@ ui <- fluidPage(
              checkboxInput(inputId = "Notch", label = "Show notch", value = FALSE),
              checkboxInput(inputId = "NullNormalise", label = "Normalise", value = TRUE),
              checkboxInput(inputId = "HideWorse", label = "Hide models worse than null model", value = TRUE),
-             plotOutput(outputId = "SelectionBoxPlot"),
+             plotOutput(outputId = "SelectionBoxPlot", height = "650px"),
              radioButtons(inputId = "Choice", label = "Model choice", choices = c(""), inline = TRUE )
     ),
     tabPanel("Performance",
@@ -971,8 +1555,13 @@ server <- function(input, output, session) {
     models <- reactiveValues()  # this is a collection of the models
     training_times <- reactiveValues()
     
-    getGlobalSeed <- reactive({
-      seed <- input$GlobalSeed %||% 2026
+    getSplitSeed <- reactive({
+      seed <- input$SplitSeed %||% 199
+      as.integer(seed)
+    })
+    
+    getTrainSeed <- reactive({
+      seed <- input$TrainSeed %||% 673
       as.integer(seed)
     })
     
@@ -980,7 +1569,7 @@ server <- function(input, output, session) {
       if (method == "glmnet") {
         list(knn = 2, bag = 4, pca = 25, pls = 25, ica = 25,
              nzv_freq = 95/5, nzv_unique = 10, other = 0.05,
-             poly = 2, corr = 0.90, tune = 10)
+             poly = 2, corr = 0.95, tune = 10)
       } else if (method == "pls") {
         list(knn = 2, bag = 4, pca = 25, pls = 25, ica = 25,
              nzv_freq = 95/5, nzv_unique = 10, other = 0.05,
@@ -1166,8 +1755,34 @@ server <- function(input, output, session) {
       }
       
       
-      sliderInput(.config_id(scope, "tuneLength"), "Tune length",
-                  min = 1, max = 50, value = defs$tune, step = 1, width = "100%")
+      controls <- list()
+      if (method == "glmnet") {
+        controls <- c(controls, list(
+          selectInput("glmnet_penalty_mode", "Penalty type",
+                      choices = c("Elastic net (tune alpha + lambda)" = "elasticnet",
+                                  "Ridge (alpha = 0)" = "ridge",
+                                  "Lasso (alpha = 1)" = "lasso"),
+                      selected = "elasticnet", width = "100%"),
+          selectInput("glmnet_grid_mode", "Tuning grid",
+                      choices = c("Tune length default" = "default",
+                                  "Custom alpha/lambda grid" = "custom"),
+                      selected = "default", width = "100%"),
+          conditionalPanel(
+            condition = "input.glmnet_grid_mode == 'custom'",
+            sliderInput("glmnet_alpha_min", "Alpha minimum", min = 0, max = 1, value = 0.1, step = 0.05, width = "100%"),
+            sliderInput("glmnet_alpha_max", "Alpha maximum", min = 0, max = 1, value = 1.0, step = 0.05, width = "100%"),
+            sliderInput("glmnet_alpha_step", "Alpha step", min = 0.05, max = 0.50, value = 0.10, step = 0.05, width = "100%"),
+            sliderInput("glmnet_lambda_min", "Log10 lambda minimum", min = -6, max = 2, value = -3, step = 1, width = "100%"),
+            sliderInput("glmnet_lambda_max", "Log10 lambda maximum", min = -2, max = 6, value = 3, step = 1, width = "100%"),
+            sliderInput("glmnet_lambda_n", "Lambda values", min = 10, max = 100, value = 50, step = 5, width = "100%")
+          )
+        ))
+      }
+      controls <- c(controls, list(
+        sliderInput(.config_id(scope, "tuneLength"), "Tune length",
+                    min = 1, max = 50, value = defs$tune, step = 1, width = "100%")
+      ))
+      tagList(controls)
     })
     
     output$method_action_buttons <- renderUI({
@@ -1340,14 +1955,14 @@ server <- function(input, output, session) {
     
     p1_simple <- reactive({
       df <- getData()
-      set.seed(getGlobalSeed())
+      set.seed(getSplitSeed())
       base::sample(x = nrow(df), size = floor(input$p1_train * nrow(df)), replace = FALSE)
     })
     
     p1_strat <- reactive({
       df <- getData()
       req(input$p1_y %in% names(df))
-      set.seed(getGlobalSeed())
+      set.seed(getSplitSeed())
       caret::createDataPartition(y = df[[input$p1_y]], p = input$p1_train, list = FALSE)
     })
     
@@ -1392,10 +2007,10 @@ server <- function(input, output, session) {
     
     p2_split <- reactive({
       df <- getData(); req(input$p2_y %in% names(df))
-      set.seed(getGlobalSeed())
+      set.seed(getSplitSeed())
       train_idx <- caret::createDataPartition(y = df[[input$p2_y]], p = input$p2_train, list = FALSE)
       remainder <- df[-train_idx, ]
-      set.seed(getGlobalSeed() + 1)
+      set.seed(getSplitSeed() + 1)
       val_idx_in_rem <- caret::createDataPartition(y = remainder[[input$p2_y]], p = input$p2_val, list = FALSE)
       list(train = train_idx,
            val   = as.integer(rownames(remainder)[val_idx_in_rem]),
@@ -1422,7 +2037,7 @@ server <- function(input, output, session) {
     
     p3_resamples <- reactive({
       df <- getData(); req(input$p3_y %in% names(df))
-      set.seed(getGlobalSeed())
+      set.seed(getSplitSeed())
       caret::createResample(y = df[[input$p3_y]], times = input$p3_times, list = TRUE)
     })
     
@@ -1444,7 +2059,7 @@ server <- function(input, output, session) {
       n_groups <- length(unique(grp))
       safe_k   <- max(2, min(as.integer(input$p4_k), n_groups - 1))
       req(safe_k >= 2, n_groups >= 3)
-      set.seed(getGlobalSeed())
+      set.seed(getSplitSeed())
       caret::groupKFold(group = grp, k = safe_k)
     })
     
@@ -1509,7 +2124,7 @@ server <- function(input, output, session) {
       nums <- df[, feat_cols, drop = FALSE]
       nums <- nums[complete.cases(nums), ]
       req(nrow(nums) >= input$p6_k)
-      set.seed(getGlobalSeed())
+      set.seed(getSplitSeed())
       cluster::pam(nums, k = input$p6_k,
                    metric = input$p6_metric,
                    stand  = as.logical(input$p6_stand))
@@ -1544,7 +2159,7 @@ server <- function(input, output, session) {
     
     applied_indices <- reactiveVal({
       df <- isolate(getData())
-      set.seed(isolate(getGlobalSeed()))
+      set.seed(isolate(getSplitSeed()))
       as.integer(caret::createDataPartition(y = df$Response, p = 0.8, list = FALSE))
     })
     
@@ -1614,6 +2229,22 @@ server <- function(input, output, session) {
     # getSplit — feeds getTrainData and getTestData
     getSplit <- reactive({ applied_indices() })
     
+    # ── STRATEGY: outlier response module ──────────────────────────────────
+    out_response_roles <- reactive({
+      df <- getData()
+      setNames(rep("", length(names(df))), names(df))
+    })
+    
+    out_response_result <- out_response_server(
+      id = "out_response",
+      get_data = getData,
+      get_raw = getData,
+      roles = out_response_roles
+    )
+    
+    getStrategyData <- reactive({
+      out_response_result$data()
+    })
     
     # # reactive getMethods ----
     # getMethods <- reactive({
@@ -2022,12 +2653,18 @@ server <- function(input, output, session) {
     
     # reactive getTrainData ----
     getTrainData <- reactive({
-      getData()[getSplit(),]
+      d <- getStrategyData()
+      train_rows <- rownames(getData())[getSplit()]
+      keep <- intersect(train_rows, rownames(d))
+      d[keep, , drop = FALSE]
     })
     
     # reactive getTestData ----
     getTestData <- reactive({
-      getData()[-getSplit(),]
+      d <- getStrategyData()
+      test_rows <- rownames(getData())[-getSplit()]
+      keep <- intersect(test_rows, rownames(d))
+      d[keep, , drop = FALSE]
     })
     
     # reactive getTrControl ----
@@ -2036,7 +2673,7 @@ server <- function(input, output, session) {
       y <- getTrainData()[,"Response"]
       resampling <- input$cfg_resampling %||% "boot"
       search <- input$cfg_search %||% "grid"
-      set.seed(getGlobalSeed())
+      set.seed(getTrainSeed())
       
       if (resampling == "cv") {
         n <- input$cfg_cv_folds %||% 10
@@ -2331,7 +2968,44 @@ server <- function(input, output, session) {
         obj <- startMode(input$Parallel)
         tryCatch({
           timing <- system.time({
-          model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na.pass)
+          penalty_mode <- input$glmnet_penalty_mode %||% "elasticnet"
+          grid_mode <- input$glmnet_grid_mode %||% "default"
+          
+          if (grid_mode == "custom") {
+            alpha_values <- if (penalty_mode == "ridge") {
+              0
+            } else if (penalty_mode == "lasso") {
+              1
+            } else {
+              amin <- min(input$glmnet_alpha_min %||% 0.1, input$glmnet_alpha_max %||% 1.0)
+              amax <- max(input$glmnet_alpha_min %||% 0.1, input$glmnet_alpha_max %||% 1.0)
+              astep <- input$glmnet_alpha_step %||% 0.1
+              round(seq(amin, amax, by = astep), 3)
+            }
+            lmin <- min(input$glmnet_lambda_min %||% -3, input$glmnet_lambda_max %||% 3)
+            lmax <- max(input$glmnet_lambda_min %||% -3, input$glmnet_lambda_max %||% 3)
+            lambda_values <- 10^seq(lmin, lmax, length.out = input$glmnet_lambda_n %||% 50)
+            tune_grid <- expand.grid(alpha = alpha_values, lambda = lambda_values)
+            model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid, na.action = na.pass)
+          } else if (penalty_mode == "ridge") {
+            tune_grid <- expand.grid(alpha = 0,
+                                     lambda = 10^seq(-4, 4, length.out = getTuneLength()))
+            model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid, na.action = na.pass)
+          } else if (penalty_mode == "lasso") {
+            tune_grid <- expand.grid(alpha = 1,
+                                     lambda = 10^seq(-4, 4, length.out = getTuneLength()))
+            model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid, na.action = na.pass)
+          } else {
+            model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength(), na.action = na.pass)
+          }
           })
           training_times[[method]] <- timing[["elapsed"]]
           deleteRds(method)
@@ -2439,10 +3113,17 @@ server <- function(input, output, session) {
     # output coefficient print ----
     output$glmnet_Coef <- renderTable({
       req(models$glmnet)
-      co <- as.matrix(coef(models$glmnet$finalModel, s  = models$glmnet$bestTune$lambda))  # special for glmnet
-      df <- as.data.frame(co, row.names = rownames(co))
-      df[df$s1 != 0.000, ,drop=FALSE]
-    }, rownames = TRUE, colnames = FALSE)
+      co <- as.matrix(coef(models$glmnet$finalModel,
+                           s = models$glmnet$bestTune$lambda))  # special for glmnet
+      df <- data.frame(
+        Predictor = rownames(co),
+        Coefficient = as.numeric(co[, 1]),
+        row.names = NULL,
+        check.names = FALSE
+      )
+      df <- df[df$Coefficient != 0, , drop = FALSE]
+      df[order(abs(df$Coefficient), decreasing = TRUE), ]
+    }, rownames = FALSE)
     
     
     
@@ -2742,4 +3423,11 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
+
+
+
+
+
+
 
