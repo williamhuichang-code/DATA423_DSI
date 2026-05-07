@@ -64,6 +64,9 @@ glmnet_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "do
                     "other", "YeoJohnson", "dummy", "interact", "lincomb",
                     "zv", "nzv", "center", "scale")
 
+nn_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                "other", "YeoJohnson", "dummy", "zv", "nzv", "center", "scale")
+
 pls_initial <- c("impute_median", "month", "dow", "dateDecimal",
                  "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
 
@@ -1444,7 +1447,52 @@ ui <- fluidPage(
                               )
                      ),
                      
-                     tabPanel("PLS", value = "pls",
+                     tabPanel("BRNN", value = "brnn",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "brnn_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "brnn_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "brnn_ModelTune", height = "650px")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "brnn_RecipePrint"),
+                                         tableOutput(outputId = "brnn_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         verbatimTextOutput(outputId = "brnn_TrainSummary")
+                                )
+                              )
+                     ),
+                     
+                     tabPanel("avNNet", value = "avNNet",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "avNNet_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "avNNet_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "avNNet_ModelTune", height = "650px")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "avNNet_RecipePrint"),
+                                         tableOutput(outputId = "avNNet_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         verbatimTextOutput(outputId = "avNNet_TrainSummary")
+                                )
+                              )
+                     ),
+                                          tabPanel("PLS", value = "pls",
                               br(),
                               tabsetPanel(
                                 type = "tabs",
@@ -1565,6 +1613,18 @@ server <- function(input, output, session) {
       as.integer(seed)
     })
     
+    getBestMetricRow <- function(method) {
+      mod <- models[[method]]
+      req(mod)
+      row <- mod$results[which.min(mod$results[, "RMSE"]), , drop = FALSE]
+      row$TrainingTimeSeconds <- if (!is.null(training_times[[method]])) {
+        round(training_times[[method]], 2)
+      } else {
+        NA_real_
+      }
+      row
+    }
+    
     .preprocess_defaults <- function(method) {
       if (method == "glmnet") {
         list(knn = 2, bag = 4, pca = 25, pls = 25, ica = 25,
@@ -1585,8 +1645,22 @@ server <- function(input, output, session) {
       }
     }
     
+    .method_specific_preprocess <- function(method) {
+      switch(method,
+             "glmnet" = list(input_id = "glmnet_Preprocess", initial = glmnet_initial),
+             "pls"    = list(input_id = "pls_Preprocess",    initial = pls_initial),
+             "rpart"  = list(input_id = "rpart_Preprocess",  initial = rpart_initial),
+             NULL)
+    }
+    
+    .uses_general_config <- reactive({
+      method <- input$active_method %||% "null"
+      mode   <- input$method_config_mode %||% "general"
+      mode == "general" || is.null(.method_specific_preprocess(method))
+    })
+    
     .config_scope <- reactive({
-      if (is.null(input$method_config_mode) || input$method_config_mode == "general") {
+      if (.uses_general_config()) {
         "general"
       } else {
         input$active_method %||% "glmnet"
@@ -1601,19 +1675,19 @@ server <- function(input, output, session) {
       method <- input$active_method %||% "null"
       mode   <- input$method_config_mode %||% "general"
       
-      if (mode == "general") {
-        input$general_Preprocess %||% general_initial
-      } else if (method == "glmnet") {
-        input$glmnet_Preprocess %||% glmnet_initial
-      } else if (method == "pls") {
-        input$pls_Preprocess %||% pls_initial
-      } else if (method == "rpart") {
-        input$rpart_Preprocess %||% rpart_initial
-      } else {
+      if (method == "null") {
         NULL
+      } else if (mode == "general") {
+        input$general_Preprocess %||% general_initial
+      } else {
+        spec <- .method_specific_preprocess(method)
+        if (is.null(spec)) {
+          input$general_Preprocess %||% general_initial
+        } else {
+          input[[spec$input_id]] %||% spec$initial
+        }
       }
-    })
-    
+    })    
     
     output$method_preprocess_ui <- renderUI({
       method <- input$active_method %||% "null"
@@ -1623,8 +1697,9 @@ server <- function(input, output, session) {
         return(div(style="font-size:12px;color:#6c757d;", "The null model has no preprocessing choices."))
       }
       
-      if (mode == "general") {
-        return(
+      shared_preprocess <- function(prefix_warning = NULL) {
+        tagList(
+          prefix_warning,
           selectizeInput(inputId = "general_Preprocess",
                          label = "Pre-processing",
                          choices = unique(c(general_initial, ppchoices)),
@@ -1633,36 +1708,32 @@ server <- function(input, output, session) {
         )
       }
       
-      if (method == "glmnet") {
-        selectizeInput(inputId = "glmnet_Preprocess",
-                       label = "Pre-processing",
-                       choices = unique(c(glmnet_initial, ppchoices)),
-                       multiple = TRUE,
-                       selected = glmnet_initial)
-      } else if (method == "pls") {
-        selectizeInput(inputId = "pls_Preprocess",
-                       label = "Pre-processing",
-                       choices = unique(c(pls_initial, ppchoices)),
-                       multiple = TRUE,
-                       selected = pls_initial)
-      } else if (method == "rpart") {
-        selectizeInput(inputId = "rpart_Preprocess",
-                       label = "Pre-processing",
-                       choices = unique(c(rpart_initial, ppchoices)),
-                       multiple = TRUE,
-                       selected = rpart_initial)
+      if (mode == "general") {
+        return(shared_preprocess())
       }
+      
+      spec <- .method_specific_preprocess(method)
+      if (is.null(spec)) {
+        return(shared_preprocess(
+          div(style="font-size:12px;color:#856404;background:#fff3cd;border-left:3px solid #ffc107;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" This model does not have model-specific preprocessing yet. It will use the shared general preprocessing."))
+        ))
+      }
+      
+      selectizeInput(inputId = spec$input_id,
+                     label = "Pre-processing",
+                     choices = unique(c(spec$initial, ppchoices)),
+                     multiple = TRUE,
+                     selected = spec$initial)
     })
-    
-    
-    output$preprocess_config_ui <- renderUI({
+        output$preprocess_config_ui <- renderUI({
       method <- input$active_method %||% "null"
       if (method == "null") return(NULL)
       
       selected_steps <- getSelectedPreprocess()
       
       scope <- .config_scope()
-      defs <- if (.config_scope() == "general") {
+      defs <- if (.uses_general_config()) {
         .preprocess_defaults("general")
       } else {
         .preprocess_defaults(method)
@@ -1743,20 +1814,20 @@ server <- function(input, output, session) {
     
     output$model_specific_config_ui <- renderUI({
       method <- input$active_method %||% "null"
+      mode   <- input$method_config_mode %||% "general"
       if (method == "null") {
         return(div(style="font-size:12px;color:#6c757d;", "The null model has no tuning parameters."))
       }
       
       scope <- .config_scope()
-      defs <- if (.config_scope() == "general") {
+      defs <- if (.uses_general_config()) {
         .preprocess_defaults("general")
       } else {
         .preprocess_defaults(method)
       }
       
-      
       controls <- list()
-      if (method == "glmnet") {
+      if (method == "glmnet" && mode == "specific") {
         controls <- c(controls, list(
           selectInput("glmnet_penalty_mode", "Penalty type",
                       choices = c("Elastic net (tune alpha + lambda)" = "elasticnet",
@@ -1777,6 +1848,11 @@ server <- function(input, output, session) {
             sliderInput("glmnet_lambda_n", "Lambda values", min = 10, max = 100, value = 50, step = 5, width = "100%")
           )
         ))
+      } else if (mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#856404;background:#fff3cd;border-left:3px solid #ffc107;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" No model-specific controls are defined for this model yet. It will use the shared general configuration."))
+        ))
       }
       controls <- c(controls, list(
         sliderInput(.config_id(scope, "tuneLength"), "Tune length",
@@ -1784,8 +1860,7 @@ server <- function(input, output, session) {
       ))
       tagList(controls)
     })
-    
-    output$method_action_buttons <- renderUI({
+        output$method_action_buttons <- renderUI({
       method <- input$active_method %||% "null"
       
       tagList(
@@ -1801,7 +1876,7 @@ server <- function(input, output, session) {
     getPreprocessConfig <- reactive({
       method <- input$active_method %||% "glmnet"
       scope  <- .config_scope()
-      defs   <- .preprocess_defaults(method)
+      defs   <- if (.uses_general_config()) .preprocess_defaults("general") else .preprocess_defaults(method)
       
       val <- function(name, default) {
         input[[.config_id(scope, name)]] %||% default
@@ -1826,7 +1901,7 @@ server <- function(input, output, session) {
       method <- input$active_method %||% "glmnet"
       scope  <- .config_scope()
       
-      if (scope == "general") {
+      if (.uses_general_config()) {
         input$cfg_general_tuneLength %||% 10
       } else {
         defs <- .preprocess_defaults(method)
@@ -2384,11 +2459,11 @@ server <- function(input, output, session) {
         "Regularization",
         "L1 Regularization",
         "L2 Regularization",
-        "L1 Regularization Models",
-        "L2 Regularization Models",
-        "Feature Extraction",
-        "Feature Extraction Models",
-        "Partial Least Squares"
+        "Implicit Feature Selection",
+        "Feature Selection Wrapper",
+        "Handle Missing Predictor Data",
+        "Robust Methods",
+        "Multivariate Adaptive Regression Splines"
       ))
       
       current_lit_tags <- isolate(input$av_flt_any)
@@ -2401,12 +2476,18 @@ server <- function(input, output, session) {
         server = TRUE
       )
       
-      updateSelectizeInput(session, "av_g1", choices = available_tags, server = TRUE)
-      updateSelectizeInput(session, "av_g2", choices = available_tags, server = TRUE)
-      updateSelectizeInput(session, "av_g3", choices = available_tags, server = TRUE)
-      updateSelectizeInput(session, "av_g4", choices = available_tags, server = TRUE)
-      updateSelectizeInput(session, "av_g5", choices = available_tags, server = TRUE)
-      updateSelectizeInput(session, "av_g6", choices = available_tags, server = TRUE)
+      updateSelectizeInput(session, "av_g1", choices = available_tags,
+                           selected = intersect("Neural Network", available_tags), server = TRUE)
+      updateSelectizeInput(session, "av_g2", choices = available_tags,
+                           selected = intersect("Linear Regression", available_tags), server = TRUE)
+      updateSelectizeInput(session, "av_g3", choices = available_tags,
+                           selected = intersect("Tree-Based Model", available_tags), server = TRUE)
+      updateSelectizeInput(session, "av_g4", choices = available_tags,
+                           selected = intersect("Kernel Method", available_tags), server = TRUE)
+      updateSelectizeInput(session, "av_g5", choices = available_tags,
+                           selected = intersect("Ensemble Model", available_tags), server = TRUE)
+      updateSelectizeInput(session, "av_g6", choices = available_tags,
+                           selected = intersect("Multivariate Adaptive Regression Splines", available_tags), server = TRUE)
     })
     
     # Helper: does a method's Tags_plain match ALL tags in a group?
@@ -2907,10 +2988,7 @@ server <- function(input, output, session) {
     
     # observeEvent null_Metrics ----
     output$null_Metrics <- renderTable({
-      method <- "null"
-      mod <- models[[method]]
-      req(mod)
-      mod$results[ which.min(mod$results[, "RMSE"]), ]
+      getBestMetricRow("null")
     })
     
     output$null_TuningNote <- renderPrint({
@@ -2968,8 +3046,9 @@ server <- function(input, output, session) {
         obj <- startMode(input$Parallel)
         tryCatch({
           timing <- system.time({
-          penalty_mode <- input$glmnet_penalty_mode %||% "elasticnet"
-          grid_mode <- input$glmnet_grid_mode %||% "default"
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          penalty_mode <- if (specific_mode) input$glmnet_penalty_mode %||% "elasticnet" else "elasticnet"
+          grid_mode <- if (specific_mode) input$glmnet_grid_mode %||% "default" else "default"
           
           if (grid_mode == "custom") {
             alpha_values <- if (penalty_mode == "ridge") {
@@ -3047,10 +3126,7 @@ server <- function(input, output, session) {
     
     # output resampling metrics table ----
     output$glmnet_Metrics <- renderTable({
-      method <- "glmnet"
-      mod <- models[[method]]
-      req(mod)
-      mod$results[ which.min(mod$results[, "RMSE"]), ]
+      getBestMetricRow("glmnet")
     })
     
     # output hyperparameter tuning chart ----
@@ -3127,7 +3203,154 @@ server <- function(input, output, session) {
     
     
     
-    # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
+    # METHOD * neural networks ----------------------------------------------------------------------------------------------------------------
+    # These candidates use the shared general controls by default.
+    .fit_caret_model <- function(method, recipe_obj, na_action = na.pass) {
+      caret::train(recipe_obj, data = getTrainData(), method = method, metric = "RMSE",
+                   trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na_action)
+    }
+    
+    .recipe_summary_table <- function(method) {
+      mod <- models[[method]]
+      req(mod)
+      terms <- as.data.frame(mod$recipe$term_info)
+      n <- dim(terms)[1]
+      types <- vector(mode="character", length=n)
+      for (row in 1:n) {
+        types[row] <- paste(collapse = " ", unlist(terms$type[row]))
+      }
+      terms$type <- types
+      terms |>
+        dplyr::filter(role == "predictor") |>
+        dplyr::select(type, source) |>
+        dplyr::group_by(type, source) |>
+        dplyr::summarise(count = n())
+    }
+    
+    .recipe_print_ui <- function(method) {
+      mod <- models[[method]]
+      req(mod)
+      html <- mod$recipe %>%
+        print() %>%
+        cli::cli_fmt() %>%
+        cli::ansi_collapse(sep="<br>", last = "<br>") %>%
+        cli::ansi_html(escape_reserved = FALSE) %>%
+        gsub(pattern = "──────", replacement = "─",  x = ., fixed = TRUE)
+      css <- paste(format(ansi_html_style()), collapse= "\n")
+      tagList(
+        tags$head(tags$style(css)),
+        tags$pre(HTML(html))
+      )
+    }
+    
+    .train_summary_print <- function(method) {
+      mod <- models[[method]]
+      req(mod)
+      if (!is.null(training_times[[method]])) {
+        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      }
+      print(mod)
+    }
+    
+    .forget_model <- function(method) {
+      models[[method]] <- NULL
+      gc()
+    }
+    
+    # reactive getBrnnRecipe ----
+    getBrnnRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$brnn_Go, {
+      method <- "brnn"
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        if (!requireNamespace("brnn", quietly = TRUE)) {
+          showNotification("Package brnn is required before training brnn.", type = "error", duration = 6)
+          return(NULL)
+        }
+        timing <- system.time({
+          model <- .fit_caret_model(method, getBrnnRecipe())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$brnn_Load, {
+      method <- "brnn"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$brnn_Delete, { .forget_model("brnn") })
+    
+    output$brnn_MethodSummary <- renderText({ description("brnn") })
+    output$brnn_Metrics <- renderTable({ getBestMetricRow("brnn") })
+    output$brnn_ModelTune <- renderPlot({ mod <- models[["brnn"]]; req(mod); plot(mod) })
+    output$brnn_RecipePrint <- renderUI({ .recipe_print_ui("brnn") })
+    output$brnn_RecipeOutput <- renderTable({ .recipe_summary_table("brnn") })
+    output$brnn_TrainSummary <- renderPrint({ .train_summary_print("brnn") })
+    
+    # reactive getAvNNetRecipe ----
+    getAvNNetRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$avNNet_Go, {
+      method <- "avNNet"
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        if (!requireNamespace("nnet", quietly = TRUE)) {
+          showNotification("Package nnet is required before training avNNet.", type = "error", duration = 6)
+          return(NULL)
+        }
+        timing <- system.time({
+          model <- .fit_caret_model(method, getAvNNetRecipe())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$avNNet_Load, {
+      method <- "avNNet"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$avNNet_Delete, { .forget_model("avNNet") })
+    
+    output$avNNet_MethodSummary <- renderText({ description("avNNet") })
+    output$avNNet_Metrics <- renderTable({ getBestMetricRow("avNNet") })
+    output$avNNet_ModelTune <- renderPlot({ mod <- models[["avNNet"]]; req(mod); plot(mod) })
+    output$avNNet_RecipePrint <- renderUI({ .recipe_print_ui("avNNet") })
+    output$avNNet_RecipeOutput <- renderTable({ .recipe_summary_table("avNNet") })
+    output$avNNet_TrainSummary <- renderPrint({ .train_summary_print("avNNet") })
+        # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
     library(pls)  #  <------ Declare any modelling packages that are needed (see Method List tab)
     
     # reactive getPlsRecipe ----
@@ -3193,10 +3416,7 @@ server <- function(input, output, session) {
     
     # output resampling metrics table ----
     output$pls_Metrics <- renderTable({
-      method <- "pls"
-      mod <- models[[method]]
-      req(mod)
-      mod$results[ which.min(mod$results[, "RMSE"]), ]
+      getBestMetricRow("pls")
     })
     
     # output hyperparameter tuning chart ----
@@ -3330,10 +3550,7 @@ server <- function(input, output, session) {
     
     # output the resampling metrics table ----
     output$rpart_Metrics <- renderTable({
-      method <- "rpart"
-      mod <- models[[method]]
-      req(mod)
-      mod$results[ which.min(mod$results[, "RMSE"]), ]
+      getBestMetricRow("rpart")
     })
     
     # output recipe-outputs table ----
@@ -3423,6 +3640,16 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
+
+
+
+
+
+
+
+
+
 
 
 
