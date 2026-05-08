@@ -3684,34 +3684,48 @@ server <- function(input, output, session) {
     output$krlsRadial_ModelTune <- renderPlot({ mod <- models[["krlsRadial"]]; req(mod); plot(mod) })
     output$krlsRadial_RecipePrint <- renderUI({ .recipe_print_ui("krlsRadial") })
     output$krlsRadial_RecipeOutput <- renderTable({ .recipe_summary_table("krlsRadial") })
-    output$krlsRadial_TrainSummary <- renderPrint({ .train_summary_print("krlsRadial") })    # METHOD * ranger ---------------------------------------------------------------------------------------------------------------------------
+    output$krlsRadial_TrainSummary <- renderPrint({ .train_summary_print("krlsRadial") })
+    # METHOD * ranger ---------------------------------------------------------------------------------------------------------------------------
     getRangerRecipe <- reactive({
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
         dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date"))
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
     })
     
     observeEvent(input$ranger_Go, {
       method <- "ranger"
-      
       if (!requireNamespace("ranger", quietly = TRUE)) {
         showNotification(paste("Package", "ranger", "is required before training", method, "."),
                          type = "error", duration = 6)
         return(NULL)
       }
       models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
       obj <- startMode(input$Parallel)
       tryCatch({
         timing <- system.time({
           set.seed(getTrainSeed())
-          model <- caret::train(getRangerRecipe(), data = getTrainData(), method = method,
+          rec <- getRangerRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
                                 metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength(), na.action = na.omit)
+                                tuneLength = getTuneLength())
         })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
