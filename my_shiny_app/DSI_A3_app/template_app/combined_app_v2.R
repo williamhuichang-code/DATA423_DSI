@@ -320,6 +320,31 @@ deleteRds <- function(name) {
 }
 
 
+# ── UI HELPER: GENERIC MODEL TAB ─────────────────────────────────────────────
+model_tab_panel <- function(label, value, prefix = value) {
+  tabPanel(label, value = value,
+           br(),
+           tabsetPanel(
+             type = "tabs",
+             tabPanel("Summary",
+                      verbatimTextOutput(outputId = paste0(prefix, "_MethodSummary")),
+                      h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                      tableOutput(outputId = paste0(prefix, "_Metrics"))
+             ),
+             tabPanel("Tuning",
+                      plotOutput(outputId = paste0(prefix, "_ModelTune"), height = "650px")
+             ),
+             tabPanel("Recipe",
+                      htmlOutput(outputId = paste0(prefix, "_RecipePrint")),
+                      tableOutput(outputId = paste0(prefix, "_RecipeOutput"))
+             ),
+             tabPanel("Model Output",
+                      h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                      verbatimTextOutput(outputId = paste0(prefix, "_TrainSummary"))
+             )
+           )
+  )
+}
 
 
 
@@ -1554,6 +1579,19 @@ ui <- fluidPage(
                                 )
                               )
                      ),
+                     model_tab_panel("enet", "enet"),
+                     model_tab_panel("relaxo", "relaxo"),
+                     model_tab_panel("cubist", "cubist"),
+                     model_tab_panel("M5", "M5"),
+                     model_tab_panel("M5Rules", "M5Rules"),
+                     model_tab_panel("svmRadial", "svmRadial"),
+                     model_tab_panel("krlsRadial", "krlsRadial"),
+                     model_tab_panel("ranger", "ranger"),
+                     model_tab_panel("rf", "rf"),
+                     model_tab_panel("gbm", "gbm"),
+                     model_tab_panel("xgbTree", "xgbTree"),
+                     model_tab_panel("bagEarth", "bagEarth"),
+                     model_tab_panel("earth", "earth")
                    )
                  )
                )
@@ -1619,6 +1657,8 @@ server <- function(input, output, session) {
       row <- mod$results[which.min(mod$results[, "RMSE"]), , drop = FALSE]
       row$TrainingTimeSeconds <- if (!is.null(training_times[[method]])) {
         round(training_times[[method]], 2)
+      } else if (!is.null(mod$trainingTimeSeconds)) {
+        round(mod$trainingTimeSeconds, 2)
       } else {
         NA_real_
       }
@@ -1910,6 +1950,14 @@ server <- function(input, output, session) {
     })
     
     
+    
+    .model_na_action <- function(method) {
+      if (method %in% c("earth", "bagEarth", "ranger")) {
+        na.fail
+      } else {
+        na.pass
+      }
+    }
     
     # Ensure the "SavedModels folder exists
     if (!"./SavedModels" %in% list.dirs()) {
@@ -2771,14 +2819,11 @@ server <- function(input, output, session) {
         reps <- NA
       }
       
-      seeds <- vector(mode = "list", length = length(idx) + 1)
-      for (i in seq_along(idx)) {
-        seeds[[i]] <- as.integer(c(runif(n = 55, min = 1000, max = 5000)))
-      }
-      seeds[[length(idx) + 1]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
+      # Let caret manage per-model seed vectors. Different methods expand
+      # tuneLength into different grid sizes, e.g. xgbTree can need 100 seeds.
       
       trainControl(method = resampling, number = n, repeats = reps, allowParallel = TRUE, search = search,
-                   index = idx, savePredictions = "final", seeds = seeds, trim = TRUE)
+                   index = idx, savePredictions = "final", trim = TRUE)
     })
     
     # # output SplitSummary ----
@@ -2955,6 +3000,7 @@ server <- function(input, output, session) {
           model <- caret::train(getNullRecipe(), data = getTrainData(), method = method, metric = "RMSE", trControl = getTrControl())
           })
           training_times[[method]] <- timing[["elapsed"]]
+          model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -2999,8 +3045,13 @@ server <- function(input, output, session) {
       method <- "null"
       mod <- models[[method]]
       req(mod)
-      if (!is.null(training_times[[method]])) {
-        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      elapsed <- if (!is.null(training_times[[method]])) {
+        training_times[[method]]
+      } else {
+        mod$trainingTimeSeconds
+      }
+      if (!is.null(elapsed)) {
+        cat("Training time:", round(elapsed, 2), "seconds\n\n")
       }
       print(mod)
     })
@@ -3067,19 +3118,19 @@ server <- function(input, output, session) {
             tune_grid <- expand.grid(alpha = alpha_values, lambda = lambda_values)
             model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
                                   metric = "RMSE", trControl = getTrControl(),
-                                  tuneGrid = tune_grid, na.action = na.pass)
+                                  tuneGrid = tune_grid, na.action = .model_na_action(method))
           } else if (penalty_mode == "ridge") {
             tune_grid <- expand.grid(alpha = 0,
                                      lambda = 10^seq(-4, 4, length.out = getTuneLength()))
             model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
                                   metric = "RMSE", trControl = getTrControl(),
-                                  tuneGrid = tune_grid, na.action = na.pass)
+                                  tuneGrid = tune_grid, na.action = .model_na_action(method))
           } else if (penalty_mode == "lasso") {
             tune_grid <- expand.grid(alpha = 1,
                                      lambda = 10^seq(-4, 4, length.out = getTuneLength()))
             model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
                                   metric = "RMSE", trControl = getTrControl(),
-                                  tuneGrid = tune_grid, na.action = na.pass)
+                                  tuneGrid = tune_grid, na.action = .model_na_action(method))
           } else {
             model <- caret::train(getGlmnetRecipe(), data = getTrainData(), method = method,
                                   metric = "RMSE", trControl = getTrControl(),
@@ -3087,6 +3138,7 @@ server <- function(input, output, session) {
           }
           })
           training_times[[method]] <- timing[["elapsed"]]
+          model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -3180,8 +3232,13 @@ server <- function(input, output, session) {
       method <- "glmnet"
       mod <- models[[method]]
       req(mod)
-      if (!is.null(training_times[[method]])) {
-        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      elapsed <- if (!is.null(training_times[[method]])) {
+        training_times[[method]]
+      } else {
+        mod$trainingTimeSeconds
+      }
+      if (!is.null(elapsed)) {
+        cat("Training time:", round(elapsed, 2), "seconds\n\n")
       }
       print(mod)
     })
@@ -3211,9 +3268,11 @@ server <- function(input, output, session) {
       obj <- startMode(input$Parallel)
       tryCatch({
         timing <- system.time({
+          set.seed(getTrainSeed())
           model <- force(train_expr)
         })
         training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
@@ -3260,8 +3319,13 @@ server <- function(input, output, session) {
     .train_summary_print <- function(method) {
       mod <- models[[method]]
       req(mod)
-      if (!is.null(training_times[[method]])) {
-        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      elapsed <- if (!is.null(training_times[[method]])) {
+        training_times[[method]]
+      } else {
+        mod$trainingTimeSeconds
+      }
+      if (!is.null(elapsed)) {
+        cat("Training time:", round(elapsed, 2), "seconds\n\n")
       }
       print(mod)
     }
@@ -3322,7 +3386,7 @@ server <- function(input, output, session) {
       }
       .train_and_store(method, {
         caret::train(getAvNNetRecipe(), data = getTrainData(), method = method, metric = "RMSE",
-                     trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na.pass,
+                     trControl = getTrControl(), tuneLength = getTuneLength(), na.action = .model_na_action(method),
                      linout = TRUE, trace = FALSE, maxit = 1000, MaxNWts = 10000)
       })
     })
@@ -3341,7 +3405,675 @@ server <- function(input, output, session) {
     output$avNNet_RecipePrint <- renderUI({ .recipe_print_ui("avNNet") })
     output$avNNet_RecipeOutput <- renderTable({ .recipe_summary_table("avNNet") })
     output$avNNet_TrainSummary <- renderPrint({ .train_summary_print("avNNet") })
-        # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
+    
+    # METHOD * additional candidates -----------------------------------------------------------------------------------------------------------
+    # These model blocks are intentionally explicit so model-specific failures point to the model being trained.
+
+    # METHOD * enet ---------------------------------------------------------------------------------------------------------------------------
+    getEnetRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$enet_Go, {
+      method <- "enet"
+      if (!requireNamespace("elasticnet", quietly = TRUE)) {
+        showNotification(paste("Package", "elasticnet", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getEnetRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$enet_Load, {
+      method <- "enet"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$enet_Delete, { .forget_model("enet") })
+    
+    output$enet_MethodSummary <- renderText({ description("enet") })
+    output$enet_Metrics <- renderTable({ getBestMetricRow("enet") })
+    output$enet_ModelTune <- renderPlot({ mod <- models[["enet"]]; req(mod); plot(mod) })
+    output$enet_RecipePrint <- renderUI({ .recipe_print_ui("enet") })
+    output$enet_RecipeOutput <- renderTable({ .recipe_summary_table("enet") })
+    output$enet_TrainSummary <- renderPrint({ .train_summary_print("enet") })
+    # METHOD * relaxo ---------------------------------------------------------------------------------------------------------------------------
+    getRelaxoRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$relaxo_Go, {
+      method <- "relaxo"
+      if (!requireNamespace("relaxo", quietly = TRUE)) {
+        showNotification(paste("Package", "relaxo", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getRelaxoRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$relaxo_Load, {
+      method <- "relaxo"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$relaxo_Delete, { .forget_model("relaxo") })
+    
+    output$relaxo_MethodSummary <- renderText({ description("relaxo") })
+    output$relaxo_Metrics <- renderTable({ getBestMetricRow("relaxo") })
+    output$relaxo_ModelTune <- renderPlot({ mod <- models[["relaxo"]]; req(mod); plot(mod) })
+    output$relaxo_RecipePrint <- renderUI({ .recipe_print_ui("relaxo") })
+    output$relaxo_RecipeOutput <- renderTable({ .recipe_summary_table("relaxo") })
+    output$relaxo_TrainSummary <- renderPrint({ .train_summary_print("relaxo") })
+    # METHOD * cubist ---------------------------------------------------------------------------------------------------------------------------
+    getCubistRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$cubist_Go, {
+      method <- "cubist"
+      if (!requireNamespace("Cubist", quietly = TRUE)) {
+        showNotification(paste("Package", "Cubist", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getCubistRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$cubist_Load, {
+      method <- "cubist"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$cubist_Delete, { .forget_model("cubist") })
+    
+    output$cubist_MethodSummary <- renderText({ description("cubist") })
+    output$cubist_Metrics <- renderTable({ getBestMetricRow("cubist") })
+    output$cubist_ModelTune <- renderPlot({ mod <- models[["cubist"]]; req(mod); plot(mod) })
+    output$cubist_RecipePrint <- renderUI({ .recipe_print_ui("cubist") })
+    output$cubist_RecipeOutput <- renderTable({ .recipe_summary_table("cubist") })
+    output$cubist_TrainSummary <- renderPrint({ .train_summary_print("cubist") })
+    # METHOD * M5 ---------------------------------------------------------------------------------------------------------------------------
+    getM5Recipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$M5_Go, {
+      method <- "M5"
+      if (!requireNamespace("RWeka", quietly = TRUE)) {
+        showNotification(paste("Package", "RWeka", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getM5Recipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$M5_Load, {
+      method <- "M5"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$M5_Delete, { .forget_model("M5") })
+    
+    output$M5_MethodSummary <- renderText({ description("M5") })
+    output$M5_Metrics <- renderTable({ getBestMetricRow("M5") })
+    output$M5_ModelTune <- renderPlot({ mod <- models[["M5"]]; req(mod); plot(mod) })
+    output$M5_RecipePrint <- renderUI({ .recipe_print_ui("M5") })
+    output$M5_RecipeOutput <- renderTable({ .recipe_summary_table("M5") })
+    output$M5_TrainSummary <- renderPrint({ .train_summary_print("M5") })
+    # METHOD * M5Rules ---------------------------------------------------------------------------------------------------------------------------
+    getM5RulesRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$M5Rules_Go, {
+      method <- "M5Rules"
+      if (!requireNamespace("RWeka", quietly = TRUE)) {
+        showNotification(paste("Package", "RWeka", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getM5RulesRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$M5Rules_Load, {
+      method <- "M5Rules"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$M5Rules_Delete, { .forget_model("M5Rules") })
+    
+    output$M5Rules_MethodSummary <- renderText({ description("M5Rules") })
+    output$M5Rules_Metrics <- renderTable({ getBestMetricRow("M5Rules") })
+    output$M5Rules_ModelTune <- renderPlot({ mod <- models[["M5Rules"]]; req(mod); plot(mod) })
+    output$M5Rules_RecipePrint <- renderUI({ .recipe_print_ui("M5Rules") })
+    output$M5Rules_RecipeOutput <- renderTable({ .recipe_summary_table("M5Rules") })
+    output$M5Rules_TrainSummary <- renderPrint({ .train_summary_print("M5Rules") })
+    # METHOD * svmRadial ---------------------------------------------------------------------------------------------------------------------------
+    getSvmRadialRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$svmRadial_Go, {
+      method <- "svmRadial"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getSvmRadialRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$svmRadial_Load, {
+      method <- "svmRadial"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$svmRadial_Delete, { .forget_model("svmRadial") })
+    
+    output$svmRadial_MethodSummary <- renderText({ description("svmRadial") })
+    output$svmRadial_Metrics <- renderTable({ getBestMetricRow("svmRadial") })
+    output$svmRadial_ModelTune <- renderPlot({ mod <- models[["svmRadial"]]; req(mod); plot(mod) })
+    output$svmRadial_RecipePrint <- renderUI({ .recipe_print_ui("svmRadial") })
+    output$svmRadial_RecipeOutput <- renderTable({ .recipe_summary_table("svmRadial") })
+    output$svmRadial_TrainSummary <- renderPrint({ .train_summary_print("svmRadial") })
+    # METHOD * krlsRadial ---------------------------------------------------------------------------------------------------------------------------
+    getKrlsRadialRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$krlsRadial_Go, {
+      method <- "krlsRadial"
+      if (!requireNamespace("KRLS", quietly = TRUE)) {
+        showNotification(paste("Package", "KRLS", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getKrlsRadialRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$krlsRadial_Load, {
+      method <- "krlsRadial"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$krlsRadial_Delete, { .forget_model("krlsRadial") })
+    
+    output$krlsRadial_MethodSummary <- renderText({ description("krlsRadial") })
+    output$krlsRadial_Metrics <- renderTable({ getBestMetricRow("krlsRadial") })
+    output$krlsRadial_ModelTune <- renderPlot({ mod <- models[["krlsRadial"]]; req(mod); plot(mod) })
+    output$krlsRadial_RecipePrint <- renderUI({ .recipe_print_ui("krlsRadial") })
+    output$krlsRadial_RecipeOutput <- renderTable({ .recipe_summary_table("krlsRadial") })
+    output$krlsRadial_TrainSummary <- renderPrint({ .train_summary_print("krlsRadial") })
+    # METHOD * ranger ---------------------------------------------------------------------------------------------------------------------------
+    getRangerRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$ranger_Go, {
+      method <- "ranger"
+      
+      if (!requireNamespace("ranger", quietly = TRUE)) {
+        showNotification(paste("Package", "ranger", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getRangerRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.omit)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$ranger_Load, {
+      method <- "ranger"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$ranger_Delete, { .forget_model("ranger") })
+    
+    output$ranger_MethodSummary <- renderText({ description("ranger") })
+    output$ranger_Metrics <- renderTable({ getBestMetricRow("ranger") })
+    output$ranger_ModelTune <- renderPlot({ mod <- models[["ranger"]]; req(mod); plot(mod) })
+    output$ranger_RecipePrint <- renderUI({ .recipe_print_ui("ranger") })
+    output$ranger_RecipeOutput <- renderTable({ .recipe_summary_table("ranger") })
+    output$ranger_TrainSummary <- renderPrint({ .train_summary_print("ranger") })
+    # METHOD * rf ---------------------------------------------------------------------------------------------------------------------------
+    getRfRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$rf_Go, {
+      method <- "rf"
+      if (!requireNamespace("randomForest", quietly = TRUE)) {
+        showNotification(paste("Package", "randomForest", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getRfRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$rf_Load, {
+      method <- "rf"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$rf_Delete, { .forget_model("rf") })
+    
+    output$rf_MethodSummary <- renderText({ description("rf") })
+    output$rf_Metrics <- renderTable({ getBestMetricRow("rf") })
+    output$rf_ModelTune <- renderPlot({ mod <- models[["rf"]]; req(mod); plot(mod) })
+    output$rf_RecipePrint <- renderUI({ .recipe_print_ui("rf") })
+    output$rf_RecipeOutput <- renderTable({ .recipe_summary_table("rf") })
+    output$rf_TrainSummary <- renderPrint({ .train_summary_print("rf") })
+    # METHOD * gbm ---------------------------------------------------------------------------------------------------------------------------
+    getGbmRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$gbm_Go, {
+      method <- "gbm"
+      if (!requireNamespace("gbm", quietly = TRUE)) {
+        showNotification(paste("Package", "gbm", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getGbmRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass, verbose = FALSE)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$gbm_Load, {
+      method <- "gbm"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$gbm_Delete, { .forget_model("gbm") })
+    
+    output$gbm_MethodSummary <- renderText({ description("gbm") })
+    output$gbm_Metrics <- renderTable({ getBestMetricRow("gbm") })
+    output$gbm_ModelTune <- renderPlot({ mod <- models[["gbm"]]; req(mod); plot(mod) })
+    output$gbm_RecipePrint <- renderUI({ .recipe_print_ui("gbm") })
+    output$gbm_RecipeOutput <- renderTable({ .recipe_summary_table("gbm") })
+    output$gbm_TrainSummary <- renderPrint({ .train_summary_print("gbm") })
+    # METHOD * xgbTree ---------------------------------------------------------------------------------------------------------------------------
+    getXgbTreeRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$xgbTree_Go, {
+      method <- "xgbTree"
+      if (!requireNamespace("xgboost", quietly = TRUE)) {
+        showNotification(paste("Package", "xgboost", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getXgbTreeRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.pass)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$xgbTree_Load, {
+      method <- "xgbTree"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$xgbTree_Delete, { .forget_model("xgbTree") })
+    
+    output$xgbTree_MethodSummary <- renderText({ description("xgbTree") })
+    output$xgbTree_Metrics <- renderTable({ getBestMetricRow("xgbTree") })
+    output$xgbTree_ModelTune <- renderPlot({ mod <- models[["xgbTree"]]; req(mod); plot(mod) })
+    output$xgbTree_RecipePrint <- renderUI({ .recipe_print_ui("xgbTree") })
+    output$xgbTree_RecipeOutput <- renderTable({ .recipe_summary_table("xgbTree") })
+    output$xgbTree_TrainSummary <- renderPrint({ .train_summary_print("xgbTree") })
+    # METHOD * bagEarth ---------------------------------------------------------------------------------------------------------------------------
+    getBagEarthRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$bagEarth_Go, {
+      method <- "bagEarth"
+      if (!requireNamespace("earth", quietly = TRUE)) {
+        showNotification(paste("Package", "earth", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getBagEarthRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.fail)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$bagEarth_Load, {
+      method <- "bagEarth"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$bagEarth_Delete, { .forget_model("bagEarth") })
+    
+    output$bagEarth_MethodSummary <- renderText({ description("bagEarth") })
+    output$bagEarth_Metrics <- renderTable({ getBestMetricRow("bagEarth") })
+    output$bagEarth_ModelTune <- renderPlot({ mod <- models[["bagEarth"]]; req(mod); plot(mod) })
+    output$bagEarth_RecipePrint <- renderUI({ .recipe_print_ui("bagEarth") })
+    output$bagEarth_RecipeOutput <- renderTable({ .recipe_summary_table("bagEarth") })
+    output$bagEarth_TrainSummary <- renderPrint({ .train_summary_print("bagEarth") })
+    # METHOD * earth ---------------------------------------------------------------------------------------------------------------------------
+    getEarthRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date"))
+    })
+    
+    observeEvent(input$earth_Go, {
+      method <- "earth"
+      if (!requireNamespace("earth", quietly = TRUE)) {
+        showNotification(paste("Package", "earth", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          model <- caret::train(getEarthRecipe(), data = getTrainData(), method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), na.action = na.fail)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$earth_Load, {
+      method <- "earth"
+      model <- loadRds(method, session)
+      if (!is.null(model)) models[[method]] <- model
+    })
+    
+    observeEvent(input$earth_Delete, { .forget_model("earth") })
+    
+    output$earth_MethodSummary <- renderText({ description("earth") })
+    output$earth_Metrics <- renderTable({ getBestMetricRow("earth") })
+    output$earth_ModelTune <- renderPlot({ mod <- models[["earth"]]; req(mod); plot(mod) })
+    output$earth_RecipePrint <- renderUI({ .recipe_print_ui("earth") })
+    output$earth_RecipeOutput <- renderTable({ .recipe_summary_table("earth") })
+    output$earth_TrainSummary <- renderPrint({ .train_summary_print("earth") })
+            # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
     library(pls)  #  <------ Declare any modelling packages that are needed (see Method List tab)
     
     # reactive getPlsRecipe ----
@@ -3368,6 +4100,7 @@ server <- function(input, output, session) {
                                 tuneLength = getTuneLength(), na.action = na.pass)
           })
           training_times[[method]] <- timing[["elapsed"]]
+          model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -3460,8 +4193,13 @@ server <- function(input, output, session) {
       method <- "pls"
       mod <- models[[method]]
       req(mod)
-      if (!is.null(training_times[[method]])) {
-        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      elapsed <- if (!is.null(training_times[[method]])) {
+        training_times[[method]]
+      } else {
+        mod$trainingTimeSeconds
+      }
+      if (!is.null(elapsed)) {
+        cat("Training time:", round(elapsed, 2), "seconds\n\n")
       }
       print(mod)
     })
@@ -3502,6 +4240,7 @@ server <- function(input, output, session) {
                                 tuneLength = getTuneLength(), na.action = na.rpart)  #<- note the rpart-specific value for na.action (not needed for other methods)
           })
           training_times[[method]] <- timing[["elapsed"]]
+          model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
           deleteRds(method)
           saveToRds(model, method)
           models[[method]] <- model
@@ -3603,8 +4342,13 @@ server <- function(input, output, session) {
       method <- "rpart"
       mod <- models[[method]]
       req(mod)
-      if (!is.null(training_times[[method]])) {
-        cat("Training time:", round(training_times[[method]], 2), "seconds\n\n")
+      elapsed <- if (!is.null(training_times[[method]])) {
+        training_times[[method]]
+      } else {
+        mod$trainingTimeSeconds
+      }
+      if (!is.null(elapsed)) {
+        cat("Training time:", round(elapsed, 2), "seconds\n\n")
       }
       print(mod)
     })
@@ -3631,6 +4375,15 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
+
+
+
+
+
+
+
+
 
 
 
