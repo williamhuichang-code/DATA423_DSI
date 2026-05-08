@@ -3623,9 +3623,8 @@ server <- function(input, output, session) {
     # METHOD * krlsRadial ---------------------------------------------------------------------------------------------------------------------------
     getKrlsRadialRecipe <- reactive({
       form <- formula(Response ~ .)
-      krls_steps <- setdiff(getSelectedPreprocess(), c("interact", "poly", "pca", "pls", "ica"))
       recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(krls_steps, getPreprocessConfig()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
         step_rm(has_type("date")) %>%
         step_zv(all_predictors()) %>%
         step_nzv(all_predictors())
