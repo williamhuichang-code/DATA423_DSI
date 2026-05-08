@@ -57,8 +57,8 @@ potential_outliers <- c(
 
 
 # default preprocessing selections shown in each method's dropdown (make sure to set these to my best recommendation)
-general_initial <- c("impute_median", "month", "dow", "dateDecimal",
-                     "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
+general_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                     "other", "YeoJohnson", "dummy", "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
                     "other", "YeoJohnson", "dummy", "interact", "lincomb",
@@ -1565,7 +1565,7 @@ ui <- fluidPage(
              checkboxInput(inputId = "Notch", label = "Show notch", value = FALSE),
              checkboxInput(inputId = "NullNormalise", label = "Normalise", value = TRUE),
              checkboxInput(inputId = "HideWorse", label = "Hide models worse than null model", value = TRUE),
-             plotOutput(outputId = "SelectionBoxPlot", height = "650px"),
+             plotOutput(outputId = "SelectionBoxPlot", height = "760px"),
              radioButtons(inputId = "Choice", label = "Model choice", choices = c(""), inline = TRUE )
     ),
     tabPanel("Performance",
@@ -2842,7 +2842,7 @@ server <- function(input, output, session) {
     # output SelectionBoxPlot (plot) ----
     output$SelectionBoxPlot <- renderPlot({
       mod <- getResamples()
-      bwplot(mod, notch = input$Notch)
+      bwplot(mod, notch = input$Notch, ylab = "Model", scales = list(y = list(cex = 1.25, font = 2)), par.settings = list(axis.text = list(cex = 1.1), par.ylab.text = list(cex = 1.15, font = 2), strip.background = list(col = "#f2f2f2"), strip.border = list(col = "#555555"), par.strip.text = list(cex = 1.05, font = 2)))
     })
     
     # output Title (UI) ----
@@ -3640,6 +3640,7 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
 
 
 
