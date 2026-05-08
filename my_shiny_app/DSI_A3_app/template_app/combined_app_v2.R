@@ -1579,8 +1579,6 @@ ui <- fluidPage(
                                 )
                               )
                      ),
-                     model_tab_panel("enet", "enet"),
-                     model_tab_panel("relaxo", "relaxo"),
                      model_tab_panel("cubist", "cubist"),
                      model_tab_panel("M5", "M5"),
                      model_tab_panel("M5Rules", "M5Rules"),
@@ -2895,12 +2893,21 @@ server <- function(input, output, session) {
       tags$h3(paste("Unseen data results for chosen model:", input$Choice))
     })
     
-    # reactive getTestResults ----
+    .predict_model <- function(mod, dat) {
+      if (!is.null(mod$preppedRecipe)) {
+        baked <- recipes::bake(mod$preppedRecipe, new_data = dat)
+        x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+        x <- x[, sapply(x, is.numeric), drop = FALSE]
+        return(predict(mod, newdata = as.matrix(x)))
+      }
+      predict(mod, newdata = dat)
+    }
+        # reactive getTestResults ----
     getTestResults <- reactive({
       dat <- getTestData()
       req(input$Choice)
       mod <- models[[input$Choice]]
-      predictions <- predict(mod, newdata = dat)
+      predictions <- .predict_model(mod, dat)
       d <- data.frame(dat$Response, predictions, row.names = rownames(dat))
       colnames(d) <- c("obs", "pred")
       d
@@ -2911,7 +2918,7 @@ server <- function(input, output, session) {
       dat <- getTrainData()
       req(input$Choice)
       mod <- models[[input$Choice]]
-      predictions <- predict(mod, newdata = dat)
+      predictions <- .predict_model(mod, dat)
       d <- data.frame(dat$Response, predictions, row.names = rownames(dat))
       colnames(d) <- c("obs", "pred")
       d
@@ -3409,108 +3416,6 @@ server <- function(input, output, session) {
     # METHOD * additional candidates -----------------------------------------------------------------------------------------------------------
     # These model blocks are intentionally explicit so model-specific failures point to the model being trained.
 
-    # METHOD * enet ---------------------------------------------------------------------------------------------------------------------------
-    getEnetRecipe <- reactive({
-      form <- formula(Response ~ .)
-      recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date"))
-    })
-    
-    observeEvent(input$enet_Go, {
-      method <- "enet"
-      if (!requireNamespace("elasticnet", quietly = TRUE)) {
-        showNotification(paste("Package", "elasticnet", "is required before training", method, "."),
-                         type = "error", duration = 6)
-        return(NULL)
-      }
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        timing <- system.time({
-          set.seed(getTrainSeed())
-          model <- caret::train(getEnetRecipe(), data = getTrainData(), method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength(), na.action = na.pass)
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
-      })
-    })
-    
-    observeEvent(input$enet_Load, {
-      method <- "enet"
-      model <- loadRds(method, session)
-      if (!is.null(model)) models[[method]] <- model
-    })
-    
-    observeEvent(input$enet_Delete, { .forget_model("enet") })
-    
-    output$enet_MethodSummary <- renderText({ description("enet") })
-    output$enet_Metrics <- renderTable({ getBestMetricRow("enet") })
-    output$enet_ModelTune <- renderPlot({ mod <- models[["enet"]]; req(mod); plot(mod) })
-    output$enet_RecipePrint <- renderUI({ .recipe_print_ui("enet") })
-    output$enet_RecipeOutput <- renderTable({ .recipe_summary_table("enet") })
-    output$enet_TrainSummary <- renderPrint({ .train_summary_print("enet") })
-    # METHOD * relaxo ---------------------------------------------------------------------------------------------------------------------------
-    getRelaxoRecipe <- reactive({
-      form <- formula(Response ~ .)
-      recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date"))
-    })
-    
-    observeEvent(input$relaxo_Go, {
-      method <- "relaxo"
-      if (!requireNamespace("relaxo", quietly = TRUE)) {
-        showNotification(paste("Package", "relaxo", "is required before training", method, "."),
-                         type = "error", duration = 6)
-        return(NULL)
-      }
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        timing <- system.time({
-          set.seed(getTrainSeed())
-          model <- caret::train(getRelaxoRecipe(), data = getTrainData(), method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength(), na.action = na.pass)
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
-      })
-    })
-    
-    observeEvent(input$relaxo_Load, {
-      method <- "relaxo"
-      model <- loadRds(method, session)
-      if (!is.null(model)) models[[method]] <- model
-    })
-    
-    observeEvent(input$relaxo_Delete, { .forget_model("relaxo") })
-    
-    output$relaxo_MethodSummary <- renderText({ description("relaxo") })
-    output$relaxo_Metrics <- renderTable({ getBestMetricRow("relaxo") })
-    output$relaxo_ModelTune <- renderPlot({ mod <- models[["relaxo"]]; req(mod); plot(mod) })
-    output$relaxo_RecipePrint <- renderUI({ .recipe_print_ui("relaxo") })
-    output$relaxo_RecipeOutput <- renderTable({ .recipe_summary_table("relaxo") })
-    output$relaxo_TrainSummary <- renderPrint({ .train_summary_print("relaxo") })
     # METHOD * cubist ---------------------------------------------------------------------------------------------------------------------------
     getCubistRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3718,9 +3623,12 @@ server <- function(input, output, session) {
     # METHOD * krlsRadial ---------------------------------------------------------------------------------------------------------------------------
     getKrlsRadialRecipe <- reactive({
       form <- formula(Response ~ .)
+      krls_steps <- setdiff(getSelectedPreprocess(), c("interact", "poly", "pca", "pls", "ica"))
       recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date"))
+        dynamicSteps(krls_steps, getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
     })
     
     observeEvent(input$krlsRadial_Go, {
@@ -3731,17 +3639,29 @@ server <- function(input, output, session) {
         return(NULL)
       }
       models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
       obj <- startMode(input$Parallel)
       tryCatch({
         timing <- system.time({
           set.seed(getTrainSeed())
-          model <- caret::train(getKrlsRadialRecipe(), data = getTrainData(), method = method,
+          rec <- getKrlsRadialRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
                                 metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength(), na.action = na.pass)
+                                tuneLength = getTuneLength())
         })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
@@ -3765,8 +3685,7 @@ server <- function(input, output, session) {
     output$krlsRadial_ModelTune <- renderPlot({ mod <- models[["krlsRadial"]]; req(mod); plot(mod) })
     output$krlsRadial_RecipePrint <- renderUI({ .recipe_print_ui("krlsRadial") })
     output$krlsRadial_RecipeOutput <- renderTable({ .recipe_summary_table("krlsRadial") })
-    output$krlsRadial_TrainSummary <- renderPrint({ .train_summary_print("krlsRadial") })
-    # METHOD * ranger ---------------------------------------------------------------------------------------------------------------------------
+    output$krlsRadial_TrainSummary <- renderPrint({ .train_summary_print("krlsRadial") })    # METHOD * ranger ---------------------------------------------------------------------------------------------------------------------------
     getRangerRecipe <- reactive({
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
