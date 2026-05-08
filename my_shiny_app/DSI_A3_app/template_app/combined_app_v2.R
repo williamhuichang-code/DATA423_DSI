@@ -2898,7 +2898,17 @@ server <- function(input, output, session) {
         baked <- recipes::bake(mod$preppedRecipe, new_data = dat)
         x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
         x <- x[, sapply(x, is.numeric), drop = FALSE]
-        return(predict(mod, newdata = as.matrix(x)))
+        x <- as.matrix(x)
+        if (!is.null(mod$bakedFeatureNames)) {
+          colnames(x) <- make.names(colnames(x), unique = TRUE)
+          missing_cols <- setdiff(mod$bakedFeatureNames, colnames(x))
+          for (m in missing_cols) {
+            x <- cbind(x, 0)
+            colnames(x)[ncol(x)] <- m
+          }
+          x <- x[, mod$bakedFeatureNames, drop = FALSE]
+        }
+        return(predict(mod, newdata = x))
       }
       predict(mod, newdata = dat)
     }
@@ -3661,6 +3671,7 @@ server <- function(input, output, session) {
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$recipe <- prep_rec
         model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
@@ -3726,6 +3737,7 @@ server <- function(input, output, session) {
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$recipe <- prep_rec
         model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
@@ -3830,10 +3842,9 @@ server <- function(input, output, session) {
           y <- baked$Response
           x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
           x <- x[, sapply(x, is.numeric), drop = FALSE]
-          ok <- complete.cases(x, y)
-          x <- as.matrix(x[ok, , drop = FALSE])
-          y <- y[ok]
-          req(nrow(x) > 5, ncol(x) > 0)
+          x <- as.matrix(x)
+          colnames(x) <- make.names(colnames(x), unique = TRUE)
+          req(nrow(x) > 5, ncol(x) > 0, length(y) == nrow(x))
           model <- caret::train(x = x, y = y, method = method,
                                 metric = "RMSE", trControl = getTrControl(),
                                 tuneLength = getTuneLength(), verbose = FALSE)
@@ -3842,6 +3853,7 @@ server <- function(input, output, session) {
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$recipe <- prep_rec
         model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
@@ -3871,7 +3883,9 @@ server <- function(input, output, session) {
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
         dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date"))
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
     })
     
     observeEvent(input$xgbTree_Go, {
@@ -3882,17 +3896,82 @@ server <- function(input, output, session) {
         return(NULL)
       }
       models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
       obj <- startMode(input$Parallel)
       tryCatch({
         timing <- system.time({
           set.seed(getTrainSeed())
-          model <- caret::train(getXgbTreeRecipe(), data = getTrainData(), method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength(), na.action = na.pass)
+          rec <- getXgbTreeRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          x <- as.matrix(x)
+          colnames(x) <- make.names(colnames(x), unique = TRUE)
+          x[!is.finite(x)] <- NA_real_
+          x[is.na(x)] <- 0
+          req(nrow(x) > 5, ncol(x) > 0, length(y) == nrow(x))
+          ctrl <- getTrControl()
+          ctrl$allowParallel <- FALSE
+          tune_grid <- expand.grid(
+            nrounds = c(400, 800, 1200),
+            max_depth = c(2, 3, 4),
+            eta = c(0.03, 0.05, 0.10),
+            gamma = 0,
+            colsample_bytree = 0.8,
+            min_child_weight = 1,
+            subsample = 0.8
+          )
+          xgb_tree_model <- list(
+            label = "eXtreme Gradient Boosting",
+            library = "xgboost",
+            type = "Regression",
+            parameters = data.frame(
+              parameter = c("nrounds", "max_depth", "eta", "gamma", "colsample_bytree", "min_child_weight", "subsample"),
+              class = rep("numeric", 7),
+              label = c("# Boosting Iterations", "Max Tree Depth", "Shrinkage", "Minimum Loss Reduction",
+                        "Subsample Ratio of Columns", "Minimum Sum of Instance Weight", "Subsample Percentage"),
+              stringsAsFactors = FALSE
+            ),
+            grid = function(x, y, len = NULL, search = "grid") tune_grid,
+            fit = function(x, y, wts, param, lev, last, classProbs, ...) {
+              dtrain <- xgboost::xgb.DMatrix(data = as.matrix(x), label = y)
+              params <- list(
+                objective = "reg:squarederror",
+                eta = param$eta,
+                max_depth = as.integer(param$max_depth),
+                gamma = param$gamma,
+                colsample_bytree = param$colsample_bytree,
+                min_child_weight = param$min_child_weight,
+                subsample = param$subsample,
+                nthread = 1
+              )
+              booster <- xgboost::xgb.train(
+                params = params,
+                data = dtrain,
+                nrounds = as.integer(param$nrounds),
+                verbose = 0
+              )
+              list(booster = booster, xNames = colnames(x))
+            },
+            predict = function(modelFit, newdata, submodels = NULL) {
+              dtest <- xgboost::xgb.DMatrix(data = as.matrix(newdata))
+              predict(modelFit$booster, dtest)
+            },
+            prob = NULL,
+            sort = function(x) x[order(x$nrounds, x$max_depth, x$eta), ],
+            levels = function(x) NULL
+          )
+          model <- caret::train(x = x, y = y, method = xgb_tree_model,
+                                metric = "RMSE", trControl = ctrl,
+                                tuneGrid = tune_grid)
         })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
         deleteRds(method)
         saveToRds(model, method)
         models[[method]] <- model
@@ -3913,7 +3992,20 @@ server <- function(input, output, session) {
     
     output$xgbTree_MethodSummary <- renderText({ description("xgbTree") })
     output$xgbTree_Metrics <- renderTable({ getBestMetricRow("xgbTree") })
-    output$xgbTree_ModelTune <- renderPlot({ mod <- models[["xgbTree"]]; req(mod); plot(mod) })
+    output$xgbTree_ModelTune <- renderPlot({
+      mod <- models[["xgbTree"]]
+      req(mod)
+      d <- mod$results
+      req(nrow(d) > 0)
+      d$Depth <- factor(d$max_depth)
+      d$Eta <- factor(d$eta)
+      ggplot(d, aes(x = nrounds, y = RMSE, color = Depth, group = interaction(Depth, Eta))) +
+        geom_line() +
+        geom_point(size = 2) +
+        facet_wrap(~ Eta, labeller = label_both) +
+        labs(title = "xgbTree tuning", x = "Boosting rounds", y = "RMSE", color = "Max depth") +
+        theme_minimal(base_size = 13)
+    })
     output$xgbTree_RecipePrint <- renderUI({ .recipe_print_ui("xgbTree") })
     output$xgbTree_RecipeOutput <- renderTable({ .recipe_summary_table("xgbTree") })
     output$xgbTree_TrainSummary <- renderPrint({ .train_summary_print("xgbTree") })
@@ -4321,6 +4413,11 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
+
+
+
+
 
 
 
