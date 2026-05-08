@@ -1447,52 +1447,7 @@ ui <- fluidPage(
                               )
                      ),
                      
-                     tabPanel("BRNN", value = "brnn",
-                              br(),
-                              tabsetPanel(
-                                type = "tabs",
-                                tabPanel("Summary",
-                                         verbatimTextOutput(outputId = "brnn_MethodSummary"),
-                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                         tableOutput(outputId = "brnn_Metrics")
-                                ),
-                                tabPanel("Tuning",
-                                         plotOutput(outputId = "brnn_ModelTune", height = "650px")
-                                ),
-                                tabPanel("Recipe",
-                                         htmlOutput(outputId = "brnn_RecipePrint"),
-                                         tableOutput(outputId = "brnn_RecipeOutput")
-                                ),
-                                tabPanel("Model Output",
-                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                         verbatimTextOutput(outputId = "brnn_TrainSummary")
-                                )
-                              )
-                     ),
-                     
-                     tabPanel("avNNet", value = "avNNet",
-                              br(),
-                              tabsetPanel(
-                                type = "tabs",
-                                tabPanel("Summary",
-                                         verbatimTextOutput(outputId = "avNNet_MethodSummary"),
-                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                         tableOutput(outputId = "avNNet_Metrics")
-                                ),
-                                tabPanel("Tuning",
-                                         plotOutput(outputId = "avNNet_ModelTune", height = "650px")
-                                ),
-                                tabPanel("Recipe",
-                                         htmlOutput(outputId = "avNNet_RecipePrint"),
-                                         tableOutput(outputId = "avNNet_RecipeOutput")
-                                ),
-                                tabPanel("Model Output",
-                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                         verbatimTextOutput(outputId = "avNNet_TrainSummary")
-                                )
-                              )
-                     ),
-                                          tabPanel("PLS", value = "pls",
+                     tabPanel("PLS", value = "pls",
                               br(),
                               tabsetPanel(
                                 type = "tabs",
@@ -1552,13 +1507,58 @@ ui <- fluidPage(
                                          )
                                 )
                               )
-                     )
+                     ), 
+                     
+                     tabPanel("BRNN", value = "brnn",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "brnn_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "brnn_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "brnn_ModelTune", height = "650px")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "brnn_RecipePrint"),
+                                         tableOutput(outputId = "brnn_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         verbatimTextOutput(outputId = "brnn_TrainSummary")
+                                )
+                              )
+                     ),
+                     
+                     tabPanel("avNNet", value = "avNNet",
+                              br(),
+                              tabsetPanel(
+                                type = "tabs",
+                                tabPanel("Summary",
+                                         verbatimTextOutput(outputId = "avNNet_MethodSummary"),
+                                         h4("Resampled performance", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         tableOutput(outputId = "avNNet_Metrics")
+                                ),
+                                tabPanel("Tuning",
+                                         plotOutput(outputId = "avNNet_ModelTune", height = "650px")
+                                ),
+                                tabPanel("Recipe",
+                                         htmlOutput(outputId = "avNNet_RecipePrint"),
+                                         tableOutput(outputId = "avNNet_RecipeOutput")
+                                ),
+                                tabPanel("Model Output",
+                                         h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                         verbatimTextOutput(outputId = "avNNet_TrainSummary")
+                                )
+                              )
+                     ),
                    )
                  )
                )
              )
     ),
-    
     
     tabPanel("Model Selection",
              tags$h5("Cross validation results:"),
@@ -3205,9 +3205,23 @@ server <- function(input, output, session) {
     
     # METHOD * neural networks ----------------------------------------------------------------------------------------------------------------
     # These candidates use the shared general controls by default.
-    .fit_caret_model <- function(method, recipe_obj, na_action = na.pass) {
-      caret::train(recipe_obj, data = getTrainData(), method = method, metric = "RMSE",
-                   trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na_action)
+    .train_and_store <- function(method, train_expr) {
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          model <- force(train_expr)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
     }
     
     .recipe_summary_table <- function(method) {
@@ -3267,25 +3281,13 @@ server <- function(input, output, session) {
     
     observeEvent(input$brnn_Go, {
       method <- "brnn"
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        if (!requireNamespace("brnn", quietly = TRUE)) {
-          showNotification("Package brnn is required before training brnn.", type = "error", duration = 6)
-          return(NULL)
-        }
-        timing <- system.time({
-          model <- .fit_caret_model(method, getBrnnRecipe())
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
+      if (!requireNamespace("brnn", quietly = TRUE)) {
+        showNotification("Package brnn is required before training brnn.", type = "error", duration = 6)
+        return(NULL)
+      }
+      .train_and_store(method, {
+        caret::train(getBrnnRecipe(), data = getTrainData(), method = method, metric = "RMSE",
+                     trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na.pass)
       })
     })
     
@@ -3314,25 +3316,14 @@ server <- function(input, output, session) {
     
     observeEvent(input$avNNet_Go, {
       method <- "avNNet"
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using resampling"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        if (!requireNamespace("nnet", quietly = TRUE)) {
-          showNotification("Package nnet is required before training avNNet.", type = "error", duration = 6)
-          return(NULL)
-        }
-        timing <- system.time({
-          model <- .fit_caret_model(method, getAvNNetRecipe())
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
+      if (!requireNamespace("nnet", quietly = TRUE)) {
+        showNotification("Package nnet is required before training avNNet.", type = "error", duration = 6)
+        return(NULL)
+      }
+      .train_and_store(method, {
+        caret::train(getAvNNetRecipe(), data = getTrainData(), method = method, metric = "RMSE",
+                     trControl = getTrControl(), tuneLength = getTuneLength(), na.action = na.pass,
+                     linout = TRUE, trace = FALSE, maxit = 1000, MaxNWts = 10000)
       })
     })
     
@@ -3640,6 +3631,9 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
+
+
 
 
 
