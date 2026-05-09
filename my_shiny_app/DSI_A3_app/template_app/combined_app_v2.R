@@ -1534,6 +1534,11 @@ ui <- fluidPage(
                               )
                      ), 
                      
+
+                     model_tab_panel("lmStepAIC", "lmStepAIC"),
+                     model_tab_panel("rlm", "rlm"),
+                     model_tab_panel("xgbLinear", "xgbLinear"),
+                     
                      tabPanel("BRNN", value = "brnn",
                               br(),
                               tabsetPanel(
@@ -1579,17 +1584,36 @@ ui <- fluidPage(
                                 )
                               )
                      ),
+                     model_tab_panel("nnet", "nnet"),
+                     model_tab_panel("mlpWeightDecay", "mlpWeightDecay"),
+                     model_tab_panel("monotonic", "monmlp", "monmlp"),
                      model_tab_panel("cubist", "cubist"),
                      model_tab_panel("M5", "M5"),
                      model_tab_panel("M5Rules", "M5Rules"),
+                     model_tab_panel("evtree", "evtree"),
                      model_tab_panel("svmRadial", "svmRadial"),
+                     model_tab_panel("svmRadialSigma", "svmRadialSigma"),
                      model_tab_panel("krlsRadial", "krlsRadial"),
+                     model_tab_panel("krlsPoly", "krlsPoly"),
+                     model_tab_panel("gaussprRadial", "gaussprRadial"),
+                     model_tab_panel("kernelpls", "kernelpls"),
+                     model_tab_panel("rvmLinear", "rvmLinear"),
+                     model_tab_panel("rvmRadial", "rvmRadial"),
+                     model_tab_panel("rvmPoly", "rvmPoly"),
+                     model_tab_panel("svmLinear", "svmLinear"),
+                     model_tab_panel("svmLinear2", "svmLinear2"),
+                     model_tab_panel("svmLinear3", "svmLinear3"),
                      model_tab_panel("ranger", "ranger"),
                      model_tab_panel("rf", "rf"),
+                     model_tab_panel("RRF", "RRF"),
+                     model_tab_panel("RRFglobal", "RRFglobal"),
+                     model_tab_panel("extraTrees", "extraTrees"),
+                     model_tab_panel("Rborist", "Rborist"),
                      model_tab_panel("gbm", "gbm"),
                      model_tab_panel("xgbTree", "xgbTree"),
                      model_tab_panel("bagEarth", "bagEarth"),
-                     model_tab_panel("earth", "earth")
+                     model_tab_panel("earth", "earth"),
+                     model_tab_panel("ppr", "ppr")
                    )
                  )
                )
@@ -2893,6 +2917,14 @@ server <- function(input, output, session) {
       tags$h3(paste("Unseen data results for chosen model:", input$Choice))
     })
     
+    .restore_prediction_scale <- function(mod, predictions) {
+      predictions <- as.numeric(predictions)
+      if (!is.null(mod$outcomeCenter) && !is.null(mod$outcomeScale)) {
+        predictions <- predictions * mod$outcomeScale + mod$outcomeCenter
+      }
+      predictions
+    }
+    
     .predict_model <- function(mod, dat) {
       if (!is.null(mod$preppedRecipe)) {
         baked <- recipes::bake(mod$preppedRecipe, new_data = dat)
@@ -2908,9 +2940,9 @@ server <- function(input, output, session) {
           }
           x <- x[, mod$bakedFeatureNames, drop = FALSE]
         }
-        return(predict(mod, newdata = x))
+        return(.restore_prediction_scale(mod, predict(mod, newdata = x)))
       }
-      predict(mod, newdata = dat)
+      .restore_prediction_scale(mod, predict(mod, newdata = dat))
     }
         # reactive getTestResults ----
     getTestResults <- reactive({
@@ -4111,7 +4143,1388 @@ server <- function(input, output, session) {
     output$earth_RecipePrint <- renderUI({ .recipe_print_ui("earth") })
     output$earth_RecipeOutput <- renderTable({ .recipe_summary_table("earth") })
     output$earth_TrainSummary <- renderPrint({ .train_summary_print("earth") })
-            # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
+    # METHOD * lmStepAIC ---------------------------------------------------------------------------------------------------------------------------
+    getLmStepAICRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$lmStepAIC_Go, {
+      method <- "lmStepAIC"
+      if (!requireNamespace("MASS", quietly = TRUE)) {
+        showNotification(paste("Package", "MASS", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getLmStepAICRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.data.frame(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$lmStepAIC_Load, { method <- "lmStepAIC"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$lmStepAIC_Delete, { .forget_model("lmStepAIC") })
+    output$lmStepAIC_MethodSummary <- renderText({ description("lmStepAIC") })
+    output$lmStepAIC_Metrics <- renderTable({ getBestMetricRow("lmStepAIC") })
+    output$lmStepAIC_ModelTune <- renderPlot({ mod <- models[["lmStepAIC"]]; req(mod); plot(mod) })
+    output$lmStepAIC_RecipePrint <- renderUI({ .recipe_print_ui("lmStepAIC") })
+    output$lmStepAIC_RecipeOutput <- renderTable({ .recipe_summary_table("lmStepAIC") })
+    output$lmStepAIC_TrainSummary <- renderPrint({ .train_summary_print("lmStepAIC") })
+        # METHOD * rlm ---------------------------------------------------------------------------------------------------------------------------
+    getRlmRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$rlm_Go, {
+      method <- "rlm"
+      if (!requireNamespace("MASS", quietly = TRUE)) {
+        showNotification(paste("Package", "MASS", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRlmRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.data.frame(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$rlm_Load, { method <- "rlm"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$rlm_Delete, { .forget_model("rlm") })
+    output$rlm_MethodSummary <- renderText({ description("rlm") })
+    output$rlm_Metrics <- renderTable({ getBestMetricRow("rlm") })
+    output$rlm_ModelTune <- renderPlot({ mod <- models[["rlm"]]; req(mod); plot(mod) })
+    output$rlm_RecipePrint <- renderUI({ .recipe_print_ui("rlm") })
+    output$rlm_RecipeOutput <- renderTable({ .recipe_summary_table("rlm") })
+    output$rlm_TrainSummary <- renderPrint({ .train_summary_print("rlm") })
+        # METHOD * xgbLinear ---------------------------------------------------------------------------------------------------------------------------
+    getXgbLinearRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$xgbLinear_Go, {
+      method <- "xgbLinear"
+      if (!requireNamespace("xgboost", quietly = TRUE)) {
+        showNotification(paste("Package", "xgboost", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getXgbLinearRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          x <- as.matrix(x)
+          colnames(x) <- make.names(colnames(x), unique = TRUE)
+          x[!is.finite(x)] <- NA_real_
+          x[is.na(x)] <- 0
+          req(nrow(x) > 5, ncol(x) > 0, length(y) == nrow(x))
+          ctrl <- getTrControl()
+          ctrl$allowParallel <- FALSE
+          tune_grid <- expand.grid(
+            nrounds = c(100, 400),
+            lambda = c(0, 0.1, 1),
+            alpha = c(0, 0.5, 1),
+            eta = 0.05
+          )
+          xgb_linear_model <- list(
+            label = "eXtreme Gradient Boosted Linear Model",
+            library = "xgboost",
+            type = "Regression",
+            parameters = data.frame(
+              parameter = c("nrounds", "lambda", "alpha", "eta"),
+              class = rep("numeric", 4),
+              label = c("# Boosting Iterations", "L2 Regularization", "L1 Regularization", "Shrinkage"),
+              stringsAsFactors = FALSE
+            ),
+            grid = function(x, y, len = NULL, search = "grid") tune_grid,
+            fit = function(x, y, wts, param, lev, last, classProbs, ...) {
+              dtrain <- xgboost::xgb.DMatrix(data = as.matrix(x), label = y)
+              params <- list(
+                booster = "gblinear",
+                objective = "reg:squarederror",
+                eta = param$eta,
+                lambda = param$lambda,
+                alpha = param$alpha,
+                nthread = 1
+              )
+              booster <- xgboost::xgb.train(params = params, data = dtrain,
+                                            nrounds = as.integer(param$nrounds), verbose = 0)
+              list(booster = booster, xNames = colnames(x))
+            },
+            predict = function(modelFit, newdata, submodels = NULL) {
+              dtest <- xgboost::xgb.DMatrix(data = as.matrix(newdata))
+              predict(modelFit$booster, dtest)
+            },
+            prob = NULL,
+            sort = function(x) x[order(x$nrounds, x$lambda, x$alpha, x$eta), ],
+            levels = function(x) NULL
+          )
+          model <- caret::train(x = x, y = y, method = xgb_linear_model,
+                                metric = "RMSE", trControl = ctrl,
+                                tuneGrid = tune_grid)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$xgbLinear_Load, { method <- "xgbLinear"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$xgbLinear_Delete, { .forget_model("xgbLinear") })
+    output$xgbLinear_MethodSummary <- renderText({ description("xgbLinear") })
+    output$xgbLinear_Metrics <- renderTable({ getBestMetricRow("xgbLinear") })
+    output$xgbLinear_ModelTune <- renderPlot({
+      mod <- models[["xgbLinear"]]
+      req(mod)
+      d <- mod$results
+      req(nrow(d) > 0)
+      d$Alpha <- factor(d$alpha)
+      d$Lambda <- factor(d$lambda)
+      ggplot(d, aes(x = nrounds, y = RMSE, color = Alpha, group = interaction(Alpha, Lambda))) +
+        geom_line() +
+        geom_point(size = 2) +
+        facet_wrap(~ Lambda, labeller = label_both) +
+        labs(title = "xgbLinear tuning", x = "Boosting rounds", y = "RMSE", color = "Alpha") +
+        theme_minimal(base_size = 13)
+    })
+    output$xgbLinear_RecipePrint <- renderUI({ .recipe_print_ui("xgbLinear") })
+    output$xgbLinear_RecipeOutput <- renderTable({ .recipe_summary_table("xgbLinear") })
+    output$xgbLinear_TrainSummary <- renderPrint({ .train_summary_print("xgbLinear") })
+        # METHOD * gaussprRadial ---------------------------------------------------------------------------------------------------------------------------
+    getGaussprRadialRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$gaussprRadial_Go, {
+      method <- "gaussprRadial"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getGaussprRadialRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$gaussprRadial_Load, { method <- "gaussprRadial"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$gaussprRadial_Delete, { .forget_model("gaussprRadial") })
+    output$gaussprRadial_MethodSummary <- renderText({ description("gaussprRadial") })
+    output$gaussprRadial_Metrics <- renderTable({ getBestMetricRow("gaussprRadial") })
+    output$gaussprRadial_ModelTune <- renderPlot({ mod <- models[["gaussprRadial"]]; req(mod); plot(mod) })
+    output$gaussprRadial_RecipePrint <- renderUI({ .recipe_print_ui("gaussprRadial") })
+    output$gaussprRadial_RecipeOutput <- renderTable({ .recipe_summary_table("gaussprRadial") })
+    output$gaussprRadial_TrainSummary <- renderPrint({ .train_summary_print("gaussprRadial") })
+        # METHOD * svmLinear2 ---------------------------------------------------------------------------------------------------------------------------
+    getSvmLinear2Recipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$svmLinear2_Go, {
+      method <- "svmLinear2"
+      if (!requireNamespace("e1071", quietly = TRUE)) {
+        showNotification(paste("Package", "e1071", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getSvmLinear2Recipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$svmLinear2_Load, { method <- "svmLinear2"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$svmLinear2_Delete, { .forget_model("svmLinear2") })
+    output$svmLinear2_MethodSummary <- renderText({ description("svmLinear2") })
+    output$svmLinear2_Metrics <- renderTable({ getBestMetricRow("svmLinear2") })
+    output$svmLinear2_ModelTune <- renderPlot({ mod <- models[["svmLinear2"]]; req(mod); plot(mod) })
+    output$svmLinear2_RecipePrint <- renderUI({ .recipe_print_ui("svmLinear2") })
+    output$svmLinear2_RecipeOutput <- renderTable({ .recipe_summary_table("svmLinear2") })
+    output$svmLinear2_TrainSummary <- renderPrint({ .train_summary_print("svmLinear2") })
+        # METHOD * RRF ---------------------------------------------------------------------------------------------------------------------------
+    getRRFRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$RRF_Go, {
+      method <- "RRF"
+      if (!requireNamespace("RRF", quietly = TRUE)) {
+        showNotification(paste("Package", "RRF", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRRFRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$RRF_Load, { method <- "RRF"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$RRF_Delete, { .forget_model("RRF") })
+    output$RRF_MethodSummary <- renderText({ description("RRF") })
+    output$RRF_Metrics <- renderTable({ getBestMetricRow("RRF") })
+    output$RRF_ModelTune <- renderPlot({ mod <- models[["RRF"]]; req(mod); plot(mod) })
+    output$RRF_RecipePrint <- renderUI({ .recipe_print_ui("RRF") })
+    output$RRF_RecipeOutput <- renderTable({ .recipe_summary_table("RRF") })
+    output$RRF_TrainSummary <- renderPrint({ .train_summary_print("RRF") })
+        # METHOD * RRFglobal ---------------------------------------------------------------------------------------------------------------------------
+    getRRFglobalRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$RRFglobal_Go, {
+      method <- "RRFglobal"
+      if (!requireNamespace("RRF", quietly = TRUE)) {
+        showNotification(paste("Package", "RRF", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRRFglobalRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$RRFglobal_Load, { method <- "RRFglobal"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$RRFglobal_Delete, { .forget_model("RRFglobal") })
+    output$RRFglobal_MethodSummary <- renderText({ description("RRFglobal") })
+    output$RRFglobal_Metrics <- renderTable({ getBestMetricRow("RRFglobal") })
+    output$RRFglobal_ModelTune <- renderPlot({ mod <- models[["RRFglobal"]]; req(mod); plot(mod) })
+    output$RRFglobal_RecipePrint <- renderUI({ .recipe_print_ui("RRFglobal") })
+    output$RRFglobal_RecipeOutput <- renderTable({ .recipe_summary_table("RRFglobal") })
+    output$RRFglobal_TrainSummary <- renderPrint({ .train_summary_print("RRFglobal") })
+        # METHOD * evtree ---------------------------------------------------------------------------------------------------------------------------
+    getEvtreeRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$evtree_Go, {
+      method <- "evtree"
+      if (!requireNamespace("evtree", quietly = TRUE)) {
+        showNotification(paste("Package", "evtree", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getEvtreeRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.data.frame(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$evtree_Load, { method <- "evtree"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$evtree_Delete, { .forget_model("evtree") })
+    output$evtree_MethodSummary <- renderText({ description("evtree") })
+    output$evtree_Metrics <- renderTable({ getBestMetricRow("evtree") })
+    output$evtree_ModelTune <- renderPlot({ mod <- models[["evtree"]]; req(mod); plot(mod) })
+    output$evtree_RecipePrint <- renderUI({ .recipe_print_ui("evtree") })
+    output$evtree_RecipeOutput <- renderTable({ .recipe_summary_table("evtree") })
+    output$evtree_TrainSummary <- renderPrint({ .train_summary_print("evtree") })
+        # METHOD * nnet ---------------------------------------------------------------------------------------------------------------------------
+    getNnetRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$nnet_Go, {
+      method <- "nnet"
+      if (!requireNamespace("nnet", quietly = TRUE)) {
+        showNotification(paste("Package", "nnet", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getNnetRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          y_center <- mean(y, na.rm = TRUE)
+          y_scale <- stats::sd(y, na.rm = TRUE)
+          req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
+          y_train <- as.numeric((y - y_center) / y_scale)
+          model <- caret::train(x = x, y = y_train, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength(), trace = FALSE,
+                                maxit = 500, MaxNWts = 10000)
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$outcomeCenter <- y_center
+        model$outcomeScale <- y_scale
+        for (metric in c("RMSE", "MAE", "RMSESD", "MAESD")) {
+          if (metric %in% names(model$results)) model$results[[metric]] <- model$results[[metric]] * y_scale
+          if (!is.null(model$resample) && metric %in% names(model$resample)) model$resample[[metric]] <- model$resample[[metric]] * y_scale
+        }
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$nnet_Load, { method <- "nnet"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$nnet_Delete, { .forget_model("nnet") })
+    output$nnet_MethodSummary <- renderText({ description("nnet") })
+    output$nnet_Metrics <- renderTable({ getBestMetricRow("nnet") })
+    output$nnet_ModelTune <- renderPlot({ mod <- models[["nnet"]]; req(mod); plot(mod) })
+    output$nnet_RecipePrint <- renderUI({ .recipe_print_ui("nnet") })
+    output$nnet_RecipeOutput <- renderTable({ .recipe_summary_table("nnet") })
+    output$nnet_TrainSummary <- renderPrint({ .train_summary_print("nnet") })
+    # METHOD * svmRadialSigma ---------------------------------------------------------------------------------------------------------------------------
+    getSvmRadialSigmaRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$svmRadialSigma_Go, {
+      method <- "svmRadialSigma"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getSvmRadialSigmaRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          y_train <- y
+          model <- caret::train(x = x, y = y_train, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$svmRadialSigma_Load, { method <- "svmRadialSigma"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$svmRadialSigma_Delete, { .forget_model("svmRadialSigma") })
+    output$svmRadialSigma_MethodSummary <- renderText({ description("svmRadialSigma") })
+    output$svmRadialSigma_Metrics <- renderTable({ getBestMetricRow("svmRadialSigma") })
+    output$svmRadialSigma_ModelTune <- renderPlot({ mod <- models[["svmRadialSigma"]]; req(mod); plot(mod) })
+    output$svmRadialSigma_RecipePrint <- renderUI({ .recipe_print_ui("svmRadialSigma") })
+    output$svmRadialSigma_RecipeOutput <- renderTable({ .recipe_summary_table("svmRadialSigma") })
+    output$svmRadialSigma_TrainSummary <- renderPrint({ .train_summary_print("svmRadialSigma") })
+    # METHOD * rvmRadial ---------------------------------------------------------------------------------------------------------------------------
+    getRvmRadialRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$rvmRadial_Go, {
+      method <- "rvmRadial"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRvmRadialRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          y_train <- y
+          model <- caret::train(x = x, y = y_train, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$rvmRadial_Load, { method <- "rvmRadial"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$rvmRadial_Delete, { .forget_model("rvmRadial") })
+    output$rvmRadial_MethodSummary <- renderText({ description("rvmRadial") })
+    output$rvmRadial_Metrics <- renderTable({ getBestMetricRow("rvmRadial") })
+    output$rvmRadial_ModelTune <- renderPlot({ mod <- models[["rvmRadial"]]; req(mod); plot(mod) })
+    output$rvmRadial_RecipePrint <- renderUI({ .recipe_print_ui("rvmRadial") })
+    output$rvmRadial_RecipeOutput <- renderTable({ .recipe_summary_table("rvmRadial") })
+    output$rvmRadial_TrainSummary <- renderPrint({ .train_summary_print("rvmRadial") })
+    # METHOD * mlpWeightDecay ---------------------------------------------------------------------------------------------------------------------------
+    getMlpWeightDecayRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$mlpWeightDecay_Go, {
+      method <- "mlpWeightDecay"
+      if (!requireNamespace("RSNNS", quietly = TRUE)) {
+        showNotification(paste("Package", "RSNNS", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getMlpWeightDecayRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          y_center <- mean(y, na.rm = TRUE)
+          y_scale <- stats::sd(y, na.rm = TRUE)
+          req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
+          y_train <- as.numeric((y - y_center) / y_scale)
+          model <- caret::train(x = x, y = y_train, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$outcomeCenter <- y_center
+        model$outcomeScale <- y_scale
+        for (metric in c("RMSE", "MAE", "RMSESD", "MAESD")) {
+          if (metric %in% names(model$results)) model$results[[metric]] <- model$results[[metric]] * y_scale
+          if (!is.null(model$resample) && metric %in% names(model$resample)) model$resample[[metric]] <- model$resample[[metric]] * y_scale
+        }
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$mlpWeightDecay_Load, { method <- "mlpWeightDecay"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$mlpWeightDecay_Delete, { .forget_model("mlpWeightDecay") })
+    output$mlpWeightDecay_MethodSummary <- renderText({ description("mlpWeightDecay") })
+    output$mlpWeightDecay_Metrics <- renderTable({ getBestMetricRow("mlpWeightDecay") })
+    output$mlpWeightDecay_ModelTune <- renderPlot({ mod <- models[["mlpWeightDecay"]]; req(mod); plot(mod) })
+    output$mlpWeightDecay_RecipePrint <- renderUI({ .recipe_print_ui("mlpWeightDecay") })
+    output$mlpWeightDecay_RecipeOutput <- renderTable({ .recipe_summary_table("mlpWeightDecay") })
+    output$mlpWeightDecay_TrainSummary <- renderPrint({ .train_summary_print("mlpWeightDecay") })
+    # METHOD * monmlp ---------------------------------------------------------------------------------------------------------------------------
+    getMonmlpRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$monmlp_Go, {
+      method <- "monmlp"
+      if (!requireNamespace("monmlp", quietly = TRUE)) {
+        showNotification(paste("Package", "monmlp", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getMonmlpRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          y_center <- mean(y, na.rm = TRUE)
+          y_scale <- stats::sd(y, na.rm = TRUE)
+          req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
+          y_train <- as.numeric((y - y_center) / y_scale)
+          model <- caret::train(x = x, y = y_train, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$outcomeCenter <- y_center
+        model$outcomeScale <- y_scale
+        for (metric in c("RMSE", "MAE", "RMSESD", "MAESD")) {
+          if (metric %in% names(model$results)) model$results[[metric]] <- model$results[[metric]] * y_scale
+          if (!is.null(model$resample) && metric %in% names(model$resample)) model$resample[[metric]] <- model$resample[[metric]] * y_scale
+        }
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$monmlp_Load, { method <- "monmlp"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$monmlp_Delete, { .forget_model("monmlp") })
+    output$monmlp_MethodSummary <- renderText({ description("monmlp") })
+    output$monmlp_Metrics <- renderTable({ getBestMetricRow("monmlp") })
+    output$monmlp_ModelTune <- renderPlot({ mod <- models[["monmlp"]]; req(mod); plot(mod) })
+    output$monmlp_RecipePrint <- renderUI({ .recipe_print_ui("monmlp") })
+    output$monmlp_RecipeOutput <- renderTable({ .recipe_summary_table("monmlp") })
+    output$monmlp_TrainSummary <- renderPrint({ .train_summary_print("monmlp") })
+    # METHOD * krlsPoly ---------------------------------------------------------------------------------------------------------------------------
+    getKrlsPolyRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$krlsPoly_Go, {
+      method <- "krlsPoly"
+      if (!requireNamespace("KRLS", quietly = TRUE)) {
+        showNotification(paste("Package", "KRLS", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getKrlsPolyRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$krlsPoly_Load, { method <- "krlsPoly"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$krlsPoly_Delete, { .forget_model("krlsPoly") })
+    output$krlsPoly_MethodSummary <- renderText({ description("krlsPoly") })
+    output$krlsPoly_Metrics <- renderTable({ getBestMetricRow("krlsPoly") })
+    output$krlsPoly_ModelTune <- renderPlot({ mod <- models[["krlsPoly"]]; req(mod); plot(mod) })
+    output$krlsPoly_RecipePrint <- renderUI({ .recipe_print_ui("krlsPoly") })
+    output$krlsPoly_RecipeOutput <- renderTable({ .recipe_summary_table("krlsPoly") })
+    output$krlsPoly_TrainSummary <- renderPrint({ .train_summary_print("krlsPoly") })
+    # METHOD * kernelpls ---------------------------------------------------------------------------------------------------------------------------
+    getKernelplsRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$kernelpls_Go, {
+      method <- "kernelpls"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getKernelplsRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$kernelpls_Load, { method <- "kernelpls"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$kernelpls_Delete, { .forget_model("kernelpls") })
+    output$kernelpls_MethodSummary <- renderText({ description("kernelpls") })
+    output$kernelpls_Metrics <- renderTable({ getBestMetricRow("kernelpls") })
+    output$kernelpls_ModelTune <- renderPlot({ mod <- models[["kernelpls"]]; req(mod); plot(mod) })
+    output$kernelpls_RecipePrint <- renderUI({ .recipe_print_ui("kernelpls") })
+    output$kernelpls_RecipeOutput <- renderTable({ .recipe_summary_table("kernelpls") })
+    output$kernelpls_TrainSummary <- renderPrint({ .train_summary_print("kernelpls") })
+    # METHOD * svmLinear ---------------------------------------------------------------------------------------------------------------------------
+    getSvmLinearRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$svmLinear_Go, {
+      method <- "svmLinear"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getSvmLinearRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$svmLinear_Load, { method <- "svmLinear"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$svmLinear_Delete, { .forget_model("svmLinear") })
+    output$svmLinear_MethodSummary <- renderText({ description("svmLinear") })
+    output$svmLinear_Metrics <- renderTable({ getBestMetricRow("svmLinear") })
+    output$svmLinear_ModelTune <- renderPlot({ mod <- models[["svmLinear"]]; req(mod); plot(mod) })
+    output$svmLinear_RecipePrint <- renderUI({ .recipe_print_ui("svmLinear") })
+    output$svmLinear_RecipeOutput <- renderTable({ .recipe_summary_table("svmLinear") })
+    output$svmLinear_TrainSummary <- renderPrint({ .train_summary_print("svmLinear") })
+    # METHOD * svmLinear3 ---------------------------------------------------------------------------------------------------------------------------
+    getSvmLinear3Recipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$svmLinear3_Go, {
+      method <- "svmLinear3"
+      if (!requireNamespace("LiblineaR", quietly = TRUE)) {
+        showNotification(paste("Package", "LiblineaR", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getSvmLinear3Recipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$svmLinear3_Load, { method <- "svmLinear3"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$svmLinear3_Delete, { .forget_model("svmLinear3") })
+    output$svmLinear3_MethodSummary <- renderText({ description("svmLinear3") })
+    output$svmLinear3_Metrics <- renderTable({ getBestMetricRow("svmLinear3") })
+    output$svmLinear3_ModelTune <- renderPlot({ mod <- models[["svmLinear3"]]; req(mod); plot(mod) })
+    output$svmLinear3_RecipePrint <- renderUI({ .recipe_print_ui("svmLinear3") })
+    output$svmLinear3_RecipeOutput <- renderTable({ .recipe_summary_table("svmLinear3") })
+    output$svmLinear3_TrainSummary <- renderPrint({ .train_summary_print("svmLinear3") })
+    # METHOD * rvmLinear ---------------------------------------------------------------------------------------------------------------------------
+    getRvmLinearRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$rvmLinear_Go, {
+      method <- "rvmLinear"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRvmLinearRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$rvmLinear_Load, { method <- "rvmLinear"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$rvmLinear_Delete, { .forget_model("rvmLinear") })
+    output$rvmLinear_MethodSummary <- renderText({ description("rvmLinear") })
+    output$rvmLinear_Metrics <- renderTable({ getBestMetricRow("rvmLinear") })
+    output$rvmLinear_ModelTune <- renderPlot({ mod <- models[["rvmLinear"]]; req(mod); plot(mod) })
+    output$rvmLinear_RecipePrint <- renderUI({ .recipe_print_ui("rvmLinear") })
+    output$rvmLinear_RecipeOutput <- renderTable({ .recipe_summary_table("rvmLinear") })
+    output$rvmLinear_TrainSummary <- renderPrint({ .train_summary_print("rvmLinear") })
+    # METHOD * rvmPoly ---------------------------------------------------------------------------------------------------------------------------
+    getRvmPolyRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$rvmPoly_Go, {
+      method <- "rvmPoly"
+      if (!requireNamespace("kernlab", quietly = TRUE)) {
+        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRvmPolyRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$rvmPoly_Load, { method <- "rvmPoly"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$rvmPoly_Delete, { .forget_model("rvmPoly") })
+    output$rvmPoly_MethodSummary <- renderText({ description("rvmPoly") })
+    output$rvmPoly_Metrics <- renderTable({ getBestMetricRow("rvmPoly") })
+    output$rvmPoly_ModelTune <- renderPlot({ mod <- models[["rvmPoly"]]; req(mod); plot(mod) })
+    output$rvmPoly_RecipePrint <- renderUI({ .recipe_print_ui("rvmPoly") })
+    output$rvmPoly_RecipeOutput <- renderTable({ .recipe_summary_table("rvmPoly") })
+    output$rvmPoly_TrainSummary <- renderPrint({ .train_summary_print("rvmPoly") })
+    # METHOD * extraTrees ---------------------------------------------------------------------------------------------------------------------------
+    getExtraTreesRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$extraTrees_Go, {
+      method <- "extraTrees"
+      if (!requireNamespace("extraTrees", quietly = TRUE)) {
+        showNotification(paste("Package", "extraTrees", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getExtraTreesRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$extraTrees_Load, { method <- "extraTrees"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$extraTrees_Delete, { .forget_model("extraTrees") })
+    output$extraTrees_MethodSummary <- renderText({ description("extraTrees") })
+    output$extraTrees_Metrics <- renderTable({ getBestMetricRow("extraTrees") })
+    output$extraTrees_ModelTune <- renderPlot({ mod <- models[["extraTrees"]]; req(mod); plot(mod) })
+    output$extraTrees_RecipePrint <- renderUI({ .recipe_print_ui("extraTrees") })
+    output$extraTrees_RecipeOutput <- renderTable({ .recipe_summary_table("extraTrees") })
+    output$extraTrees_TrainSummary <- renderPrint({ .train_summary_print("extraTrees") })
+    # METHOD * Rborist ---------------------------------------------------------------------------------------------------------------------------
+    getRboristRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$Rborist_Go, {
+      method <- "Rborist"
+      if (!requireNamespace("Rborist", quietly = TRUE)) {
+        showNotification(paste("Package", "Rborist", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getRboristRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.data.frame(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$Rborist_Load, { method <- "Rborist"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$Rborist_Delete, { .forget_model("Rborist") })
+    output$Rborist_MethodSummary <- renderText({ description("Rborist") })
+    output$Rborist_Metrics <- renderTable({ getBestMetricRow("Rborist") })
+    output$Rborist_ModelTune <- renderPlot({ mod <- models[["Rborist"]]; req(mod); plot(mod) })
+    output$Rborist_RecipePrint <- renderUI({ .recipe_print_ui("Rborist") })
+    output$Rborist_RecipeOutput <- renderTable({ .recipe_summary_table("Rborist") })
+    output$Rborist_TrainSummary <- renderPrint({ .train_summary_print("Rborist") })
+        # METHOD * ppr ---------------------------------------------------------------------------------------------------------------------------
+    getPprRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$ppr_Go, {
+      method <- "ppr"
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getPprRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$ppr_Load, { method <- "ppr"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$ppr_Delete, { .forget_model("ppr") })
+    output$ppr_MethodSummary <- renderText({ description("ppr") })
+    output$ppr_Metrics <- renderTable({ getBestMetricRow("ppr") })
+    output$ppr_ModelTune <- renderPlot({ mod <- models[["ppr"]]; req(mod); plot(mod) })
+    output$ppr_RecipePrint <- renderUI({ .recipe_print_ui("ppr") })
+    output$ppr_RecipeOutput <- renderTable({ .recipe_summary_table("ppr") })
+    output$ppr_TrainSummary <- renderPrint({ .train_summary_print("ppr") })
+        # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
     library(pls)  #  <------ Declare any modelling packages that are needed (see Method List tab)
     
     # reactive getPlsRecipe ----
@@ -4413,6 +5826,8 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
+
 
 
 
