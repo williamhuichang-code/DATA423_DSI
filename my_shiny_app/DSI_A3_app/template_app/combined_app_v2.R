@@ -1502,6 +1502,7 @@ ui <- fluidPage(
                                 )
                               )
                      ),
+                     model_tab_panel("spls", "spls"),
                      
                      tabPanel("Rpart", value = "rpart",
                               br(),
@@ -1586,7 +1587,8 @@ ui <- fluidPage(
                      ),
                      model_tab_panel("nnet", "nnet"),
                      model_tab_panel("mlpWeightDecay", "mlpWeightDecay"),
-                     model_tab_panel("monotonic", "monmlp", "monmlp"),
+                     model_tab_panel("monmlp", "monmlp"),
+                     model_tab_panel("qrnn", "qrnn"),
                      model_tab_panel("cubist", "cubist"),
                      model_tab_panel("M5", "M5"),
                      model_tab_panel("M5Rules", "M5Rules"),
@@ -4998,6 +5000,75 @@ server <- function(input, output, session) {
     output$monmlp_RecipePrint <- renderUI({ .recipe_print_ui("monmlp") })
     output$monmlp_RecipeOutput <- renderTable({ .recipe_summary_table("monmlp") })
     output$monmlp_TrainSummary <- renderPrint({ .train_summary_print("monmlp") })
+    # METHOD * qrnn ---------------------------------------------------------------------------------------------------------------------------
+    getQrnnRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$qrnn_Go, {
+      method <- "qrnn"
+      if (!requireNamespace("qrnn", quietly = TRUE)) {
+        showNotification(paste("Package", "qrnn", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getQrnnRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          y_center <- mean(y, na.rm = TRUE)
+          y_scale <- stats::sd(y, na.rm = TRUE)
+          req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
+          y_train <- as.numeric((y - y_center) / y_scale)
+          model <- caret::train(x = x, y = y_train, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$outcomeCenter <- y_center
+        model$outcomeScale <- y_scale
+        for (metric in c("RMSE", "MAE", "RMSESD", "MAESD")) {
+          if (metric %in% names(model$results)) model$results[[metric]] <- model$results[[metric]] * y_scale
+          if (!is.null(model$resample) && metric %in% names(model$resample)) model$resample[[metric]] <- model$resample[[metric]] * y_scale
+        }
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$qrnn_Load, { method <- "qrnn"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$qrnn_Delete, { .forget_model("qrnn") })
+    output$qrnn_MethodSummary <- renderText({ description("qrnn") })
+    output$qrnn_Metrics <- renderTable({ getBestMetricRow("qrnn") })
+    output$qrnn_ModelTune <- renderPlot({ mod <- models[["qrnn"]]; req(mod); plot(mod) })
+    output$qrnn_RecipePrint <- renderUI({ .recipe_print_ui("qrnn") })
+    output$qrnn_RecipeOutput <- renderTable({ .recipe_summary_table("qrnn") })
+    output$qrnn_TrainSummary <- renderPrint({ .train_summary_print("qrnn") })
     # METHOD * krlsPoly ---------------------------------------------------------------------------------------------------------------------------
     getKrlsPolyRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5663,7 +5734,66 @@ server <- function(input, output, session) {
     }, rownames = TRUE, colnames = FALSE)
     
     
-    # METHOD * rpart ---------------------------------------------------------------------------------------------------------------------------
+    # METHOD * spls ---------------------------------------------------------------------------------------------------------------------------
+    getSplsRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$spls_Go, {
+      method <- "spls"
+      if (!requireNamespace("spls", quietly = TRUE)) {
+        showNotification(paste("Package", "spls", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getSplsRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.matrix(x[ok, , drop = FALSE])
+          y <- y[ok]
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    observeEvent(input$spls_Load, { method <- "spls"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$spls_Delete, { .forget_model("spls") })
+    output$spls_MethodSummary <- renderText({ description("spls") })
+    output$spls_Metrics <- renderTable({ getBestMetricRow("spls") })
+    output$spls_ModelTune <- renderPlot({ mod <- models[["spls"]]; req(mod); plot(mod) })
+    output$spls_RecipePrint <- renderUI({ .recipe_print_ui("spls") })
+    output$spls_RecipeOutput <- renderTable({ .recipe_summary_table("spls") })
+    output$spls_TrainSummary <- renderPrint({ .train_summary_print("spls") })
+        # METHOD * rpart ---------------------------------------------------------------------------------------------------------------------------
     library(rpart)  #  <------ Declare any modelling packages that are needed (see Method List tab)
     library(rpart.plot)
     
