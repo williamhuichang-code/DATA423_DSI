@@ -58,20 +58,33 @@ potential_outliers <- c(
 
 # default preprocessing selections shown in each method's dropdown (make sure to set these to my best recommendation)
 general_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
-                     "other", "YeoJohnson", "dummy", "zv", "nzv", "center", "scale")
+                     "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
 
-glmnet_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
-                    "other", "YeoJohnson", "dummy", "interact", "lincomb",
-                    "zv", "nzv", "center", "scale")
+glmnet_initial <- c('impute_bag', 'dateDecimal', 'quarter', 'month', 'week', 'dow',
+                    'other', 'YeoJohnson', 'dummy', 'interact', 'lincomb',
+                    'zv', 'nzv', 'center', 'scale')
 
-nn_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
-                "other", "YeoJohnson", "dummy", "zv", "nzv", "center", "scale")
 
 pls_initial <- c("impute_median", "month", "dow", "dateDecimal",
                  "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
 
 rpart_initial <- c("impute_median", "month", "dow", "dateDecimal",
                    "other", "zv", "nzv")
+
+svmRadialSigma_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                            "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
+
+gaussprRadial_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                           "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
+
+krlsRadial_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                        "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
+
+monmlp_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                    "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
+
+qrnn_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                  "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
 
 
 # maintenance point ---------------------------------------------------------------------------------------------------------------------------
@@ -221,7 +234,16 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                                    degree = cfg$poly_degree %||% 2)
       
     } else if (s == "interact") {
-      recipe <- recipes::step_interact(recipe, terms = ~ all_numeric_predictors():all_numeric_predictors())
+      interact_type <- cfg$interact_type %||% "numeric_numeric"
+      terms <- switch(interact_type,
+                      "numeric_numeric" = ~ all_numeric_predictors():all_numeric_predictors(),
+                      "nominal_numeric" = ~ all_nominal_predictors():all_numeric_predictors(),
+                      "nominal_nominal" = ~ all_nominal_predictors():all_nominal_predictors(),
+                      "all"             = ~ (all_numeric_predictors() + all_nominal_predictors()):
+                        (all_numeric_predictors() + all_nominal_predictors()),
+                      stop(paste("Unknown interact_type:", interact_type))
+      )
+      recipe <- recipes::step_interact(recipe, terms = terms)
       
     } else if (s == "lincomb") {
       recipe <- recipes::step_lincomb(recipe, all_numeric_predictors())
@@ -340,7 +362,9 @@ model_tab_panel <- function(label, value, prefix = value) {
              ),
              tabPanel("Model Output",
                       h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                      verbatimTextOutput(outputId = paste0(prefix, "_TrainSummary"))
+                      verbatimTextOutput(outputId = paste0(prefix, "_TrainSummary")),
+                      h4("Evaluated tuning grid", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                      DT::dataTableOutput(outputId = paste0(prefix, "_TuningGrid"))
              )
            )
   )
@@ -936,7 +960,7 @@ ui <- fluidPage(
                                   HTML("<strong>Tab note:</strong><br>Compares simple random vs stratified sampling. Stratification preserves outcome distribution.")),
                               hr(),
                               tags$label("Train proportion", style="font-weight:600;font-size:13px;color:#343a40;"),
-                              sliderInput("p1_train", label=NULL, min=0.5, max=0.95, value=0.8, step=0.05, width="100%"),
+                              sliderInput("p1_train", label=NULL, min=0.05, max=0.95, value=0.3, step=0.05, width="100%"), # 0.8
                               hr(),
                               tags$label("Stratify by (y =)", style="font-weight:600;font-size:13px;color:#343a40;"),
                               selectInput("p1_y", label=NULL, choices=NULL),
@@ -1363,7 +1387,7 @@ ui <- fluidPage(
                                choices = c("Bootstrap" = "boot",
                                            "Cross-validation" = "cv",
                                            "Repeated cross-validation" = "repeatedcv"),
-                               selected = "boot"),
+                               selected = "repeatedcv"), # boot
                    conditionalPanel(
                      condition = "input.cfg_resampling == 'boot'",
                      sliderInput("cfg_boot_n", label = "Bootstrap resamples", min = 5, max = 50, value = 25, step = 5, width = "100%")
@@ -1461,7 +1485,9 @@ ui <- fluidPage(
                                          fluidRow(
                                            column(width = 6,
                                                   h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                                  verbatimTextOutput(outputId = "glmnet_TrainSummary")
+                                                  verbatimTextOutput(outputId = "glmnet_TrainSummary"),
+                                                  h4("Evaluated tuning grid", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  DT::dataTableOutput(outputId = "glmnet_TuningGrid")
                                            ),
                                            column(width = 6,
                                                   h4("Coefficients", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
@@ -1492,7 +1518,9 @@ ui <- fluidPage(
                                          fluidRow(
                                            column(width = 6,
                                                   h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                                  verbatimTextOutput(outputId = "pls_TrainSummary")
+                                                  verbatimTextOutput(outputId = "pls_TrainSummary"),
+                                                  h4("Evaluated tuning grid", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  DT::dataTableOutput(outputId = "pls_TuningGrid")
                                            ),
                                            column(width = 6,
                                                   h4("Coefficients", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
@@ -1524,7 +1552,9 @@ ui <- fluidPage(
                                          fluidRow(
                                            column(width = 6,
                                                   h4("Training summary", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                                                  verbatimTextOutput(outputId = "rpart_TrainSummary")
+                                                  verbatimTextOutput(outputId = "rpart_TrainSummary"),
+                                                  h4("Evaluated tuning grid", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                                                  DT::dataTableOutput(outputId = "rpart_TuningGrid")
                                            ),
                                            column(width = 6,
                                                   h4("Model tree", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
@@ -1593,15 +1623,14 @@ ui <- fluidPage(
                      model_tab_panel("M5", "M5"),
                      model_tab_panel("M5Rules", "M5Rules"),
                      model_tab_panel("evtree", "evtree"),
+                     model_tab_panel("qrf", "qrf"),
                      model_tab_panel("svmRadial", "svmRadial"),
                      model_tab_panel("svmRadialSigma", "svmRadialSigma"),
                      model_tab_panel("krlsRadial", "krlsRadial"),
                      model_tab_panel("krlsPoly", "krlsPoly"),
                      model_tab_panel("gaussprRadial", "gaussprRadial"),
                      model_tab_panel("kernelpls", "kernelpls"),
-                     model_tab_panel("rvmLinear", "rvmLinear"),
                      model_tab_panel("rvmRadial", "rvmRadial"),
-                     model_tab_panel("rvmPoly", "rvmPoly"),
                      model_tab_panel("svmLinear", "svmLinear"),
                      model_tab_panel("svmLinear2", "svmLinear2"),
                      model_tab_panel("svmLinear3", "svmLinear3"),
@@ -1609,7 +1638,6 @@ ui <- fluidPage(
                      model_tab_panel("rf", "rf"),
                      model_tab_panel("RRF", "RRF"),
                      model_tab_panel("RRFglobal", "RRFglobal"),
-                     model_tab_panel("extraTrees", "extraTrees"),
                      model_tab_panel("Rborist", "Rborist"),
                      model_tab_panel("gbm", "gbm"),
                      model_tab_panel("xgbTree", "xgbTree"),
@@ -1679,7 +1707,7 @@ server <- function(input, output, session) {
       mod <- models[[method]]
       req(mod)
       row <- mod$results[which.min(mod$results[, "RMSE"]), , drop = FALSE]
-      row$TrainingTimeSeconds <- if (!is.null(training_times[[method]])) {
+      row$TimedFitStepSeconds <- if (!is.null(training_times[[method]])) {
         round(training_times[[method]], 2)
       } else if (!is.null(mod$trainingTimeSeconds)) {
         round(mod$trainingTimeSeconds, 2)
@@ -1711,11 +1739,21 @@ server <- function(input, output, session) {
     
     .method_specific_preprocess <- function(method) {
       switch(method,
-             "glmnet" = list(input_id = "glmnet_Preprocess", initial = glmnet_initial),
-             "pls"    = list(input_id = "pls_Preprocess",    initial = pls_initial),
-             "rpart"  = list(input_id = "rpart_Preprocess",  initial = rpart_initial),
+             "glmnet"         = list(input_id = "glmnet_Preprocess",         initial = glmnet_initial),
+             "pls"            = list(input_id = "pls_Preprocess",            initial = pls_initial),
+             "rpart"          = list(input_id = "rpart_Preprocess",          initial = rpart_initial),
+             "svmRadialSigma" = list(input_id = "svmRadialSigma_Preprocess", initial = svmRadialSigma_initial),
+             "gaussprRadial"  = list(input_id = "gaussprRadial_Preprocess",  initial = gaussprRadial_initial),
+             "krlsRadial"     = list(input_id = "krlsRadial_Preprocess",     initial = krlsRadial_initial),
+             "monmlp"         = list(input_id = "monmlp_Preprocess",         initial = monmlp_initial),
+             "qrnn"           = list(input_id = "qrnn_Preprocess",           initial = qrnn_initial),
              NULL)
     }
+    
+    observeEvent(input$active_method, {
+      default_mode <- if (identical(input$active_method, "svmRadialSigma")) "specific" else "general"
+      updateRadioButtons(session, "method_config_mode", selected = default_mode)
+    }, ignoreInit = FALSE)
     
     .uses_general_config <- reactive({
       method <- input$active_method %||% "null"
@@ -1862,6 +1900,17 @@ server <- function(input, output, session) {
         ))
       }
       
+      if ("interact" %in% selected_steps) {
+        controls <- c(controls, list(
+          selectInput(.config_id(scope, "interact_type"), "Interaction terms",
+                      choices = c("Numeric × Numeric" = "numeric_numeric",
+                                  "Nominal × Numeric"  = "nominal_numeric",
+                                  "Nominal × Nominal"  = "nominal_nominal",
+                                  "All"                = "all"),
+                      selected = "numeric_numeric", width = "100%")
+        ))
+      }
+      
       if ("corr" %in% selected_steps) {
         controls <- c(controls, list(
           sliderInput(.config_id(scope, "corr_threshold"), "Correlation threshold",
@@ -1912,6 +1961,119 @@ server <- function(input, output, session) {
             sliderInput("glmnet_lambda_n", "Lambda values", min = 10, max = 100, value = 50, step = 5, width = "100%")
           )
         ))
+      } else if (method == "svmRadialSigma" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes an explicit <code>sigma</code> and <code>C</code> grid. Values are generated on log scales.")),
+          selectInput("svmRadialSigma_grid_mode", "Tuning grid", choices = c("Tune length default" = "default", "Custom sigma/C grid" = "custom"), selected = "custom", width = "100%"),
+          conditionalPanel(
+            condition = "input.svmRadialSigma_grid_mode == 'custom'",
+          sliderInput("svmRadialSigma_sigma_min", "Log10 sigma minimum", min = -4, max = 0, value = -3.5, step = 0.1, width = "100%"),
+          sliderInput("svmRadialSigma_sigma_max", "Log10 sigma maximum", min = -4, max = 0, value = -2.9, step = 0.1, width = "100%"),
+          sliderInput("svmRadialSigma_sigma_n", "Sigma values", min = 3, max = 20, value = 5, step = 1, width = "100%"),
+          sliderInput("svmRadialSigma_c_min", "Log2 C minimum", min = -5, max = 9, value = -2, step = 1, width = "100%"),
+          sliderInput("svmRadialSigma_c_max", "Log2 C maximum", min = -5, max = 20, value = 6, step = 1, width = "100%"),
+          sliderInput("svmRadialSigma_c_n", "C values", min = 3, max = 20, value = 5, step = 1, width = "100%")
+          )
+        ))
+      } else if (method == "monmlp" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes hidden units and ensemble count for the monotone neural net.")),
+          selectInput("monmlp_grid_mode", "Tuning grid", choices = c("Tune length default" = "default", "Custom hidden/ensemble grid" = "custom"), selected = "default", width = "100%"),
+          conditionalPanel(
+            condition = "input.monmlp_grid_mode == 'custom'",
+          sliderInput("monmlp_hidden1_min", "Hidden units minimum", min = 1, max = 30, value = 1, step = 1, width = "100%"),
+          sliderInput("monmlp_hidden1_max", "Hidden units maximum", min = 1, max = 30, value = 6, step = 1, width = "100%"),
+          sliderInput("monmlp_hidden1_n", "Hidden unit values", min = 2, max = 15, value = 6, step = 1, width = "100%"),
+          sliderInput("monmlp_ensemble_min", "Ensemble minimum", min = 1, max = 10, value = 1, step = 1, width = "100%"),
+          sliderInput("monmlp_ensemble_max", "Ensemble maximum", min = 1, max = 10, value = 3, step = 1, width = "100%")
+          )
+        ))
+      } else if (method == "qrnn" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes hidden units, penalty, and optional bagging for QRNN. Keep this grid modest; it is expensive.")),
+          selectInput("qrnn_grid_mode", "Tuning grid", choices = c("Tune length default" = "default", "Custom hidden/penalty grid" = "custom"), selected = "default", width = "100%"),
+          conditionalPanel(
+            condition = "input.qrnn_grid_mode == 'custom'",
+          sliderInput("qrnn_hidden_min", "Hidden units minimum", min = 1, max = 60, value = 5, step = 1, width = "100%"),
+          sliderInput("qrnn_hidden_max", "Hidden units maximum", min = 1, max = 60, value = 30, step = 1, width = "100%"),
+          sliderInput("qrnn_hidden_n", "Hidden unit values", min = 2, max = 12, value = 4, step = 1, width = "100%"),
+          sliderInput("qrnn_penalty_min", "Log10 penalty minimum", min = -4, max = 1, value = -2, step = 0.5, width = "100%"),
+          sliderInput("qrnn_penalty_max", "Log10 penalty maximum", min = -4, max = 1, value = 0, step = 0.5, width = "100%"),
+          sliderInput("qrnn_penalty_n", "Penalty values", min = 2, max = 10, value = 3, step = 1, width = "100%"),
+          checkboxInput("qrnn_include_bag", "Also test bagged QRNN", value = FALSE)
+          )
+        ))
+      } else if (method == "gaussprRadial" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes the radial kernel width <code>sigma</code> on a log scale.")),
+          selectInput("gaussprRadial_grid_mode", "Tuning grid", choices = c("Tune length default" = "default", "Custom sigma grid" = "custom"), selected = "default", width = "100%"),
+          conditionalPanel(
+            condition = "input.gaussprRadial_grid_mode == 'custom'",
+          sliderInput("gaussprRadial_sigma_min", "Log10 sigma minimum", min = -4, max = 1, value = -3.0, step = 0.1, width = "100%"),
+          sliderInput("gaussprRadial_sigma_max", "Log10 sigma maximum", min = -4, max = 1, value = 0.0, step = 0.1, width = "100%"),
+          sliderInput("gaussprRadial_sigma_n", "Sigma values", min = 3, max = 25, value = 15, step = 1, width = "100%")
+          )
+        ))
+      } else if (method == "krlsRadial" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes radial <code>sigma</code>. Lambda is left as <code>NA</code>, matching the successful automatic KRLS behaviour.")),
+          selectInput("krlsRadial_grid_mode", "Tuning grid", choices = c("Tune length default" = "default", "Custom sigma grid" = "custom"), selected = "default", width = "100%"),
+          conditionalPanel(
+            condition = "input.krlsRadial_grid_mode == 'custom'",
+          sliderInput("krlsRadial_sigma_min", "Log10 sigma minimum", min = -1, max = 3, value = 1.0, step = 0.1, width = "100%"),
+          sliderInput("krlsRadial_sigma_max", "Log10 sigma maximum", min = -1, max = 3, value = 2.2, step = 0.1, width = "100%"),
+          sliderInput("krlsRadial_sigma_n", "Sigma values", min = 3, max = 20, value = 7, step = 1, width = "100%")
+          )
+        ))
+      } else if (method == "gbm" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes boosting iterations, tree depth, shrinkage, and terminal-node size. The custom defaults start near the strong GBM region from the general search.")),
+          selectInput("gbm_grid_mode", "Tuning grid",
+                      choices = c("Tune length default" = "default",
+                                  "Custom GBM grid" = "custom"),
+                      selected = "custom", width = "100%"),
+          conditionalPanel(
+            condition = "input.gbm_grid_mode == 'custom'",
+            sliderInput("gbm_trees_min", "Boosting iterations minimum", min = 50, max = 2000, value = 250, step = 50, width = "100%"),
+            sliderInput("gbm_trees_max", "Boosting iterations maximum", min = 50, max = 2000, value = 600, step = 50, width = "100%"),
+            sliderInput("gbm_trees_step", "Boosting iterations step", min = 25, max = 250, value = 50, step = 25, width = "100%"),
+            sliderInput("gbm_depth_min", "Tree depth minimum", min = 1, max = 10, value = 4, step = 1, width = "100%"),
+            sliderInput("gbm_depth_max", "Tree depth maximum", min = 1, max = 10, value = 6, step = 1, width = "100%"),
+            selectizeInput("gbm_shrinkage_values", "Shrinkage values",
+                           choices = c("0.01", "0.03", "0.05", "0.10", "0.15"),
+                           selected = c("0.05", "0.10"), multiple = TRUE,
+                           options = list(plugins = list("remove_button")), width = "100%"),
+            selectizeInput("gbm_minobs_values", "Minimum observations per terminal node",
+                           choices = c("3", "5", "10", "15", "20"),
+                           selected = c("5", "10"), multiple = TRUE,
+                           options = list(plugins = list("remove_button")), width = "100%")
+          )
+        ))
+      } else if (method == "mlpWeightDecay" && mode == "specific") {
+        controls <- c(controls, list(
+          div(style="font-size:12px;color:#084298;background:#cfe2ff;border-left:3px solid #0d6efd;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
+              icon("circle-info"), HTML(" Tunes neural network <code>size</code> and <code>decay</code>. Use this after the default search lands on the largest hidden-unit value or smallest decay.")),
+          selectInput("mlpWeightDecay_grid_mode", "Tuning grid",
+                      choices = c("Tune length default" = "default",
+                                  "Custom size/decay grid" = "custom"),
+                      selected = "custom", width = "100%"),
+          conditionalPanel(
+            condition = "input.mlpWeightDecay_grid_mode == 'custom'",
+            sliderInput("mlpWeightDecay_size_min", "Hidden units minimum", min = 1, max = 60, value = 9, step = 1, width = "100%"),
+            sliderInput("mlpWeightDecay_size_max", "Hidden units maximum", min = 1, max = 60, value = 15, step = 1, width = "100%"),
+            sliderInput("mlpWeightDecay_size_step", "Hidden units step", min = 1, max = 10, value = 2, step = 1, width = "100%"),
+            selectizeInput("mlpWeightDecay_decay_values", "Weight decay values",
+                           choices = c("0", "1e-08", "1e-07", "1e-06", "1e-05", "1e-04", "0.001", "0.01"),
+                           selected = c("0", "1e-06", "1e-05", "1e-04"), multiple = TRUE,
+                           options = list(plugins = list("remove_button")), width = "100%")
+          )
+        ))
       } else if (mode == "specific") {
         controls <- c(controls, list(
           div(style="font-size:12px;color:#856404;background:#fff3cd;border-left:3px solid #ffc107;padding:8px 10px;border-radius:4px;margin-bottom:8px;",
@@ -1957,7 +2119,8 @@ server <- function(input, output, session) {
         other_threshold      = val("other_threshold", defs$other),
         other_label          = "other",
         poly_degree          = val("poly_degree", defs$poly),
-        corr_threshold       = val("corr_threshold", defs$corr)
+        corr_threshold       = val("corr_threshold", defs$corr),
+        interact_type        = val("interact_type", "numeric_numeric")
       )
     })
     
@@ -3102,7 +3265,8 @@ server <- function(input, output, session) {
         mod$trainingTimeSeconds
       }
       if (!is.null(elapsed)) {
-        cat("Training time:", round(elapsed, 2), "seconds\n\n")
+        cat("Timed fit step:", round(elapsed, 2), "seconds\n")
+        cat("Note: total wall-clock time can be longer because saving/butchering happens after this timer.\n\n")
       }
       print(mod)
     })
@@ -3289,7 +3453,8 @@ server <- function(input, output, session) {
         mod$trainingTimeSeconds
       }
       if (!is.null(elapsed)) {
-        cat("Training time:", round(elapsed, 2), "seconds\n\n")
+        cat("Timed fit step:", round(elapsed, 2), "seconds\n")
+        cat("Note: total wall-clock time can be longer because saving/butchering happens after this timer.\n\n")
       }
       print(mod)
     })
@@ -3376,10 +3541,35 @@ server <- function(input, output, session) {
         mod$trainingTimeSeconds
       }
       if (!is.null(elapsed)) {
-        cat("Training time:", round(elapsed, 2), "seconds\n\n")
+        cat("Timed fit step:", round(elapsed, 2), "seconds\n")
+        cat("Note: total wall-clock time can be longer because saving/butchering happens after this timer.\n\n")
       }
       print(mod)
     }
+    
+    .tuning_grid_table <- function(method) {
+      mod <- models[[method]]
+      req(mod)
+      res <- as.data.frame(mod$results)
+      if (nrow(res) == 0) return(data.frame())
+      if ("RMSE" %in% names(res)) {
+        res <- res[order(res$RMSE, na.last = TRUE), , drop = FALSE]
+      }
+      rownames(res) <- NULL
+      res
+    }
+    
+    .tuning_grid_dt <- function(method) {
+      DT::datatable(
+        .tuning_grid_table(method),
+        options = list(pageLength = 10, lengthMenu = c(5, 10, 25, 50), scrollX = TRUE, dom = "tip"),
+        rownames = FALSE
+      )
+    }
+    
+    output$glmnet_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("glmnet") })
+    output$pls_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("pls") })
+    output$rpart_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("rpart") })
     
     .forget_model <- function(method) {
       models[[method]] <- NULL
@@ -3420,6 +3610,7 @@ server <- function(input, output, session) {
     output$brnn_RecipePrint <- renderUI({ .recipe_print_ui("brnn") })
     output$brnn_RecipeOutput <- renderTable({ .recipe_summary_table("brnn") })
     output$brnn_TrainSummary <- renderPrint({ .train_summary_print("brnn") })
+    output$brnn_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("brnn") })
     
     # reactive getAvNNetRecipe ----
     getAvNNetRecipe <- reactive({
@@ -3456,6 +3647,7 @@ server <- function(input, output, session) {
     output$avNNet_RecipePrint <- renderUI({ .recipe_print_ui("avNNet") })
     output$avNNet_RecipeOutput <- renderTable({ .recipe_summary_table("avNNet") })
     output$avNNet_TrainSummary <- renderPrint({ .train_summary_print("avNNet") })
+    output$avNNet_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("avNNet") })
     
     # METHOD * additional candidates -----------------------------------------------------------------------------------------------------------
     # These model blocks are intentionally explicit so model-specific failures point to the model being trained.
@@ -3511,6 +3703,7 @@ server <- function(input, output, session) {
     output$cubist_RecipePrint <- renderUI({ .recipe_print_ui("cubist") })
     output$cubist_RecipeOutput <- renderTable({ .recipe_summary_table("cubist") })
     output$cubist_TrainSummary <- renderPrint({ .train_summary_print("cubist") })
+    output$cubist_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("cubist") })
     # METHOD * M5 ---------------------------------------------------------------------------------------------------------------------------
     getM5Recipe <- reactive({
       form <- formula(Response ~ .)
@@ -3562,6 +3755,7 @@ server <- function(input, output, session) {
     output$M5_RecipePrint <- renderUI({ .recipe_print_ui("M5") })
     output$M5_RecipeOutput <- renderTable({ .recipe_summary_table("M5") })
     output$M5_TrainSummary <- renderPrint({ .train_summary_print("M5") })
+    output$M5_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("M5") })
     # METHOD * M5Rules ---------------------------------------------------------------------------------------------------------------------------
     getM5RulesRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3613,6 +3807,7 @@ server <- function(input, output, session) {
     output$M5Rules_RecipePrint <- renderUI({ .recipe_print_ui("M5Rules") })
     output$M5Rules_RecipeOutput <- renderTable({ .recipe_summary_table("M5Rules") })
     output$M5Rules_TrainSummary <- renderPrint({ .train_summary_print("M5Rules") })
+    output$M5Rules_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("M5Rules") })
     # METHOD * svmRadial ---------------------------------------------------------------------------------------------------------------------------
     getSvmRadialRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3664,6 +3859,7 @@ server <- function(input, output, session) {
     output$svmRadial_RecipePrint <- renderUI({ .recipe_print_ui("svmRadial") })
     output$svmRadial_RecipeOutput <- renderTable({ .recipe_summary_table("svmRadial") })
     output$svmRadial_TrainSummary <- renderPrint({ .train_summary_print("svmRadial") })
+    output$svmRadial_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("svmRadial") })
     # METHOD * krlsRadial ---------------------------------------------------------------------------------------------------------------------------
     getKrlsRadialRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3697,10 +3893,24 @@ server <- function(input, output, session) {
           x <- as.matrix(x[ok, , drop = FALSE])
           y <- y[ok]
           req(nrow(x) > 5, ncol(x) > 0)
-          model <- caret::train(x = x, y = y, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$krlsRadial_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            sigma_min <- min(input$krlsRadial_sigma_min %||% 1.0, input$krlsRadial_sigma_max %||% 2.2)
+            sigma_max <- max(input$krlsRadial_sigma_min %||% 1.0, input$krlsRadial_sigma_max %||% 2.2)
+            tune_grid <- expand.grid(
+              lambda = NA_real_,
+              sigma = signif(10^seq(sigma_min, sigma_max, length.out = input$krlsRadial_sigma_n %||% 7), 4)
+            )
+            model <- caret::train(x = x, y = y, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid)
+          } else {
+            model <- caret::train(x = x, y = y, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength())
+          }
+          })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$recipe <- prep_rec
@@ -3730,6 +3940,7 @@ server <- function(input, output, session) {
     output$krlsRadial_RecipePrint <- renderUI({ .recipe_print_ui("krlsRadial") })
     output$krlsRadial_RecipeOutput <- renderTable({ .recipe_summary_table("krlsRadial") })
     output$krlsRadial_TrainSummary <- renderPrint({ .train_summary_print("krlsRadial") })
+    output$krlsRadial_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("krlsRadial") })
     # METHOD * ranger ---------------------------------------------------------------------------------------------------------------------------
     getRangerRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3796,6 +4007,7 @@ server <- function(input, output, session) {
     output$ranger_RecipePrint <- renderUI({ .recipe_print_ui("ranger") })
     output$ranger_RecipeOutput <- renderTable({ .recipe_summary_table("ranger") })
     output$ranger_TrainSummary <- renderPrint({ .train_summary_print("ranger") })
+    output$ranger_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("ranger") })
     # METHOD * rf ---------------------------------------------------------------------------------------------------------------------------
     getRfRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3847,6 +4059,7 @@ server <- function(input, output, session) {
     output$rf_RecipePrint <- renderUI({ .recipe_print_ui("rf") })
     output$rf_RecipeOutput <- renderTable({ .recipe_summary_table("rf") })
     output$rf_TrainSummary <- renderPrint({ .train_summary_print("rf") })
+    output$rf_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("rf") })
     # METHOD * gbm ---------------------------------------------------------------------------------------------------------------------------
     getGbmRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -3879,9 +4092,36 @@ server <- function(input, output, session) {
           x <- as.matrix(x)
           colnames(x) <- make.names(colnames(x), unique = TRUE)
           req(nrow(x) > 5, ncol(x) > 0, length(y) == nrow(x))
-          model <- caret::train(x = x, y = y, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength(), verbose = FALSE)
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$gbm_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            trees_min <- min(input$gbm_trees_min %||% 250, input$gbm_trees_max %||% 600)
+            trees_max <- max(input$gbm_trees_min %||% 250, input$gbm_trees_max %||% 600)
+            trees_step <- input$gbm_trees_step %||% 50
+            n_trees <- unique(as.integer(seq(trees_min, trees_max, by = trees_step)))
+            depth_min <- min(input$gbm_depth_min %||% 4, input$gbm_depth_max %||% 6)
+            depth_max <- max(input$gbm_depth_min %||% 4, input$gbm_depth_max %||% 6)
+            depths <- unique(as.integer(seq(depth_min, depth_max, by = 1)))
+            shrinkage <- suppressWarnings(as.numeric(input$gbm_shrinkage_values %||% c("0.05", "0.10")))
+            shrinkage <- shrinkage[is.finite(shrinkage) & shrinkage > 0]
+            if (length(shrinkage) == 0) shrinkage <- c(0.05, 0.10)
+            minobs <- suppressWarnings(as.numeric(input$gbm_minobs_values %||% c("5", "10")))
+            minobs <- unique(as.integer(minobs[is.finite(minobs) & minobs >= 1]))
+            if (length(minobs) == 0) minobs <- c(5L, 10L)
+            tune_grid <- expand.grid(
+              n.trees = n_trees,
+              interaction.depth = depths,
+              shrinkage = shrinkage,
+              n.minobsinnode = minobs
+            )
+            model <- caret::train(x = x, y = y, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid, verbose = FALSE)
+          } else {
+            model <- caret::train(x = x, y = y, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength(), verbose = FALSE)
+          }
         })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
@@ -3912,6 +4152,7 @@ server <- function(input, output, session) {
     output$gbm_RecipePrint <- renderUI({ .recipe_print_ui("gbm") })
     output$gbm_RecipeOutput <- renderTable({ .recipe_summary_table("gbm") })
     output$gbm_TrainSummary <- renderPrint({ .train_summary_print("gbm") })
+    output$gbm_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("gbm") })
     # METHOD * xgbTree ---------------------------------------------------------------------------------------------------------------------------
     getXgbTreeRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4043,6 +4284,7 @@ server <- function(input, output, session) {
     output$xgbTree_RecipePrint <- renderUI({ .recipe_print_ui("xgbTree") })
     output$xgbTree_RecipeOutput <- renderTable({ .recipe_summary_table("xgbTree") })
     output$xgbTree_TrainSummary <- renderPrint({ .train_summary_print("xgbTree") })
+    output$xgbTree_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("xgbTree") })
     # METHOD * bagEarth ---------------------------------------------------------------------------------------------------------------------------
     getBagEarthRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4094,6 +4336,7 @@ server <- function(input, output, session) {
     output$bagEarth_RecipePrint <- renderUI({ .recipe_print_ui("bagEarth") })
     output$bagEarth_RecipeOutput <- renderTable({ .recipe_summary_table("bagEarth") })
     output$bagEarth_TrainSummary <- renderPrint({ .train_summary_print("bagEarth") })
+    output$bagEarth_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("bagEarth") })
     # METHOD * earth ---------------------------------------------------------------------------------------------------------------------------
     getEarthRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4145,6 +4388,7 @@ server <- function(input, output, session) {
     output$earth_RecipePrint <- renderUI({ .recipe_print_ui("earth") })
     output$earth_RecipeOutput <- renderTable({ .recipe_summary_table("earth") })
     output$earth_TrainSummary <- renderPrint({ .train_summary_print("earth") })
+    output$earth_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("earth") })
     # METHOD * lmStepAIC ---------------------------------------------------------------------------------------------------------------------------
     getLmStepAICRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4204,6 +4448,7 @@ server <- function(input, output, session) {
     output$lmStepAIC_RecipePrint <- renderUI({ .recipe_print_ui("lmStepAIC") })
     output$lmStepAIC_RecipeOutput <- renderTable({ .recipe_summary_table("lmStepAIC") })
     output$lmStepAIC_TrainSummary <- renderPrint({ .train_summary_print("lmStepAIC") })
+    output$lmStepAIC_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("lmStepAIC") })
         # METHOD * rlm ---------------------------------------------------------------------------------------------------------------------------
     getRlmRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4211,7 +4456,8 @@ server <- function(input, output, session) {
         dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
         step_rm(has_type("date")) %>%
         step_zv(all_predictors()) %>%
-        step_nzv(all_predictors())
+        step_nzv(all_predictors()) %>%
+        step_lincomb(all_numeric_predictors())
     })
     
     observeEvent(input$rlm_Go, {
@@ -4263,6 +4509,7 @@ server <- function(input, output, session) {
     output$rlm_RecipePrint <- renderUI({ .recipe_print_ui("rlm") })
     output$rlm_RecipeOutput <- renderTable({ .recipe_summary_table("rlm") })
     output$rlm_TrainSummary <- renderPrint({ .train_summary_print("rlm") })
+    output$rlm_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("rlm") })
         # METHOD * xgbLinear ---------------------------------------------------------------------------------------------------------------------------
     getXgbLinearRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4377,6 +4624,7 @@ server <- function(input, output, session) {
     output$xgbLinear_RecipePrint <- renderUI({ .recipe_print_ui("xgbLinear") })
     output$xgbLinear_RecipeOutput <- renderTable({ .recipe_summary_table("xgbLinear") })
     output$xgbLinear_TrainSummary <- renderPrint({ .train_summary_print("xgbLinear") })
+    output$xgbLinear_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("xgbLinear") })
         # METHOD * gaussprRadial ---------------------------------------------------------------------------------------------------------------------------
     getGaussprRadialRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4410,10 +4658,23 @@ server <- function(input, output, session) {
           x <- as.matrix(x[ok, , drop = FALSE])
           y <- y[ok]
           req(nrow(x) > 5, ncol(x) > 0)
-          model <- caret::train(x = x, y = y, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$gaussprRadial_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            sigma_min <- min(input$gaussprRadial_sigma_min %||% -3.0, input$gaussprRadial_sigma_max %||% 0.0)
+            sigma_max <- max(input$gaussprRadial_sigma_min %||% -3.0, input$gaussprRadial_sigma_max %||% 0.0)
+            tune_grid <- expand.grid(
+              sigma = signif(10^seq(sigma_min, sigma_max, length.out = input$gaussprRadial_sigma_n %||% 15), 4)
+            )
+            model <- caret::train(x = x, y = y, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid)
+          } else {
+            model <- caret::train(x = x, y = y, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength())
+          }
+          })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$recipe <- prep_rec
@@ -4436,6 +4697,7 @@ server <- function(input, output, session) {
     output$gaussprRadial_RecipePrint <- renderUI({ .recipe_print_ui("gaussprRadial") })
     output$gaussprRadial_RecipeOutput <- renderTable({ .recipe_summary_table("gaussprRadial") })
     output$gaussprRadial_TrainSummary <- renderPrint({ .train_summary_print("gaussprRadial") })
+    output$gaussprRadial_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("gaussprRadial") })
         # METHOD * svmLinear2 ---------------------------------------------------------------------------------------------------------------------------
     getSvmLinear2Recipe <- reactive({
       form <- formula(Response ~ .)
@@ -4495,6 +4757,7 @@ server <- function(input, output, session) {
     output$svmLinear2_RecipePrint <- renderUI({ .recipe_print_ui("svmLinear2") })
     output$svmLinear2_RecipeOutput <- renderTable({ .recipe_summary_table("svmLinear2") })
     output$svmLinear2_TrainSummary <- renderPrint({ .train_summary_print("svmLinear2") })
+    output$svmLinear2_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("svmLinear2") })
         # METHOD * RRF ---------------------------------------------------------------------------------------------------------------------------
     getRRFRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4554,6 +4817,7 @@ server <- function(input, output, session) {
     output$RRF_RecipePrint <- renderUI({ .recipe_print_ui("RRF") })
     output$RRF_RecipeOutput <- renderTable({ .recipe_summary_table("RRF") })
     output$RRF_TrainSummary <- renderPrint({ .train_summary_print("RRF") })
+    output$RRF_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("RRF") })
         # METHOD * RRFglobal ---------------------------------------------------------------------------------------------------------------------------
     getRRFglobalRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4613,6 +4877,7 @@ server <- function(input, output, session) {
     output$RRFglobal_RecipePrint <- renderUI({ .recipe_print_ui("RRFglobal") })
     output$RRFglobal_RecipeOutput <- renderTable({ .recipe_summary_table("RRFglobal") })
     output$RRFglobal_TrainSummary <- renderPrint({ .train_summary_print("RRFglobal") })
+    output$RRFglobal_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("RRFglobal") })
         # METHOD * evtree ---------------------------------------------------------------------------------------------------------------------------
     getEvtreeRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4672,7 +4937,70 @@ server <- function(input, output, session) {
     output$evtree_RecipePrint <- renderUI({ .recipe_print_ui("evtree") })
     output$evtree_RecipeOutput <- renderTable({ .recipe_summary_table("evtree") })
     output$evtree_TrainSummary <- renderPrint({ .train_summary_print("evtree") })
-        # METHOD * nnet ---------------------------------------------------------------------------------------------------------------------------
+    output$evtree_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("evtree") })
+    # METHOD * qrf ---------------------------------------------------------------------------------------------------------------------------
+    getQrfRecipe <- reactive({
+      form <- formula(Response ~ .)
+      recipes::recipe(form, data = getTrainData()) %>%
+        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
+        step_rm(has_type("date")) %>%
+        step_zv(all_predictors()) %>%
+        step_nzv(all_predictors())
+    })
+    
+    observeEvent(input$qrf_Go, {
+      method <- "qrf"
+      if (!requireNamespace("quantregForest", quietly = TRUE)) {
+        showNotification(paste("Package", "quantregForest", "is required before training", method, "."),
+                         type = "error", duration = 6)
+        return(NULL)
+      }
+      models[[method]] <- NULL
+      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
+      obj <- startMode(input$Parallel)
+      tryCatch({
+        timing <- system.time({
+          set.seed(getTrainSeed())
+          rec <- getQrfRecipe()
+          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
+          baked <- recipes::bake(prep_rec, new_data = NULL)
+          y <- baked$Response
+          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
+          x <- x[, sapply(x, is.numeric), drop = FALSE]
+          ok <- complete.cases(x, y)
+          x <- as.data.frame(x[ok, , drop = FALSE])
+          y <- y[ok]
+          colnames(x) <- make.names(colnames(x), unique = TRUE)
+          req(nrow(x) > 5, ncol(x) > 0)
+          model <- caret::train(x = x, y = y, method = method,
+                                metric = "RMSE", trControl = getTrControl(),
+                                tuneLength = getTuneLength())
+        })
+        training_times[[method]] <- timing[["elapsed"]]
+        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
+        model$recipe <- prep_rec
+        model$preppedRecipe <- prep_rec
+        model$bakedFeatureNames <- colnames(x)
+        deleteRds(method)
+        saveToRds(model, method)
+        models[[method]] <- model
+      },
+      finally = {
+        removeNotification(id = method)
+        stopMode(obj)
+      })
+    })
+    
+    observeEvent(input$qrf_Load, { method <- "qrf"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
+    observeEvent(input$qrf_Delete, { .forget_model("qrf") })
+    output$qrf_MethodSummary <- renderText({ description("qrf") })
+    output$qrf_Metrics <- renderTable({ getBestMetricRow("qrf") })
+    output$qrf_ModelTune <- renderPlot({ mod <- models[["qrf"]]; req(mod); plot(mod) })
+    output$qrf_RecipePrint <- renderUI({ .recipe_print_ui("qrf") })
+    output$qrf_RecipeOutput <- renderTable({ .recipe_summary_table("qrf") })
+    output$qrf_TrainSummary <- renderPrint({ .train_summary_print("qrf") })
+    output$qrf_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("qrf") })
+            # METHOD * nnet ---------------------------------------------------------------------------------------------------------------------------
     getNnetRecipe <- reactive({
       form <- formula(Response ~ .)
       recipes::recipe(form, data = getTrainData()) %>%
@@ -4742,6 +5070,7 @@ server <- function(input, output, session) {
     output$nnet_RecipePrint <- renderUI({ .recipe_print_ui("nnet") })
     output$nnet_RecipeOutput <- renderTable({ .recipe_summary_table("nnet") })
     output$nnet_TrainSummary <- renderPrint({ .train_summary_print("nnet") })
+    output$nnet_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("nnet") })
     # METHOD * svmRadialSigma ---------------------------------------------------------------------------------------------------------------------------
     getSvmRadialSigmaRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4776,9 +5105,25 @@ server <- function(input, output, session) {
           y <- y[ok]
           req(nrow(x) > 5, ncol(x) > 0)
           y_train <- y
-          model <- caret::train(x = x, y = y_train, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$svmRadialSigma_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            sigma_min <- min(input$svmRadialSigma_sigma_min %||% -3.5, input$svmRadialSigma_sigma_max %||% -2.9)
+            sigma_max <- max(input$svmRadialSigma_sigma_min %||% -3.5, input$svmRadialSigma_sigma_max %||% -2.9)
+            c_min <- min(input$svmRadialSigma_c_min %||% -2, input$svmRadialSigma_c_max %||% 6)
+            c_max <- max(input$svmRadialSigma_c_min %||% -2, input$svmRadialSigma_c_max %||% 6)
+            tune_grid <- expand.grid(
+              sigma = signif(10^seq(sigma_min, sigma_max, length.out = input$svmRadialSigma_sigma_n %||% 5), 4),
+              C = signif(2^seq(c_min, c_max, length.out = input$svmRadialSigma_c_n %||% 5), 4)
+            )
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid)
+          } else {
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength())
+          }
         })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
@@ -4798,10 +5143,30 @@ server <- function(input, output, session) {
     observeEvent(input$svmRadialSigma_Delete, { .forget_model("svmRadialSigma") })
     output$svmRadialSigma_MethodSummary <- renderText({ description("svmRadialSigma") })
     output$svmRadialSigma_Metrics <- renderTable({ getBestMetricRow("svmRadialSigma") })
-    output$svmRadialSigma_ModelTune <- renderPlot({ mod <- models[["svmRadialSigma"]]; req(mod); plot(mod) })
+    output$svmRadialSigma_ModelTune <- renderPlot({
+      mod <- models[["svmRadialSigma"]]
+      req(mod)
+      res <- mod$results
+      req(all(c("sigma", "C", "RMSE") %in% names(res)))
+      res$log10_sigma <- log10(res$sigma)
+      res$log2_C <- log2(res$C)
+      res$log2_C_label <- factor(signif(res$log2_C, 4), levels = sort(unique(signif(res$log2_C, 4))))
+      ggplot(res, aes(x = log10_sigma, y = RMSE, color = log2_C_label, group = log2_C_label)) +
+        geom_line() +
+        geom_point(size = 2) +
+        labs(
+          title = "svmRadialSigma tuning",
+          x = "log10(sigma)",
+          y = paste("RMSE (", mod$control$method, ")", sep = ""),
+          color = "log2(C)"
+        ) +
+        theme_minimal(base_size = 13) +
+        theme(plot.title = element_text(hjust = 0))
+    })
     output$svmRadialSigma_RecipePrint <- renderUI({ .recipe_print_ui("svmRadialSigma") })
     output$svmRadialSigma_RecipeOutput <- renderTable({ .recipe_summary_table("svmRadialSigma") })
     output$svmRadialSigma_TrainSummary <- renderPrint({ .train_summary_print("svmRadialSigma") })
+    output$svmRadialSigma_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("svmRadialSigma") })
     # METHOD * rvmRadial ---------------------------------------------------------------------------------------------------------------------------
     getRvmRadialRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4862,6 +5227,7 @@ server <- function(input, output, session) {
     output$rvmRadial_RecipePrint <- renderUI({ .recipe_print_ui("rvmRadial") })
     output$rvmRadial_RecipeOutput <- renderTable({ .recipe_summary_table("rvmRadial") })
     output$rvmRadial_TrainSummary <- renderPrint({ .train_summary_print("rvmRadial") })
+    output$rvmRadial_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("rvmRadial") })
     # METHOD * mlpWeightDecay ---------------------------------------------------------------------------------------------------------------------------
     getMlpWeightDecayRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4899,9 +5265,27 @@ server <- function(input, output, session) {
           y_scale <- stats::sd(y, na.rm = TRUE)
           req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
           y_train <- as.numeric((y - y_center) / y_scale)
-          model <- caret::train(x = x, y = y_train, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$mlpWeightDecay_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            size_min <- min(input$mlpWeightDecay_size_min %||% 9, input$mlpWeightDecay_size_max %||% 15)
+            size_max <- max(input$mlpWeightDecay_size_min %||% 9, input$mlpWeightDecay_size_max %||% 15)
+            size_step <- max(1, input$mlpWeightDecay_size_step %||% 2)
+            decay_values <- suppressWarnings(as.numeric(input$mlpWeightDecay_decay_values %||% c("0", "1e-06", "1e-05", "1e-04")))
+            decay_values <- decay_values[is.finite(decay_values) & decay_values >= 0]
+            req(length(decay_values) > 0)
+            tune_grid <- expand.grid(
+              size = unique(as.integer(seq(size_min, size_max, by = size_step))),
+              decay = unique(decay_values)
+            )
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid)
+          } else {
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength())
+          }
         })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
@@ -4931,6 +5315,7 @@ server <- function(input, output, session) {
     output$mlpWeightDecay_RecipePrint <- renderUI({ .recipe_print_ui("mlpWeightDecay") })
     output$mlpWeightDecay_RecipeOutput <- renderTable({ .recipe_summary_table("mlpWeightDecay") })
     output$mlpWeightDecay_TrainSummary <- renderPrint({ .train_summary_print("mlpWeightDecay") })
+    output$mlpWeightDecay_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("mlpWeightDecay") })
     # METHOD * monmlp ---------------------------------------------------------------------------------------------------------------------------
     getMonmlpRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -4968,10 +5353,26 @@ server <- function(input, output, session) {
           y_scale <- stats::sd(y, na.rm = TRUE)
           req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
           y_train <- as.numeric((y - y_center) / y_scale)
-          model <- caret::train(x = x, y = y_train, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$monmlp_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            hidden_min <- min(input$monmlp_hidden1_min %||% 1, input$monmlp_hidden1_max %||% 6)
+            hidden_max <- max(input$monmlp_hidden1_min %||% 1, input$monmlp_hidden1_max %||% 6)
+            ensemble_min <- min(input$monmlp_ensemble_min %||% 1, input$monmlp_ensemble_max %||% 3)
+            ensemble_max <- max(input$monmlp_ensemble_min %||% 1, input$monmlp_ensemble_max %||% 3)
+            tune_grid <- expand.grid(
+              hidden1 = unique(round(seq(hidden_min, hidden_max, length.out = input$monmlp_hidden1_n %||% 6))),
+              n.ensemble = seq(ensemble_min, ensemble_max, by = 1)
+            )
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid)
+          } else {
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength())
+          }
+          })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$outcomeCenter <- y_center
@@ -5000,6 +5401,7 @@ server <- function(input, output, session) {
     output$monmlp_RecipePrint <- renderUI({ .recipe_print_ui("monmlp") })
     output$monmlp_RecipeOutput <- renderTable({ .recipe_summary_table("monmlp") })
     output$monmlp_TrainSummary <- renderPrint({ .train_summary_print("monmlp") })
+    output$monmlp_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("monmlp") })
     # METHOD * qrnn ---------------------------------------------------------------------------------------------------------------------------
     getQrnnRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5037,10 +5439,27 @@ server <- function(input, output, session) {
           y_scale <- stats::sd(y, na.rm = TRUE)
           req(is.finite(y_center), is.finite(y_scale), y_scale > 0)
           y_train <- as.numeric((y - y_center) / y_scale)
-          model <- caret::train(x = x, y = y_train, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
+          specific_mode <- (input$method_config_mode %||% "general") == "specific"
+          grid_mode <- if (specific_mode) input$qrnn_grid_mode %||% "default" else "default"
+          if (specific_mode && grid_mode == "custom") {
+            hidden_min <- min(input$qrnn_hidden_min %||% 5, input$qrnn_hidden_max %||% 30)
+            hidden_max <- max(input$qrnn_hidden_min %||% 5, input$qrnn_hidden_max %||% 30)
+            penalty_min <- min(input$qrnn_penalty_min %||% -2, input$qrnn_penalty_max %||% 0)
+            penalty_max <- max(input$qrnn_penalty_min %||% -2, input$qrnn_penalty_max %||% 0)
+            tune_grid <- expand.grid(
+              n.hidden = unique(round(seq(hidden_min, hidden_max, length.out = input$qrnn_hidden_n %||% 4))),
+              penalty = signif(10^seq(penalty_min, penalty_max, length.out = input$qrnn_penalty_n %||% 3), 4),
+              bag = if (isTRUE(input$qrnn_include_bag)) c(FALSE, TRUE) else FALSE
+            )
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneGrid = tune_grid)
+          } else {
+            model <- caret::train(x = x, y = y_train, method = method,
+                                  metric = "RMSE", trControl = getTrControl(),
+                                  tuneLength = getTuneLength())
+          }
+          })
         training_times[[method]] <- timing[["elapsed"]]
         model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
         model$outcomeCenter <- y_center
@@ -5069,6 +5488,7 @@ server <- function(input, output, session) {
     output$qrnn_RecipePrint <- renderUI({ .recipe_print_ui("qrnn") })
     output$qrnn_RecipeOutput <- renderTable({ .recipe_summary_table("qrnn") })
     output$qrnn_TrainSummary <- renderPrint({ .train_summary_print("qrnn") })
+    output$qrnn_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("qrnn") })
     # METHOD * krlsPoly ---------------------------------------------------------------------------------------------------------------------------
     getKrlsPolyRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5128,6 +5548,7 @@ server <- function(input, output, session) {
     output$krlsPoly_RecipePrint <- renderUI({ .recipe_print_ui("krlsPoly") })
     output$krlsPoly_RecipeOutput <- renderTable({ .recipe_summary_table("krlsPoly") })
     output$krlsPoly_TrainSummary <- renderPrint({ .train_summary_print("krlsPoly") })
+    output$krlsPoly_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("krlsPoly") })
     # METHOD * kernelpls ---------------------------------------------------------------------------------------------------------------------------
     getKernelplsRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5187,6 +5608,7 @@ server <- function(input, output, session) {
     output$kernelpls_RecipePrint <- renderUI({ .recipe_print_ui("kernelpls") })
     output$kernelpls_RecipeOutput <- renderTable({ .recipe_summary_table("kernelpls") })
     output$kernelpls_TrainSummary <- renderPrint({ .train_summary_print("kernelpls") })
+    output$kernelpls_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("kernelpls") })
     # METHOD * svmLinear ---------------------------------------------------------------------------------------------------------------------------
     getSvmLinearRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5246,6 +5668,7 @@ server <- function(input, output, session) {
     output$svmLinear_RecipePrint <- renderUI({ .recipe_print_ui("svmLinear") })
     output$svmLinear_RecipeOutput <- renderTable({ .recipe_summary_table("svmLinear") })
     output$svmLinear_TrainSummary <- renderPrint({ .train_summary_print("svmLinear") })
+    output$svmLinear_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("svmLinear") })
     # METHOD * svmLinear3 ---------------------------------------------------------------------------------------------------------------------------
     getSvmLinear3Recipe <- reactive({
       form <- formula(Response ~ .)
@@ -5305,183 +5728,7 @@ server <- function(input, output, session) {
     output$svmLinear3_RecipePrint <- renderUI({ .recipe_print_ui("svmLinear3") })
     output$svmLinear3_RecipeOutput <- renderTable({ .recipe_summary_table("svmLinear3") })
     output$svmLinear3_TrainSummary <- renderPrint({ .train_summary_print("svmLinear3") })
-    # METHOD * rvmLinear ---------------------------------------------------------------------------------------------------------------------------
-    getRvmLinearRecipe <- reactive({
-      form <- formula(Response ~ .)
-      recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date")) %>%
-        step_zv(all_predictors()) %>%
-        step_nzv(all_predictors())
-    })
-    
-    observeEvent(input$rvmLinear_Go, {
-      method <- "rvmLinear"
-      if (!requireNamespace("kernlab", quietly = TRUE)) {
-        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
-                         type = "error", duration = 6)
-        return(NULL)
-      }
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        timing <- system.time({
-          set.seed(getTrainSeed())
-          rec <- getRvmLinearRecipe()
-          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
-          baked <- recipes::bake(prep_rec, new_data = NULL)
-          y <- baked$Response
-          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
-          x <- x[, sapply(x, is.numeric), drop = FALSE]
-          ok <- complete.cases(x, y)
-          x <- as.matrix(x[ok, , drop = FALSE])
-          y <- y[ok]
-          req(nrow(x) > 5, ncol(x) > 0)
-          model <- caret::train(x = x, y = y, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
-        model$recipe <- prep_rec
-        model$preppedRecipe <- prep_rec
-        model$bakedFeatureNames <- colnames(x)
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
-      })
-    })
-    observeEvent(input$rvmLinear_Load, { method <- "rvmLinear"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
-    observeEvent(input$rvmLinear_Delete, { .forget_model("rvmLinear") })
-    output$rvmLinear_MethodSummary <- renderText({ description("rvmLinear") })
-    output$rvmLinear_Metrics <- renderTable({ getBestMetricRow("rvmLinear") })
-    output$rvmLinear_ModelTune <- renderPlot({ mod <- models[["rvmLinear"]]; req(mod); plot(mod) })
-    output$rvmLinear_RecipePrint <- renderUI({ .recipe_print_ui("rvmLinear") })
-    output$rvmLinear_RecipeOutput <- renderTable({ .recipe_summary_table("rvmLinear") })
-    output$rvmLinear_TrainSummary <- renderPrint({ .train_summary_print("rvmLinear") })
-    # METHOD * rvmPoly ---------------------------------------------------------------------------------------------------------------------------
-    getRvmPolyRecipe <- reactive({
-      form <- formula(Response ~ .)
-      recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date")) %>%
-        step_zv(all_predictors()) %>%
-        step_nzv(all_predictors())
-    })
-    
-    observeEvent(input$rvmPoly_Go, {
-      method <- "rvmPoly"
-      if (!requireNamespace("kernlab", quietly = TRUE)) {
-        showNotification(paste("Package", "kernlab", "is required before training", method, "."),
-                         type = "error", duration = 6)
-        return(NULL)
-      }
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        timing <- system.time({
-          set.seed(getTrainSeed())
-          rec <- getRvmPolyRecipe()
-          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
-          baked <- recipes::bake(prep_rec, new_data = NULL)
-          y <- baked$Response
-          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
-          x <- x[, sapply(x, is.numeric), drop = FALSE]
-          ok <- complete.cases(x, y)
-          x <- as.matrix(x[ok, , drop = FALSE])
-          y <- y[ok]
-          req(nrow(x) > 5, ncol(x) > 0)
-          model <- caret::train(x = x, y = y, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
-        model$recipe <- prep_rec
-        model$preppedRecipe <- prep_rec
-        model$bakedFeatureNames <- colnames(x)
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
-      })
-    })
-    observeEvent(input$rvmPoly_Load, { method <- "rvmPoly"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
-    observeEvent(input$rvmPoly_Delete, { .forget_model("rvmPoly") })
-    output$rvmPoly_MethodSummary <- renderText({ description("rvmPoly") })
-    output$rvmPoly_Metrics <- renderTable({ getBestMetricRow("rvmPoly") })
-    output$rvmPoly_ModelTune <- renderPlot({ mod <- models[["rvmPoly"]]; req(mod); plot(mod) })
-    output$rvmPoly_RecipePrint <- renderUI({ .recipe_print_ui("rvmPoly") })
-    output$rvmPoly_RecipeOutput <- renderTable({ .recipe_summary_table("rvmPoly") })
-    output$rvmPoly_TrainSummary <- renderPrint({ .train_summary_print("rvmPoly") })
-    # METHOD * extraTrees ---------------------------------------------------------------------------------------------------------------------------
-    getExtraTreesRecipe <- reactive({
-      form <- formula(Response ~ .)
-      recipes::recipe(form, data = getTrainData()) %>%
-        dynamicSteps(getSelectedPreprocess(), getPreprocessConfig()) %>%
-        step_rm(has_type("date")) %>%
-        step_zv(all_predictors()) %>%
-        step_nzv(all_predictors())
-    })
-    
-    observeEvent(input$extraTrees_Go, {
-      method <- "extraTrees"
-      if (!requireNamespace("extraTrees", quietly = TRUE)) {
-        showNotification(paste("Package", "extraTrees", "is required before training", method, "."),
-                         type = "error", duration = 6)
-        return(NULL)
-      }
-      models[[method]] <- NULL
-      showNotification(id = method, paste("Processing", method, "model using baked numeric predictors"), session = session, duration = NULL)
-      obj <- startMode(input$Parallel)
-      tryCatch({
-        timing <- system.time({
-          set.seed(getTrainSeed())
-          rec <- getExtraTreesRecipe()
-          prep_rec <- recipes::prep(rec, training = getTrainData(), retain = TRUE)
-          baked <- recipes::bake(prep_rec, new_data = NULL)
-          y <- baked$Response
-          x <- baked[, setdiff(names(baked), "Response"), drop = FALSE]
-          x <- x[, sapply(x, is.numeric), drop = FALSE]
-          ok <- complete.cases(x, y)
-          x <- as.matrix(x[ok, , drop = FALSE])
-          y <- y[ok]
-          req(nrow(x) > 5, ncol(x) > 0)
-          model <- caret::train(x = x, y = y, method = method,
-                                metric = "RMSE", trControl = getTrControl(),
-                                tuneLength = getTuneLength())
-        })
-        training_times[[method]] <- timing[["elapsed"]]
-        model$trainingTimeSeconds <- round(timing[["elapsed"]], 2)
-        model$recipe <- prep_rec
-        model$preppedRecipe <- prep_rec
-        model$bakedFeatureNames <- colnames(x)
-        deleteRds(method)
-        saveToRds(model, method)
-        models[[method]] <- model
-      },
-      finally = {
-        removeNotification(id = method)
-        stopMode(obj)
-      })
-    })
-    observeEvent(input$extraTrees_Load, { method <- "extraTrees"; model <- loadRds(method, session); if (!is.null(model)) models[[method]] <- model })
-    observeEvent(input$extraTrees_Delete, { .forget_model("extraTrees") })
-    output$extraTrees_MethodSummary <- renderText({ description("extraTrees") })
-    output$extraTrees_Metrics <- renderTable({ getBestMetricRow("extraTrees") })
-    output$extraTrees_ModelTune <- renderPlot({ mod <- models[["extraTrees"]]; req(mod); plot(mod) })
-    output$extraTrees_RecipePrint <- renderUI({ .recipe_print_ui("extraTrees") })
-    output$extraTrees_RecipeOutput <- renderTable({ .recipe_summary_table("extraTrees") })
-    output$extraTrees_TrainSummary <- renderPrint({ .train_summary_print("extraTrees") })
+    output$svmLinear3_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("svmLinear3") })
     # METHOD * Rborist ---------------------------------------------------------------------------------------------------------------------------
     getRboristRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5541,6 +5788,7 @@ server <- function(input, output, session) {
     output$Rborist_RecipePrint <- renderUI({ .recipe_print_ui("Rborist") })
     output$Rborist_RecipeOutput <- renderTable({ .recipe_summary_table("Rborist") })
     output$Rborist_TrainSummary <- renderPrint({ .train_summary_print("Rborist") })
+    output$Rborist_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("Rborist") })
         # METHOD * ppr ---------------------------------------------------------------------------------------------------------------------------
     getPprRecipe <- reactive({
       form <- formula(Response ~ .)
@@ -5595,6 +5843,7 @@ server <- function(input, output, session) {
     output$ppr_RecipePrint <- renderUI({ .recipe_print_ui("ppr") })
     output$ppr_RecipeOutput <- renderTable({ .recipe_summary_table("ppr") })
     output$ppr_TrainSummary <- renderPrint({ .train_summary_print("ppr") })
+    output$ppr_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("ppr") })
         # METHOD * pls ---------------------------------------------------------------------------------------------------------------------------
     library(pls)  #  <------ Declare any modelling packages that are needed (see Method List tab)
     
@@ -5721,7 +5970,8 @@ server <- function(input, output, session) {
         mod$trainingTimeSeconds
       }
       if (!is.null(elapsed)) {
-        cat("Training time:", round(elapsed, 2), "seconds\n\n")
+        cat("Timed fit step:", round(elapsed, 2), "seconds\n")
+        cat("Note: total wall-clock time can be longer because saving/butchering happens after this timer.\n\n")
       }
       print(mod)
     })
@@ -5793,6 +6043,7 @@ server <- function(input, output, session) {
     output$spls_RecipePrint <- renderUI({ .recipe_print_ui("spls") })
     output$spls_RecipeOutput <- renderTable({ .recipe_summary_table("spls") })
     output$spls_TrainSummary <- renderPrint({ .train_summary_print("spls") })
+    output$spls_TuningGrid <- DT::renderDataTable({ .tuning_grid_dt("spls") })
         # METHOD * rpart ---------------------------------------------------------------------------------------------------------------------------
     library(rpart)  #  <------ Declare any modelling packages that are needed (see Method List tab)
     library(rpart.plot)
@@ -5929,7 +6180,8 @@ server <- function(input, output, session) {
         mod$trainingTimeSeconds
       }
       if (!is.null(elapsed)) {
-        cat("Training time:", round(elapsed, 2), "seconds\n\n")
+        cat("Timed fit step:", round(elapsed, 2), "seconds\n")
+        cat("Note: total wall-clock time can be longer because saving/butchering happens after this timer.\n\n")
       }
       print(mod)
     })
@@ -5956,9 +6208,6 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
-
-
-
 
 
 

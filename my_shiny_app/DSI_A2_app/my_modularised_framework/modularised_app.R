@@ -101,7 +101,8 @@ ui <- dashboardPage(
                menuSubItem("Heatmap",      tabName = "eda_heatmap"),
                menuSubItem("GGPairs",      tabName = "eda_ggpairs"),
                menuSubItem("Bar Chart",    tabName = "eda_bar"),
-               menuSubItem("Box Plot",     tabName = "eda_boxplot")
+               menuSubItem("Box Plot",     tabName = "eda_boxplot"),
+               menuSubItem("Interaction", tabName = "eda_interaction")
                # more future subtabs here
       ),
       
@@ -164,6 +165,7 @@ ui <- dashboardPage(
       tabItem(tabName = "eda_ggpairs",   eda_ggpairs_ui("eda_ggpairs")),
       tabItem(tabName = "eda_bar",       eda_bar_ui("eda_bar")),
       tabItem(tabName = "eda_boxplot",   eda_boxplot_ui("eda_boxplot")),
+      tabItem(tabName = "eda_interaction", eda_interaction_ui("eda_interaction")),
       
       # Miss Strategy
       tabItem(tabName = "miss_variants",   miss_variants_ui("miss_variants")),
@@ -259,18 +261,19 @@ server <- function(input, output, session) {
   ))
   
   # EDA visualisations
-  eda_datatable_server("eda_datatable", get_diagnose_data, get_raw)
-  eda_summary_server("eda_summary",     get_diagnose_data)
-  eda_cloud_server("eda_cloud",         get_diagnose_data)
-  eda_vis_server("eda_vis",             get_diagnose_data, roles)
-  eda_upset_server("eda_upset",         get_diagnose_data, roles)
-  eda_rising_server("eda_rising",       get_diagnose_data, roles)
-  eda_mosaic_server("eda_mosaic",       get_diagnose_data, roles)
-  eda_tabplot_server("eda_tabplot",     get_diagnose_data, roles)
-  eda_heatmap_server("eda_heatmap",     get_diagnose_data, roles)
-  eda_ggpairs_server("eda_ggpairs",     get_diagnose_data, roles)
-  eda_bar_server("eda_bar",             get_diagnose_data)
-  eda_boxplot_server("eda_boxplot",     get_diagnose_data)
+  eda_datatable_server("eda_datatable",     get_diagnose_data, get_raw)
+  eda_summary_server("eda_summary",         get_diagnose_data)
+  eda_cloud_server("eda_cloud",             get_diagnose_data)
+  eda_vis_server("eda_vis",                 get_diagnose_data, roles)
+  eda_upset_server("eda_upset",             get_diagnose_data, roles)
+  eda_rising_server("eda_rising",           get_diagnose_data, roles)
+  eda_mosaic_server("eda_mosaic",           get_diagnose_data, roles)
+  eda_tabplot_server("eda_tabplot",         get_diagnose_data, roles)
+  eda_heatmap_server("eda_heatmap",         get_diagnose_data, roles)
+  eda_ggpairs_server("eda_ggpairs",         get_diagnose_data, roles)
+  eda_bar_server("eda_bar",                 get_diagnose_data)
+  eda_boxplot_server("eda_boxplot",        get_diagnose_data)
+  eda_interaction_server("eda_interaction", get_diagnose_data, roles)
   
   # diagnostics visualisations
   miss_rpart_server("miss_rpart",                  get_diagnose_data, roles)

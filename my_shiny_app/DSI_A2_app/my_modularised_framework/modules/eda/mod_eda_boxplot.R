@@ -53,6 +53,14 @@ eda_boxplot_ui <- function(id) {
       ),
       hr(),
       
+      selectizeInput(
+        inputId = ns("vars"),
+        label   = "Variables to plot:",
+        choices = NULL,
+        multiple = TRUE,
+        options  = list(placeholder = "Default: all numeric variables")
+      ),
+      
       textInput(
         inputId     = ns("custom_title"),
         label       = "Chart title (leave blank for default):",
@@ -72,14 +80,18 @@ eda_boxplot_ui <- function(id) {
 eda_boxplot_server <- function(id, get_data) {
   moduleServer(id, function(input, output, session) {
     
-    # populate label column selector — rowname first, then all columns
+    # # populate both selectors, label column selector — rowname first, then all columns
     observe({
       d <- get_data()
       req(d)
+      num_cols <- names(d)[sapply(d, is.numeric)]
       all_cols <- c("(rowname)" = ".rowname", setNames(names(d), names(d)))
       updateSelectInput(session, "label_col",
                         choices  = all_cols,
                         selected = ".rowname")
+      updateSelectizeInput(session, "vars",
+                           choices  = num_cols,
+                           selected = num_cols)
     })
     
     output$boxplot <- renderPlot({
@@ -92,6 +104,14 @@ eda_boxplot_server <- function(id, get_data) {
       req(d, input$multiplier, sum(numeric) > 0)
       
       d_num <- d[, numeric, drop = FALSE]
+      
+      # filter to selected variables (empty selection = all)
+      selected_vars <- input$vars
+      if (length(selected_vars) > 0) {
+        selected_vars <- intersect(selected_vars, names(d_num))
+        if (length(selected_vars) > 0)
+          d_num <- d_num[, selected_vars, drop = FALSE]
+      }
       
       # standardise if requested
       if (input$normalise) {
