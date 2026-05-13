@@ -64,7 +64,6 @@ glmnet_initial <- c('impute_bag', 'dateDecimal', 'quarter', 'month', 'week', 'do
                     'other', 'YeoJohnson', 'dummy', 'interact', 'lincomb',
                     'zv', 'nzv', 'center', 'scale')
 
-
 pls_initial <- c("impute_median", "month", "dow", "dateDecimal",
                  "other", "dummy", "zv", "nzv", "YeoJohnson", "center", "scale")
 

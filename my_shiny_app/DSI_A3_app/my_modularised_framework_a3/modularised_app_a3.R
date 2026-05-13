@@ -10,14 +10,54 @@ library(dplyr)
 library(waiter)
 library(plotly)
 library(ggrepel)
+library(recipes)
+library(shinycssloaders) # busy spinner (compatibility with bs4Dash TBC)
+library(caret)
+library(cluster)
+
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
 
 # file of interest
-FILE_OF_INTEREST <- "Ass2Data.csv"
+FILE_OF_INTEREST <- ""
 
 # explicit data folder
 DATA_WD <- "."
+
+# sets R to display numbers with 3 significant digits globally
+DIGITS = 3
+
+
+# ── TASK SPECIFIC DEFAULT ────────────────────────────────────────────────────
+
+# Assignment 3 specific starting values, might comment out for general use
+FILE_OF_INTEREST <- "Ass3Data.csv"
+
+general_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
+                     "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
+
+glmnet_initial <- c('impute_bag', 'dateDecimal', 'quarter', 'month', 'week', 'dow',
+                    'other', 'YeoJohnson', 'dummy', 'interact', 'lincomb',
+                    'zv', 'nzv', 'center', 'scale')
+
+rpart_initial <- c("impute_median", "month", "dow", "dateDecimal",
+                   "other", "zv", "nzv")
+
+A3_default_roles <- list(
+  Patient         = "obs_id",
+  Response        = "outcome",
+  ObservationDate = "date"
+)
+
+SPLIT_SEED <- 199
+
+A3_omit_ids <- c(
+  "tid-57748", "tid-57237", "tid-57537", "tid-57651", "tid-57689",
+  "tid-57361", "tid-57431", "tid-57479", "tid-57487", "tid-57500",
+  "tid-57732", "tid-57739", "tid-57877", "tid-57808", "tid-57845",
+  "tid-57859", "tid-57921", "tid-58028", "tid-58060", "tid-58055",
+  "tid-57470", "tid-57580", "tid-57899"
+)
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
@@ -37,6 +77,12 @@ default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "
 # look inside "modules" folder and its subs, load all files with .R according to their full paths
 list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
   lapply(source)
+
+
+# ── AESTHETIC LOGIC ──────────────────────────────────────────────────────────
+
+# sets R to display numbers with n significant digits globally (set it in global config)
+options(digits = DIGITS)
 
 
 
@@ -71,7 +117,7 @@ ui <- dashboardPage(
       class = "dropdown",
       tags$div(
         style = "padding: 0 30px; font-size: 24px; font-weight: 700; color: #212529; line-height: 50px;",
-        "DATA423-26S1 Assignment 2 (EDA, Strategy, Model) \u2003 | \u2003 William Hui Chang (69051925)"
+        "DATA423-26S1 Assignment 3 (Model Discovery & Selection) \u2003 | \u2003 William Hui Chang (69051925)"
       )
     )
   ),
@@ -149,7 +195,8 @@ ui <- dashboardPage(
     tabItems(
       
       # Config
-      tabItem(tabName = "data_roles",       data_roles_ui("data_roles")),
+      tabItem(tabName = "data_roles",       data_roles_ui("data_roles",
+                                            default_seed = if (exists("SPLIT_SEED")) SPLIT_SEED else NULL)),
       tabItem(tabName = "data_download",    data_download_ui("data_download")),
       
       # EDA
@@ -225,7 +272,8 @@ server <- function(input, output, session) {
   
   # ── DOMAIN CONFIGS ────────────────────────────────────────────────────────
   
-  config         <- data_roles_server("data_roles", get_raw)
+  config         <- data_roles_server("data_roles", get_raw,
+                                     default_roles = if (exists("A3_default_roles")) A3_default_roles else NULL)
   config_data    <- config$data            # reactive df (raw + optional split col)
   roles          <- config$roles           # reactive named list of role assignments
   important_vars <- config$important_vars  # reactive character vector
@@ -244,7 +292,8 @@ server <- function(input, output, session) {
   shadow       <- miss_shadow_server("miss_shadow",       variant$data)
   napp         <- miss_napp_server("miss_napp",           shadow$data)
   excessive    <- miss_excessive_server("miss_excessive", napp$data, important_vars)
-  out_response <- out_response_server("out_response",     excessive$data, get_raw, roles)
+  out_response <- out_response_server("out_response",     excessive$data, get_raw, roles,
+                                     default_omit_ids = if (exists("A3_omit_ids")) A3_omit_ids else NULL)
   
   # exploratory diagnostics for imputation and standarisation choices
   impute    <- miss_impute_server("miss_impute",       out_response$data, roles, seed_in_use)

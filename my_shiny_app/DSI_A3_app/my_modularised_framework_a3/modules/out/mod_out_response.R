@@ -107,14 +107,15 @@ out_response_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-out_response_server <- function(id, get_data, get_raw, roles) {
+out_response_server <- function(id, get_data, get_raw, roles, default_omit_ids = NULL) {
   moduleServer(id, function(input, output, session) {
-    
+
     ns <- session$ns
-    
+
     # ── state ──────────────────────────────────────────────────────────────
-    n_global_rules <- reactiveVal(0)
-    n_rules        <- reactiveVal(0)
+    n_global_rules  <- reactiveVal(0)
+    n_rules         <- reactiveVal(0)
+    defaults_applied <- reactiveVal(FALSE)
     
     # ── helper: build one global rule block ────────────────────────────────
     make_global_rule_ui <- function(i) {
@@ -263,7 +264,14 @@ out_response_server <- function(id, get_data, get_raw, roles) {
         req(id_col %in% names(df))
         as.character(unique(df[[id_col]]))
       }
-      updateSelectizeInput(session, "omit_ids", choices = ids, selected = character(0),
+      # apply task-specific defaults on first load only; intersect to guard against bad IDs
+      selected <- if (!defaults_applied() && !is.null(default_omit_ids)) {
+        defaults_applied(TRUE)
+        intersect(as.character(default_omit_ids), ids)
+      } else {
+        character(0)
+      }
+      updateSelectizeInput(session, "omit_ids", choices = ids, selected = selected,
                            server = TRUE)
     })
     
