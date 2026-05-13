@@ -963,6 +963,13 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           co <- coef(mod$finalModel)
           as.data.frame(co, row.names = rownames(co))
 
+        } else if (meth == "rlm") {
+          co <- coef(mod$finalModel)
+          data.frame(
+            Variable    = names(co),
+            Coefficient = round(co, 6)
+          )
+
         } else if (meth == "rpart") {
           vi <- mod$finalModel$variable.importance
           if (length(vi) == 0)

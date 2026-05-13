@@ -35,15 +35,14 @@ DIGITS = 3
 # Assignment 3 specific starting values, might comment out for general use
 FILE_OF_INTEREST <- "Ass3Data.csv"
 
-general_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
-                     "other", "YeoJohnson", "dummy", "zv", "nzv", "center", "scale")
+general_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                     "other", "YeoJohnson", "dummy", 
+                     "zv", "nzv", "center", "scale")
 
-glmnet_initial <- c('impute_bag', 'dateDecimal', 'quarter', 'month', 'week', 'dow',
-                    'other', 'YeoJohnson', 'dummy', 'interact', 'lincomb',
-                    'zv', 'nzv', 'center', 'scale')
-
-rpart_initial <- c("impute_median", "month", "dow", "dateDecimal",
-                   "other", "zv", "nzv")
+glmnet_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                    "other", "YeoJohnson", "dummy", 
+                    "interact", "lincomb",
+                    "zv", "nzv", "center", "scale")
 
 A3_default_roles <- list(
   Patient         = "obs_id",
@@ -73,14 +72,14 @@ av_highlight_tags <- c(
   "Multivariate Adaptive Regression Splines"
 )
 
-# A3_omit_ids <- c(
-#   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
-#   "tid-57689", "tid-57787", "tid-57761", "tid-57431",
-#   "tid-57479", "tid-57487", "tid-57600", "tid-57732",
-#   "tid-57739", "tid-57808", "tid-57845", "tid-57859",
-#   "tid-57921", "tid-57928", "tid-58050", "tid-58055",
-#   "tid-57470", "tid-57569", "tid-57580", "tid-57899"
-# )
+A3_omit_ids <- c(
+  "tid-57748", "tid-57237", "tid-57537", "tid-57651",
+  "tid-57689", "tid-57787", "tid-57761", "tid-57431",
+  "tid-57479", "tid-57487", "tid-57600", "tid-57732",
+  "tid-57739", "tid-57808", "tid-57845", "tid-57859",
+  "tid-57921", "tid-57928", "tid-58050", "tid-58055",
+  "tid-57470", "tid-57569", "tid-57580", "tid-57899"
+)
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
@@ -222,7 +221,10 @@ ui <- dashboardPage(
                # more future subtabs here
       ),
       
-      menuItem("Available Methods", tabName = "meth_available", icon = icon("list-check")),
+      menuItem("Available Methods", icon = icon("list-check"),
+               menuSubItem("Method Table", tabName = "meth_av_table", icon = icon("table")),
+               menuSubItem("Method Map",   tabName = "meth_av_map",   icon = icon("map"))
+      ),
 
       menuItem("Methods", icon = icon("flask"),
                menuSubItem("Null",            tabName = "meth_null",     icon = icon("minus")),
@@ -289,9 +291,11 @@ ui <- dashboardPage(
       tabItem(tabName = "out_summary", out_summary_ui("out_summary")),
       tabItem(tabName = "out_response", out_response_ui("out_response")),
       
-      # Available Methods explorer
-      tabItem(tabName = "meth_available",
-              meth_available_ui("meth_available")),
+      # Available Methods explorer — two sidebar sub-items, one shared server
+      tabItem(tabName = "meth_av_table",
+              meth_available_table_ui("meth_available")),
+      tabItem(tabName = "meth_av_map",
+              meth_available_map_ui("meth_available")),
 
       # Methods — one tabItem per category
       tabItem(tabName = "meth_null",
@@ -466,6 +470,7 @@ server <- function(input, output, session) {
                    model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
                    general_preprocess = if (exists("general_initial")) general_initial else NULL,
                    glmnet_preprocess  = if (exists("glmnet_initial"))  glmnet_initial  else NULL,
+                   rlm_preprocess     = if (exists("rlm_initial"))     rlm_initial     else NULL,
                    pp_choices         = ppchoices)
 
   meth_tree <- meth_tree_server("meth_tree", get_model_data, roles,

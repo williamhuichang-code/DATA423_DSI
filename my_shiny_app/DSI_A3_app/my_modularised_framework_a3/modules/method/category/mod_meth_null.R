@@ -20,8 +20,10 @@ meth_null_ui <- function(id,
 
   fluidRow(
     column(9,
-      div(style = "padding-top:12px;",
-          .meth_subtabs_ui(ns, "null", has_tuning = TRUE))
+      tabsetPanel(type = "tabs", id = ns("method_inner"),
+        tabPanel("null", value = "null", style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "null", has_tuning = TRUE))
+      )
     ),
     column(3,
       .meth_sidebar_ui(ns,

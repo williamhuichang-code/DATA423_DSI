@@ -1,13 +1,13 @@
 # =================================================================================
-# mod_meth_ols.R  — OLS category module  (GLMnet + PLS)
+# mod_meth_ols.R  — OLS category module  (GLMnet + PLS + RLM)
 # =================================================================================
-# Two methods assembled under one shared sidebar.
+# Three methods assembled under one shared sidebar.
 # The active method is tracked via the method_inner tabsetPanel.
 #
 # UI:     meth_ols_ui(id, pp_choices, default_preprocess)
 # Server: meth_ols_server(id, get_data, roles, seed,
 #                          general_preprocess, glmnet_preprocess,
-#                          pls_preprocess, pp_choices)
+#                          pls_preprocess, rlm_preprocess, pp_choices)
 # Returns: list(models = reactiveValues, effective_seed = reactive)
 # =================================================================================
 
@@ -79,7 +79,9 @@ meth_ols_ui <- function(id,
         tabPanel("glmnet", value = "glmnet", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "glmnet")),
         tabPanel("pls",    value = "pls",    style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "pls"))
+                 .meth_subtabs_ui(ns, "pls")),
+        tabPanel("rlm",    value = "rlm",    style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "rlm",    has_tuning = TRUE))
       )
     ),
     column(3,
@@ -101,6 +103,7 @@ meth_ols_server <- function(id, get_data, roles,
                              general_preprocess = NULL,
                              glmnet_preprocess  = NULL,
                              pls_preprocess     = NULL,
+                             rlm_preprocess     = NULL,
                              pp_choices         = character(0)) {
   moduleServer(id, function(input, output, session) {
 
@@ -120,6 +123,7 @@ meth_ols_server <- function(id, get_data, roles,
     # ── Standard output renders ───────────────────────────────────────────────
     .meth_register_outputs(output, "glmnet", models, ns)
     .meth_register_outputs(output, "pls",    models, ns)
+    .meth_register_outputs(output, "rlm",    models, ns)
 
     # ── Override GLMnet tuning plot: facet by λ, colour gradient for α ────────
     # The default plot(mod) puts all λ values in the legend, which is unreadable.
@@ -237,6 +241,56 @@ meth_ols_server <- function(id, get_data, roles,
         )
     })
 
+    # ── RLM tuning plot: RMSE per intercept × psi combination ────────────────
+    # Two categorical tuning params: intercept (TRUE/FALSE), psi (3 options).
+    output[["rlm_tune_plot"]] <- renderPlot({
+      mod <- models[["rlm"]]; req(mod)
+      df  <- mod$results
+
+      has_sd <- !all(is.na(df$RMSESD))
+
+      best_combo_intercept <- mod$bestTune$intercept
+      best_combo_psi       <- mod$bestTune$psi
+
+      df$intercept_label <- paste0("intercept = ", df$intercept)
+
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = psi, y = RMSE, colour = psi))
+      if (has_sd)
+        p <- p + ggplot2::geom_errorbar(
+          ggplot2::aes(ymin = RMSE - RMSESD, ymax = RMSE + RMSESD),
+          width = 0.2
+        )
+      p +
+        ggplot2::geom_point(size = 4) +
+        ggplot2::geom_point(
+          data = df[df$intercept == best_combo_intercept &
+                    df$psi       == best_combo_psi, ],
+          colour = "#dc3545", size = 6, shape = 1, stroke = 1.5
+        ) +
+        ggplot2::facet_wrap(~ intercept_label) +
+        ggplot2::scale_colour_manual(
+          values = c("psi.huber"    = "#185FA5",
+                     "psi.hampel"   = "#0F6E56",
+                     "psi.bisquare" = "#BA7517")
+        ) +
+        ggplot2::labs(
+          x        = "Psi function",
+          y        = "RMSE (Bootstrap)",
+          colour   = "psi",
+          title    = "RLM tuning: RMSE per intercept × psi combination",
+          subtitle = "Red circle = best combination  |  error bars = ± 1 SD"
+        ) +
+        ggplot2::theme_bw(base_size = 13) +
+        ggplot2::theme(
+          strip.text      = ggplot2::element_text(face = "bold", size = 11),
+          legend.position = "right",
+          plot.title      = ggplot2::element_text(face = "bold", size = 14),
+          plot.subtitle   = ggplot2::element_text(colour = "#6c757d", size = 11),
+          axis.text       = ggplot2::element_text(size = 12),
+          axis.title      = ggplot2::element_text(size = 13, face = "bold")
+        )
+    })
+
     # ── Preprocessing selector update ─────────────────────────────────────────
     # Fires when the active method tab or config mode changes.
     observe({
@@ -248,6 +302,7 @@ meth_ols_server <- function(id, get_data, roles,
         switch(method,
                "glmnet" = glmnet_preprocess %||% general_preprocess %||% character(0),
                "pls"    = pls_preprocess    %||% general_preprocess %||% character(0),
+               "rlm"    = rlm_preprocess    %||% general_preprocess %||% character(0),
                general_preprocess %||% character(0))
       }
       updateSelectizeInput(session, "preprocess",
@@ -320,6 +375,21 @@ meth_ols_server <- function(id, get_data, roles,
           caret::train(rec, data = train_df, method = "pls",
                        metric = "RMSE", trControl = tr_ctrl,
                        tuneLength = input$tune_length %||% 5, na.action = na.pass)
+        },
+
+        rlm = function() {
+          library(MASS)
+          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed    <- effective_seed()
+          r        <- roles()
+          tr_ctrl  <- .meth_build_tr_control(
+            input, eseed, train_df[[names(r)[r == "outcome"][1]]]
+          )
+          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          set.seed(eseed)
+          caret::train(rec, data = train_df, method = "rlm",
+                       metric = "RMSE", trControl = tr_ctrl,
+                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
         }
 
       )

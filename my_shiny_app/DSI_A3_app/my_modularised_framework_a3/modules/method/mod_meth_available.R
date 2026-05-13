@@ -4,8 +4,16 @@
 # Lets users browse, filter and spatially compare all regression-capable caret
 # methods via a filterable DT table and an MDS similarity map.
 #
-# UI:     meth_available_ui(id)
-# Server: meth_available_server(id)
+# UI (two separate functions — one per sidebar sub-item / tabItem):
+#   meth_available_table_ui(id)  — filter sidebar + DT table
+#   meth_available_map_ui(id)    — map controls sidebar + similarity map
+#
+# Server (single call, shared namespace for both tabs):
+#   meth_available_server(id, exclude_tags, highlight_tags)
+#
+# The two tabItems share the same module id so the server's reactives feed both.
+# bs4Dash pre-renders all tabItems in the DOM, so filter inputs (in the table tab)
+# are always present and readable by the server even when the map tab is active.
 # =================================================================================
 
 library(DT)
@@ -13,19 +21,26 @@ library(ggplot2)
 library(ggrepel)
 
 
-# ── UI ───────────────────────────────────────────────────────────────────────
+# ── Shared CSS (injected by both UIs) ────────────────────────────────────────
 
-meth_available_ui <- function(id) {
+.av_css <- tags$style(HTML("
+  .shiny-input-container label,
+  .radio label, .checkbox label {
+    font-weight: 400 !important;
+    font-size: 13px;
+  }
+"))
+
+
+# ── UI: Method Table tab ─────────────────────────────────────────────────────
+# Contains: filter sidebar (right) + DT table (main)
+# All filter inputs live here; the server reads them for both table and map.
+
+meth_available_table_ui <- function(id) {
   ns <- NS(id)
 
   tagList(
-    tags$style(HTML("
-      .shiny-input-container label,
-      .radio label, .checkbox label {
-        font-weight: 400 !important;
-        font-size: 13px;
-      }
-    ")),
+    .av_css,
 
     sidebarLayout(
       position = "right",
@@ -43,8 +58,8 @@ meth_available_ui <- function(id) {
           icon("circle-info", style = "color:#0d6efd;"), HTML("&nbsp;"),
           HTML("<strong>How to use:</strong><br>
                Filter methods using the controls below.
-               The table updates instantly. Switch to the map
-               tab to see coloured clusters.")
+               The table updates instantly. Switch to the
+               <strong>Method Map</strong> tab to visualise clusters.")
         ),
 
         # ── 1st: Model Constraints ────────────────────────────────────────────
@@ -59,9 +74,9 @@ meth_available_ui <- function(id) {
                    style = "font-weight:600; font-size:13px; color:#343a40;
                             display:block; margin-bottom:4px; margin-top:10px;"),
         radioButtons(ns("av_type"), label = NULL,
-                     choices  = c("Regression only"    = "reg",
+                     choices  = c("Regression only"     = "reg",
                                   "Classification only" = "cls",
-                                  "Both"               = "both"),
+                                  "Both"                = "both"),
                      selected = "reg"),
 
         tags$label("Exclude tags (ANY disqualifies)",
@@ -78,7 +93,7 @@ meth_available_ui <- function(id) {
             tags$label("2nd — Literature-Informed Highlights",
                         style = "font-weight:700; font-size:13px; color:#664d03;")),
         div(style = "font-size:11px; color:#6c757d; margin-bottom:6px;",
-            "Or logic for bold highlighting based on domain research"),
+            "OR logic — bold highlighting based on domain research"),
         selectizeInput(ns("av_flt_any"), label = NULL, choices = NULL,
                        multiple = TRUE,
                        options  = list(placeholder = "e.g. Regularization")),
@@ -135,6 +150,55 @@ meth_available_ui <- function(id) {
                        options = list(placeholder = "e.g. anything...")),
         hr(),
 
+        tags$label("Matching methods",
+                   style = "font-weight:600; font-size:13px; color:#343a40;
+                            display:block; margin-bottom:4px; margin-top:10px;"),
+        verbatimTextOutput(ns("av_filter_summary"))
+      ),
+
+      mainPanel(
+        width = 9,
+        h4("Filtered caret methods",
+           style = "border-left:3px solid #534AB7; padding-left:8px;
+                    font-size:14px; margin-top:4px; margin-bottom:8px;"),
+        shinycssloaders::withSpinner(DT::dataTableOutput(ns("av_method_table")))
+      )
+    )
+  )
+}
+
+
+# ── UI: Method Map tab ───────────────────────────────────────────────────────
+# Contains: map controls sidebar (right) + similarity map (main)
+# Filter inputs live in the table tab; they're always in the DOM (bs4Dash
+# pre-renders all tabItems), so the server can read them here too.
+
+meth_available_map_ui <- function(id) {
+  ns <- NS(id)
+
+  tagList(
+    .av_css,
+
+    sidebarLayout(
+      position = "right",
+
+      sidebarPanel(
+        width = 3,
+        style = "background-color:#f4f6fb; border-left:3px solid #6a9fd8;
+                 min-height:100vh; padding:16px 14px;",
+
+        # Info note
+        div(
+          style = "font-size:13px; color:#343a40; background-color:white;
+                   padding:10px; border-left:4px solid #ffc107; border-radius:6px;
+                   margin-bottom:12px;",
+          icon("circle-info", style = "color:#ffc107;"), HTML("&nbsp;"),
+          HTML("<strong>Tip:</strong><br>
+               Configure model type, exclusions, highlights and colour
+               groups in the <strong>Method Table</strong> tab.
+               Changes reflect here instantly.")
+        ),
+
         # ── Map Configs ───────────────────────────────────────────────────────
         div(style = "background:#e2e3e5; border-left:3px solid #6c757d;
                      padding:6px 10px; border-radius:4px; margin-bottom:6px;",
@@ -161,37 +225,18 @@ meth_available_ui <- function(id) {
                     min = 10, max = 100, value = 50, step = 5, width = "100%"),
         hr(),
 
-        tags$label("Matching methods",
+        tags$label("Matching methods (from table filters)",
                    style = "font-weight:600; font-size:13px; color:#343a40;
                             display:block; margin-bottom:4px; margin-top:10px;"),
-        verbatimTextOutput(ns("av_filter_summary"))
+        verbatimTextOutput(ns("av_filter_summary_map"))
       ),
 
       mainPanel(
         width = 9,
-        navlistPanel(
-          id       = ns("av_subtabs"),
-          well     = FALSE,
-          widths   = c(2, 10),
-
-          tabPanel(
-            title = tagList(icon("table"), " Method table"),
-            br(),
-            h4("Filtered caret methods",
-               style = "border-left:3px solid #534AB7; padding-left:8px;
-                        font-size:14px; margin-top:4px; margin-bottom:8px;"),
-            shinycssloaders::withSpinner(DT::dataTableOutput(ns("av_method_table")))
-          ),
-
-          tabPanel(
-            title = tagList(icon("map"), " Method map"),
-            br(),
-            h4("Similarity map — colour groups highlighted",
-               style = "border-left:3px solid #534AB7; padding-left:8px;
-                        font-size:14px; margin-top:4px; margin-bottom:8px;"),
-            shinycssloaders::withSpinner(plotOutput(ns("av_map_plot"), height = "80vh"))
-          )
-        )
+        h4("Similarity map — colour groups highlighted",
+           style = "border-left:3px solid #534AB7; padding-left:8px;
+                    font-size:14px; margin-top:4px; margin-bottom:8px;"),
+        shinycssloaders::withSpinner(plotOutput(ns("av_map_plot"), height = "80vh"))
       )
     )
   )
@@ -338,7 +383,7 @@ meth_available_server <- function(id,
     # ── Base filter (type + exclude tags) ─────────────────────────────────────
     av_base_df <- reactive({
       df <- av_methods_plain()
-      df <- switch(input$av_type,
+      df <- switch(input$av_type %||% "reg",
                    "reg"  = df[df$Regression,     ],
                    "cls"  = df[df$Classification, ],
                    "both" = df)
@@ -375,8 +420,16 @@ meth_available_server <- function(id,
       if (any_active) df[df$Group != "none", ] else df
     })
 
-    # ── Sidebar count ─────────────────────────────────────────────────────────
+    # ── Sidebar count (table tab) ─────────────────────────────────────────────
     output$av_filter_summary <- renderPrint({
+      df <- av_filtered_df()
+      cat(nrow(df), "method(s)\n")
+      if (nrow(df) > 0 && nrow(df) <= 30)
+        cat(paste(sort(df$Model), collapse = ", "))
+    })
+
+    # ── Sidebar count (map tab — separate output ID to avoid DOM duplication) ─
+    output$av_filter_summary_map <- renderPrint({
       df <- av_filtered_df()
       cat(nrow(df), "method(s)\n")
       if (nrow(df) > 0 && nrow(df) <= 30)
@@ -413,8 +466,9 @@ meth_available_server <- function(id,
 
     # ── Method map ────────────────────────────────────────────────────────────
     output$av_map_plot <- renderPlot({
-      wide <- av_wide_matrix()
-      wide_sub <- switch(input$av_type,
+      wide     <- av_wide_matrix()
+      av_type  <- input$av_type %||% "reg"
+      wide_sub <- switch(av_type,
                          "reg"  = wide[wide$Regression == 1,     ],
                          "cls"  = wide[wide$Classification == 1, ],
                          "both" = wide)
@@ -422,7 +476,7 @@ meth_available_server <- function(id,
 
       lit_boost <- 3
 
-      d   <- stats::dist(wide_sub, method = input$av_map_dist)
+      d   <- stats::dist(wide_sub, method = input$av_map_dist %||% "manhattan")
       dd  <- stats::cmdscale(d, k = 2)
       df_map <- data.frame(Model = rownames(dd), X1 = dd[, 1], X2 = dd[, 2],
                            stringsAsFactors = FALSE)
@@ -434,7 +488,7 @@ meth_available_server <- function(id,
       base_models <- av_base_df()$Model
       df_map$Group[!df_map$Model %in% base_models] <- "none"
 
-      type_label <- switch(input$av_type,
+      type_label <- switch(av_type,
                            "reg"  = "Regression",
                            "cls"  = "Classification",
                            "both" = "All")
@@ -445,7 +499,9 @@ meth_available_server <- function(id,
         ggplot2::theme_minimal(base_size = 13) +
         ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5))
 
-      # helper to add one layer (grey or coloured, plain or lit-bold)
+      label_size <- input$av_map_label_size %||% 5
+      overlaps   <- input$av_map_overlaps   %||% 50
+
       .add_layer <- function(p, df_sub, col, size_pt, size_txt, face) {
         if (nrow(df_sub) == 0) return(p)
         p +
@@ -454,12 +510,11 @@ meth_available_server <- function(id,
                                    size         = size_txt,
                                    colour       = col,
                                    fontface     = face,
-                                   max.overlaps = input$av_map_overlaps,
+                                   max.overlaps = overlaps,
                                    box.padding  = 0.4,
                                    na.rm        = TRUE)
       }
 
-      # tags lookup for lit-highlight check
       tags_lookup <- av_base_df()[, c("Model", "Tags_plain")]
       has_lit     <- length(input$av_flt_any) > 0
       pattern     <- if (has_lit) paste(input$av_flt_any, collapse = "|") else ""
@@ -475,26 +530,23 @@ meth_available_server <- function(id,
              lit   = df_sub[ df_sub$LitHit, ])
       }
 
-      # grey background (groups 1→6 rendered on top)
       df_grey <- df_map[df_map$Group == "none", ]
       if (nrow(df_grey) > 0) {
         sp <- .split_lit(df_grey)
-        p  <- .add_layer(p, sp$plain, "#cccccc", 1.5, input$av_map_label_size,     "plain")
-        p  <- .add_layer(p, sp$lit,   "#888888", 2.0, input$av_map_label_size + lit_boost, "bold")
+        p  <- .add_layer(p, sp$plain, "#cccccc", 1.5, label_size,             "plain")
+        p  <- .add_layer(p, sp$lit,   "#888888", 2.0, label_size + lit_boost, "bold")
       }
 
-      # coloured groups — render 6 → 1 so group 1 is on top
       for (g in c("6", "5", "4", "3", "2", "1")) {
         df_g <- df_map[df_map$Group == g, ]
         if (nrow(df_g) > 0) {
           col <- av_group_colours[g]
           sp  <- .split_lit(df_g)
-          p   <- .add_layer(p, sp$plain, col, 2.0, input$av_map_label_size,     "plain")
-          p   <- .add_layer(p, sp$lit,   col, 2.5, input$av_map_label_size + lit_boost, "bold")
+          p   <- .add_layer(p, sp$plain, col, 2.0, label_size,             "plain")
+          p   <- .add_layer(p, sp$lit,   col, 2.5, label_size + lit_boost, "bold")
         }
       }
 
-      # caption legend
       active_groups <- sort(unique(df_map$Group[df_map$Group != "none"]))
       if (length(active_groups) > 0) {
         group_names <- c("1" = "Neural Network", "2" = "OLS",      "3" = "Tree-Based",
