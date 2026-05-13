@@ -96,7 +96,7 @@ out_mahalanobis_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-out_mahalanobis_server <- function(id, get_data, get_raw, roles) {
+out_mahalanobis_server <- function(id, get_data, get_raw, roles, seed = reactive(2026)) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -121,6 +121,7 @@ out_mahalanobis_server <- function(id, get_data, get_raw, roles) {
     
     # ── Core computation (plot only — never modifies get_data()) ──────────────
     result <- reactive({
+      seed()   # top — always registers dependency before any req() / early return (Mahalanobis is deterministic)
       req(input$id_col, input$pred_cols)
       df   <- get_data()
       cols <- intersect(input$pred_cols, names(df))

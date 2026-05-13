@@ -193,7 +193,8 @@ data_roles_ui <- function(id, default_seed = NULL) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-data_roles_server <- function(id, get_raw, default_roles = NULL) {
+data_roles_server <- function(id, get_raw, default_roles = NULL,
+                              auto_split = FALSE, split_ratio = 0.7) {
   moduleServer(id, function(input, output, session) {
 
     ns <- session$ns
@@ -222,6 +223,43 @@ data_roles_server <- function(id, get_raw, default_roles = NULL) {
     observeEvent(get_raw(), {
       split_col(NULL)
     }, ignoreInit = TRUE)
+
+    # auto-apply 2-partition split on first data load when task-specific var is set
+    observeEvent(get_raw(), {
+      if (!isTRUE(auto_split)) return()
+      df <- get_raw(); req(df)
+      n  <- nrow(df)
+      # use outcome col from default_roles for stratification, fallback to first col
+      outcome_col <- if (!is.null(default_roles)) {
+        names(default_roles)[unlist(default_roles) == "outcome"]
+      } else character(0)
+      y <- if (length(outcome_col) > 0 && outcome_col %in% names(df)) {
+        df[[outcome_col]]
+      } else {
+        df[[1]]
+      }
+      set.seed(input$seed %||% 42)
+      idx_str <- caret::createDataPartition(y = y, p = split_ratio, list = FALSE)
+      idx_srs <- base::sample(x = n, size = floor(split_ratio * n), replace = FALSE)
+      out     <- rep("Test", n)
+      out[idx_str] <- "Train"
+      split_col(list(
+        name   = "split_TrainTest",
+        data   = factor(out, levels = c("Train", "Test")),
+        method = "two_partition",
+        extra  = list(idx_srs = idx_srs, idx_str = idx_str, y = y)
+      ))
+      # build full assignments so default_roles + split role are both applied
+      # (can't rely on init_assignments because it skips default_roles when cur is non-empty)
+      vars    <- c(names(df), "split_TrainTest")
+      new_out <- setNames(rep("predictor", length(vars)), vars)
+      if (!is.null(default_roles)) {
+        for (v in intersect(names(default_roles), vars))
+          new_out[[v]] <- default_roles[[v]]
+      }
+      new_out[["split_TrainTest"]] <- "split"
+      assignments(new_out)
+    }, ignoreInit = FALSE, once = TRUE)
 
     # ── Internal data ────────────────────────────────────────────────────────
 
@@ -362,10 +400,10 @@ data_roles_server <- function(id, get_raw, default_roles = NULL) {
         if (method == "two_partition") {
           y <- df[[input$p2_stratify]]
           p <- input$p2_train
-          # tutorial: base::sample for simple random
-          idx_srs <- base::sample(x = n, size = floor(p * n), replace = FALSE)
-          # tutorial: caret::createDataPartition for stratified
+          # tutorial: caret::createDataPartition for stratified (immediately after set.seed)
           idx_str <- caret::createDataPartition(y = y, p = p, list = FALSE)
+          # tutorial: base::sample for simple random (after, so seed state matches classmates)
+          idx_srs <- base::sample(x = n, size = floor(p * n), replace = FALSE)
           # use stratified as the actual split column
           out <- rep("Test", n)
           out[idx_str] <- "Train"

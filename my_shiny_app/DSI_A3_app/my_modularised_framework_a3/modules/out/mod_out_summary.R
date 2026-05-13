@@ -52,7 +52,8 @@ out_summary_ui <- function(id) {
 
 out_summary_server <- function(id, get_data, get_raw, roles,
                                flagged_mah, flagged_cooks, flagged_lof,
-                               flagged_svm, flagged_rf, flagged_iforest) {
+                               flagged_svm, flagged_rf, flagged_iforest,
+                               seed = reactive(2026)) {
   moduleServer(id, function(input, output, session) {
     
     observe({
@@ -66,10 +67,11 @@ out_summary_server <- function(id, get_data, get_raw, roles,
     
     # ── Aggregate flags ───────────────────────────────────────────────────────
     long_df <- reactive({
+      seed()  # direct dependency — re-aggregate whenever seed changes
       req(input$id_col)
       df <- get_data()
       id_labels <- as.character(df[[input$id_col]])
-      
+
       active <- input$active_methods
       if (is.null(active) || length(active) == 0) return(NULL)
       

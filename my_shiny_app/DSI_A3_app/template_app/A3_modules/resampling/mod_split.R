@@ -115,7 +115,10 @@ split_ui <- function(id) {
                    verbatimTextOutput(ns("p1_strat_table")),
                    hr(),
                    .section_head("Partition sizes"),
-                   tableOutput(ns("p1_sizes"))
+                   tableOutput(ns("p1_sizes")),
+                   hr(),
+                   .section_head("Applied test-set patient IDs"),
+                   DT::DTOutput(ns("test_patient_ids"))
                  )
                )
       ),
@@ -530,6 +533,35 @@ split_server <- function(id, get_data) {
       )
     })
     
+    
+    output$test_patient_ids <- DT::renderDT({
+      df <- get_data()
+      idx <- applied_indices()
+      test_rows <- setdiff(seq_len(nrow(df)), as.integer(idx))
+      out <- data.frame(
+        Patient = if ("Patient" %in% names(df)) df$Patient[test_rows] else test_rows,
+        Row = test_rows,
+        stringsAsFactors = FALSE
+      )
+      if ("ObservationDate" %in% names(df)) {
+        out$ObservationDate <- df$ObservationDate[test_rows]
+      }
+      if ("Response" %in% names(df)) {
+        out$Response <- df$Response[test_rows]
+      }
+      if ("ObservationDate" %in% names(out)) {
+        out <- out[order(out$ObservationDate, out$Row), , drop = FALSE]
+      }
+      DT::datatable(
+        out,
+        rownames = FALSE,
+        filter = "top",
+        options = list(
+          pageLength = 25,
+          scrollX = TRUE
+        )
+      )
+    })
     
     # ── TAB 2: 3-partition ────────────────────────────────────────────────────
     

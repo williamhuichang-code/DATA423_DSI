@@ -264,15 +264,21 @@ out_response_server <- function(id, get_data, get_raw, roles, default_omit_ids =
         req(id_col %in% names(df))
         as.character(unique(df[[id_col]]))
       }
-      # apply task-specific defaults on first load only; intersect to guard against bad IDs
-      selected <- if (!defaults_applied() && !is.null(default_omit_ids)) {
+      # apply defaults once on first load; afterwards only refresh choices (preserve selection)
+      if (!defaults_applied() && !is.null(default_omit_ids)) {
         defaults_applied(TRUE)
-        intersect(as.character(default_omit_ids), ids)
+        updateSelectizeInput(session, "omit_ids", choices = ids,
+                             selected = intersect(as.character(default_omit_ids), ids),
+                             server = TRUE)
       } else {
-        character(0)
+        # isolate() reads current selection WITHOUT creating a reactive dependency
+        # (avoids the infinite loop: observer → updateSelectizeInput → input$omit_ids changes → observer)
+        # intersect() drops any IDs that no longer exist in the new data
+        current_sel <- isolate(input$omit_ids)
+        updateSelectizeInput(session, "omit_ids", choices = ids,
+                             selected = intersect(current_sel, ids),
+                             server = TRUE)
       }
-      updateSelectizeInput(session, "omit_ids", choices = ids, selected = selected,
-                           server = TRUE)
     })
     
     # ── collect global rules ────────────────────────────────────────────────

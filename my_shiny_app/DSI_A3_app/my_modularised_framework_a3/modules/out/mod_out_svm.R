@@ -111,7 +111,7 @@ out_svm_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-out_svm_server <- function(id, get_data, get_raw, roles) {
+out_svm_server <- function(id, get_data, get_raw, roles, seed = reactive(2026)) {
   moduleServer(id, function(input, output, session) {
     
     observe({
@@ -129,6 +129,7 @@ out_svm_server <- function(id, get_data, get_raw, roles) {
     })
     
     result <- reactive({
+      current_seed <- seed()   # top — always registers dependency before any req() / early return
       req(input$id_col, input$pred_cols)
       df   <- get_data()
       cols <- intersect(input$pred_cols, names(df))
@@ -193,6 +194,7 @@ out_svm_server <- function(id, get_data, get_raw, roles) {
       # ── 5. fit one-class SVM ──────────────────────────────────────────────
       tryCatch({
         mat   <- as.matrix(df_sub)
+        set.seed(current_seed)
         model <- e1071::svm(mat, y=NULL, type="one-classification",
                             nu=input$nu, scale=FALSE,  # scaling handled above
                             kernel=input$kernel)

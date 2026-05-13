@@ -121,7 +121,7 @@ out_rf_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-out_rf_server <- function(id, get_data, get_raw, roles) {
+out_rf_server <- function(id, get_data, get_raw, roles, seed = reactive(2026)) {
   moduleServer(id, function(input, output, session) {
     
     observe({
@@ -149,6 +149,7 @@ out_rf_server <- function(id, get_data, get_raw, roles) {
     })
     
     result <- reactive({
+      current_seed <- seed()   # top — always registers dependency before any req() / early return
       req(input$id_col, input$response_col, input$pred_cols)
       df       <- get_data()
       response <- input$response_col
@@ -180,6 +181,7 @@ out_rf_server <- function(id, get_data, get_raw, roles) {
         if (ncol(df_sub) < 2) return(NULL)
         
         # ── 3. fit Random Forest ───────────────────────────────────────────
+        set.seed(current_seed)
         gen_model <- randomForest::randomForest(
           as.formula(paste(response,"~.")), data=df_sub)
         

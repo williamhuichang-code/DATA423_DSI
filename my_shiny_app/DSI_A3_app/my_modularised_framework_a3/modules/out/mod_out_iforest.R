@@ -117,7 +117,7 @@ out_iforest_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-out_iforest_server <- function(id, get_data, get_raw, roles) {
+out_iforest_server <- function(id, get_data, get_raw, roles, seed = reactive(2026)) {
   moduleServer(id, function(input, output, session) {
     
     observe({
@@ -141,6 +141,7 @@ out_iforest_server <- function(id, get_data, get_raw, roles) {
     })
     
     result <- reactive({
+      current_seed <- seed()   # top — always registers dependency before any req() / early return
       req(input$id_col, input$pred_cols)
       df    <- get_data()
       preds <- intersect(input$pred_cols, names(df))
@@ -170,7 +171,8 @@ out_iforest_server <- function(id, get_data, get_raw, roles) {
       tryCatch({
         ntrees      <- max(10, as.integer(input$ntrees))
         sample_size <- max(32, as.integer(input$sample_size))
-        
+
+        set.seed(current_seed)
         itree  <- isotree::isolation.forest(
           df_sub,
           ntrees      = ntrees,

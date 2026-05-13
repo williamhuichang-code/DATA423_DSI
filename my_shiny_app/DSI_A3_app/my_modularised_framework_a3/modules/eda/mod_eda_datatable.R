@@ -77,7 +77,14 @@ eda_datatable_ui <- function(id) {
       # ── Misc ───────────────────────────────────────────────────────────
       checkboxInput(ns("rownames"),   "Show row names",    value = TRUE),
       checkboxInput(ns("ordering"),   "Column ordering",   value = TRUE),
-      checkboxInput(ns("responsive"), "Responsive layout", value = FALSE)
+      checkboxInput(ns("responsive"), "Responsive layout", value = FALSE),
+      hr(),
+      actionButton(
+        ns("reset"),
+        label = "Reset",
+        icon = icon("rotate-left"),
+        width = "100%"
+      )
     ),
     
     mainPanel(
@@ -98,6 +105,7 @@ eda_datatable_server <- function(id, get_data, get_raw) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
+    table_reset_nonce <- reactiveVal(0)
     
     # ── Active data source ────────────────────────────────────────────────
     active_data <- reactive({
@@ -113,6 +121,27 @@ eda_datatable_server <- function(id, get_data, get_raw) {
                            server   = TRUE)
     }) |> bindEvent(active_data(), input$use_raw, ignoreNULL = TRUE)
     
+    # ── Reset table controls and client-side table state ─────────────────
+    observeEvent(input$reset, {
+      updateCheckboxInput(session, "use_raw", value = FALSE)
+      
+      df <- get_data(); req(df)
+      updateSelectizeInput(session, "cols",
+                           choices  = names(df),
+                           selected = names(df),
+                           server   = TRUE)
+      
+      updateSelectInput(session, "page_length", selected = 15)
+      updateSelectInput(session, "filter", selected = "top")
+      updateSelectInput(session, "selection", selected = "none")
+      updateCheckboxGroupInput(session, "dom", selected = c("l", "f", "t", "i", "p"))
+      updateCheckboxInput(session, "rownames", value = TRUE)
+      updateCheckboxInput(session, "ordering", value = TRUE)
+      updateCheckboxInput(session, "responsive", value = FALSE)
+      
+      table_reset_nonce(isolate(table_reset_nonce()) + 1)
+    })
+    
     # ── Filtered data ─────────────────────────────────────────────────────
     get_display_df <- reactive({
       df   <- active_data(); req(df)
@@ -123,6 +152,7 @@ eda_datatable_server <- function(id, get_data, get_raw) {
     
     # ── Main table ────────────────────────────────────────────────────────
     output$table <- DT::renderDataTable({
+      table_reset_nonce()
       df <- get_display_df(); req(df)
       
       ext <- if (isTRUE(input$responsive)) list(Responsive = TRUE) else list()
@@ -146,6 +176,7 @@ eda_datatable_server <- function(id, get_data, get_raw) {
     
     # ── Selected rows ─────────────────────────────────────────────────────
     output$selected_tbl <- DT::renderDataTable({
+      table_reset_nonce()
       req(input$table_rows_selected)
       df <- get_display_df()
       DT::datatable(

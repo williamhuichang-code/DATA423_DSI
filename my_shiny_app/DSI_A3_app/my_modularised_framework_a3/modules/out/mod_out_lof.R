@@ -130,7 +130,7 @@ out_lof_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-out_lof_server <- function(id, get_data, get_raw, roles) {
+out_lof_server <- function(id, get_data, get_raw, roles, seed = reactive(2026)) {
   moduleServer(id, function(input, output, session) {
     
     observe({
@@ -148,6 +148,7 @@ out_lof_server <- function(id, get_data, get_raw, roles) {
     })
     
     result <- reactive({
+      seed()   # top — always registers dependency before any req() / early return (LOF is deterministic)
       req(input$id_col, input$pred_cols)
       df   <- get_data()
       cols <- intersect(input$pred_cols, names(df))

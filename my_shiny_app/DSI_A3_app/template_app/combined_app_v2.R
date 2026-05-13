@@ -1006,7 +1006,10 @@ ui <- fluidPage(
                               verbatimTextOutput("p1_strat_table"),
                               hr(),
                               h4("Partition sizes", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
-                              tableOutput("p1_sizes")
+                              tableOutput("p1_sizes"),
+                              hr(),
+                              h4("Applied train/test observation IDs", style="border-left:3px solid #534AB7;padding-left:8px;font-size:14px;margin-top:16px;margin-bottom:8px;"),
+                              DT::dataTableOutput("split_membership_tbl")
                             )
                           )
                  ),
@@ -2560,6 +2563,29 @@ server <- function(input, output, session) {
     
     # getSplit — feeds getTrainData and getTestData
     getSplit <- reactive({ applied_indices() })
+
+    output$split_membership_tbl <- DT::renderDataTable({
+      df <- getData()
+      req(nrow(df) > 0)
+      idx <- as.integer(getSplit())
+      idx <- idx[!is.na(idx) & idx >= 1 & idx <= nrow(df)]
+      rows <- seq_len(nrow(df))
+      id_candidates <- setdiff(names(df)[grepl("(^id$|_id$|id$|ID$|Id$|patient|Patient|subject|Subject|record|Record|tid|Tid)", names(df))], "Response")
+      out <- data.frame(Patient = rownames(df), Row = rows, Partition = ifelse(rows %in% idx, "Train", "Test"), check.names = FALSE)
+      if (length(id_candidates) > 0) {
+        id_df <- df[id_candidates]
+        names(id_df) <- paste0("ID: ", names(id_df))
+        out <- cbind(id_df, out)
+      }
+      if ("Response" %in% names(df)) out$Response <- df$Response
+      if ("ObservationDate" %in% names(df)) out$ObservationDate <- df$ObservationDate
+      DT::datatable(
+        out,
+        rownames = FALSE,
+        filter = "top",
+        options = list(pageLength = 25, scrollX = TRUE, order = list(list(which(names(out) == "Partition") - 1, "desc"), list(which(names(out) == "Row") - 1, "asc")))
+      )
+    })
     
     # ── STRATEGY: outlier response module ──────────────────────────────────
     out_response_roles <- reactive({
@@ -6230,6 +6256,7 @@ server <- function(input, output, session) {
 # =================================================================================
 
 shinyApp(ui = ui, server = server)
+
 
 
 

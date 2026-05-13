@@ -12,8 +12,8 @@ library(plotly)
 library(ggrepel)
 library(recipes)
 library(shinycssloaders) # busy spinner (compatibility with bs4Dash TBC)
-library(caret)
 library(cluster)
+# caret, doParallel, cli, butcher, glmnet, pls, rpart, rpart.plot loaded in mod_meth_shared.R
 
 
 # ── GLOBAL CONFIG ────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ DIGITS = 3
 FILE_OF_INTEREST <- "Ass3Data.csv"
 
 general_initial <- c("impute_bag", "dateDecimal", "quarter", "month", "week", "dow",
-                     "other", "YeoJohnson", "dummy", "interact", "zv", "nzv", "center", "scale")
+                     "other", "YeoJohnson", "dummy", "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c('impute_bag', 'dateDecimal', 'quarter', 'month', 'week', 'dow',
                     'other', 'YeoJohnson', 'dummy', 'interact', 'lincomb',
@@ -49,15 +49,19 @@ A3_default_roles <- list(
   ObservationDate = "date"
 )
 
-SPLIT_SEED <- 199
+SPLIT_SEED   <- 199
+MODEL_SEED   <- 673
+AUTO_SPLIT   <- TRUE
+SPLIT_RATIO  <- 0.8
 
-A3_omit_ids <- c(
-  "tid-57748", "tid-57237", "tid-57537", "tid-57651", "tid-57689",
-  "tid-57361", "tid-57431", "tid-57479", "tid-57487", "tid-57500",
-  "tid-57732", "tid-57739", "tid-57877", "tid-57808", "tid-57845",
-  "tid-57859", "tid-57921", "tid-58028", "tid-58060", "tid-58055",
-  "tid-57470", "tid-57580", "tid-57899"
-)
+# A3_omit_ids <- c(
+#   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
+#   "tid-57689", "tid-57787", "tid-57761", "tid-57431",
+#   "tid-57479", "tid-57487", "tid-57600", "tid-57732",
+#   "tid-57739", "tid-57808", "tid-57845", "tid-57859",
+#   "tid-57921", "tid-57928", "tid-58050", "tid-58055",
+#   "tid-57470", "tid-57569", "tid-57580", "tid-57899"
+# )
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
@@ -72,6 +76,22 @@ file_choices_with_none    <- c("(none)", csv_files)
 default_selected <- if (FILE_OF_INTEREST %in% csv_files) FILE_OF_INTEREST else "(none)"
 
 
+# ── PREPROCESSING UTILITIES ──────────────────────────────────────────────────
+# defined before module loading so category UIs can reference ppchoices at build time
+# dynamicSteps() is defined in modules/mod_meth_tune.R (sourced into globalenv)
+
+ppchoices <- c(
+  "impute_knn", "impute_bag", "impute_median", "impute_mode",
+  "YeoJohnson", "BoxCox", "log", "sqrt",
+  "naomit",
+  "pca", "pls", "ica",
+  "center", "scale", "range", "spatialsign",
+  "year", "quarter", "month", "week", "dow", "dateDecimal",
+  "nzv", "zv", "other", "dummy",
+  "poly", "interact", "lincomb",
+  "indicate_na", "corr"
+)
+
 # ── MODULE LOADING LOGIC ─────────────────────────────────────────────────────
 
 # look inside "modules" folder and its subs, load all files with .R according to their full paths
@@ -83,6 +103,10 @@ list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
 
 # sets R to display numbers with n significant digits globally (set it in global config)
 options(digits = DIGITS)
+
+
+# ── MODEL UTILITIES ───────────────────────────────────────────────────────────
+# defined in modules/mod_meth_tune.R (sourced into globalenv)
 
 
 
@@ -179,12 +203,19 @@ ui <- dashboardPage(
                # more future subtabs here
       ),
       
-      menuItem("Model", tabName = "model", icon = icon("brain"),
-               menuSubItem("Recipe",     tabName = "pre_recipe"),
-               menuSubItem("Tune",       tabName = "model_tune"),
-               menuSubItem("Regression", tabName = "model_reg")
-               # more future subtabs here
-      )
+      menuItem("Methods", icon = icon("flask"),
+               menuSubItem("Null",            tabName = "meth_null",     icon = icon("minus")),
+               menuSubItem("OLS",             tabName = "meth_ols",      icon = icon("chart-line")),
+               menuSubItem("Tree Based",      tabName = "meth_tree",     icon = icon("tree")),
+               menuSubItem("Kernel Methods",  tabName = "meth_kernel",   icon = icon("circle-nodes")),
+               menuSubItem("Ensembles",       tabName = "meth_ensemble", icon = icon("layer-group")),
+               menuSubItem("Neural Networks", tabName = "meth_nn",       icon = icon("brain")),
+               menuSubItem("WildCards",       tabName = "meth_wildcard", icon = icon("wand-magic-sparkles"))
+      ),
+
+      menuItem("Model Selection", tabName = "meth_select", icon = icon("trophy")),
+      menuItem("Performance",    tabName = "meth_perf",   icon = icon("gauge-high"))
+
     )
   ),
   
@@ -237,10 +268,46 @@ ui <- dashboardPage(
       tabItem(tabName = "out_summary", out_summary_ui("out_summary")),
       tabItem(tabName = "out_response", out_response_ui("out_response")),
       
-      # Model
-      tabItem(tabName = "pre_recipe", prep_recipe_ui("prep_recipe")),
-      tabItem(tabName = "model_tune",      model_tune_ui("model_tune")),
-      tabItem(tabName = "model_reg",       model_reg_ui("model_reg"))
+      # Methods — one tabItem per category
+      tabItem(tabName = "meth_null",
+              meth_null_ui("meth_null",
+                           pp_choices         = ppchoices,
+                           default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                           model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
+
+      tabItem(tabName = "meth_ols",
+              meth_ols_ui("meth_ols",
+                          pp_choices         = ppchoices,
+                          default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                          model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
+
+      tabItem(tabName = "meth_tree",
+              meth_tree_ui("meth_tree",
+                           pp_choices         = ppchoices,
+                           default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                           model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
+
+      tabItem(tabName = "meth_nn",
+              tags$p("No methods configured yet.",
+                     style = "color:#adb5bd; font-style:italic; padding:20px;")),
+      tabItem(tabName = "meth_kernel",
+              meth_kernel_ui("meth_kernel",
+                             pp_choices         = ppchoices,
+                             default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                             model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
+      tabItem(tabName = "meth_ensemble",
+              tags$p("No methods configured yet.",
+                     style = "color:#adb5bd; font-style:italic; padding:20px;")),
+      tabItem(tabName = "meth_wildcard",
+              tags$p("No methods configured yet.",
+                     style = "color:#adb5bd; font-style:italic; padding:20px;")),
+
+      tabItem(tabName = "meth_select",
+              meth_select_ui("meth_select")),
+
+      tabItem(tabName = "meth_perf",
+              meth_perf_ui("meth_perf"))
+
     )
   ),
   
@@ -257,7 +324,10 @@ ui <- dashboardPage(
 # =================================================================================
 
 server <- function(input, output, session) {
-  
+
+  if (!dir.exists("./SavedModels")) dir.create("./SavedModels")
+  shiny::onSessionEnded(stopApp)
+
   # ── RAW DATA ─────────────────────────────────────────────────────────────
   
   get_raw <- reactive({
@@ -273,7 +343,9 @@ server <- function(input, output, session) {
   # ── DOMAIN CONFIGS ────────────────────────────────────────────────────────
   
   config         <- data_roles_server("data_roles", get_raw,
-                                     default_roles = if (exists("A3_default_roles")) A3_default_roles else NULL)
+                                     default_roles = if (exists("A3_default_roles")) A3_default_roles else NULL,
+                                     auto_split    = if (exists("AUTO_SPLIT"))  AUTO_SPLIT  else FALSE,
+                                     split_ratio   = if (exists("SPLIT_RATIO")) SPLIT_RATIO else 0.7)
   config_data    <- config$data            # reactive df (raw + optional split col)
   roles          <- config$roles           # reactive named list of role assignments
   important_vars <- config$important_vars  # reactive character vector
@@ -330,24 +402,69 @@ server <- function(input, output, session) {
   out_histogram_server("out_hist",                 get_diagnose_data, roles)
   out_boxplot_server("out_boxplot",                get_diagnose_data, get_raw, roles)
   out_bagplot_server("out_bagplot",                get_diagnose_data, get_raw, roles)
-  out_mah     <- out_mahalanobis_server("out_mah", get_diagnose_data, get_raw, roles)
-  out_cooks   <- out_cooks_server("out_cooks",     get_diagnose_data, get_raw, roles)
-  out_lof     <- out_lof_server("out_lof",         get_diagnose_data, get_raw, roles)
-  out_svm     <- out_svm_server("out_svm",         get_diagnose_data, get_raw, roles)
-  out_rf      <- out_rf_server("out_rf",           get_diagnose_data, get_raw, roles)
-  out_iforest <- out_iforest_server("out_iforest", get_diagnose_data, get_raw, roles)
+  out_mah     <- out_mahalanobis_server("out_mah", get_diagnose_data, get_raw, roles, seed = seed_in_use)
+  out_cooks   <- out_cooks_server("out_cooks",     get_diagnose_data, get_raw, roles, seed = seed_in_use)
+  out_lof     <- out_lof_server("out_lof",         get_diagnose_data, get_raw, roles, seed = seed_in_use)
+  out_svm     <- out_svm_server("out_svm",         get_diagnose_data, get_raw, roles, seed = seed_in_use)
+  out_rf      <- out_rf_server("out_rf",           get_diagnose_data, get_raw, roles, seed = seed_in_use)
+  out_iforest <- out_iforest_server("out_iforest", get_diagnose_data, get_raw, roles, seed = seed_in_use)
   out_summary <- out_summary_server("out_summary", get_diagnose_data, get_raw, roles,
                                     out_mah$flagged, out_cooks$flagged,
                                     out_lof$flagged, out_svm$flagged,
-                                    out_rf$flagged,  out_iforest$flagged)
+                                    out_rf$flagged,  out_iforest$flagged,
+                                    seed = seed_in_use)
   
   
   # ── PIPELINE (AUTO) ───────────────────────────────────────────────────────
   
-  # OOP for recipe-based preprocessing and modelling
-  precipe    <- prep_recipe_server("prep_recipe", get_model_data, roles, seed_in_use)
-  model_tune <- model_tune_server("model_tune",   get_model_data, roles, precipe$recipe, seed_in_use)
-  model_reg <- model_reg_server("model_reg",      get_model_data, roles, precipe$recipe, model_tune, get_raw, seed_in_use)
+  # Methods modules — one server instance per active category
+  meth_null <- meth_null_server("meth_null", get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   pp_choices         = ppchoices)
+
+  meth_ols  <- meth_ols_server("meth_ols",  get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   glmnet_preprocess  = if (exists("glmnet_initial"))  glmnet_initial  else NULL,
+                   pp_choices         = ppchoices)
+
+  meth_tree <- meth_tree_server("meth_tree", get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   rpart_preprocess   = if (exists("rpart_initial"))   rpart_initial   else NULL,
+                   pp_choices         = ppchoices)
+
+  meth_kernel <- meth_kernel_server("meth_kernel", get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   pp_choices         = ppchoices)
+
+  # ── Aggregate all trained models for Model Selection ──────────────────────
+  # Each method module returns $models (reactiveValues). Merge here in the app
+  # file so neither module depends on the other.
+  get_all_models <- reactive({
+    all <- c(
+      reactiveValuesToList(meth_null$models),
+      reactiveValuesToList(meth_ols$models),
+      reactiveValuesToList(meth_tree$models),
+      reactiveValuesToList(meth_kernel$models)
+    )
+    Filter(Negate(is.null), all)
+  })
+
+  meth_select <- meth_select_server("meth_select", get_models = get_all_models)
+
+  meth_perf_server("meth_perf",
+                   get_data   = get_model_data,
+                   roles      = roles,
+                   get_models = get_all_models,
+                   choice     = meth_select$choice)
+
   
   
 }

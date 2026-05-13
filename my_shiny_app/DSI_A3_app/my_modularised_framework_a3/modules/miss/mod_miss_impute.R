@@ -446,7 +446,7 @@ miss_impute_server <- function(id, get_data, roles, seed = reactive(42)) {
               train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
             }
             rec <- recipe(fml, data = train_with_y) |>
-              step_impute_knn(all_predictors(), neighbors = input$knn_neighbors)
+              step_impute_knn(all_predictors(), -has_type("date"), neighbors = input$knn_neighbors)
             set.seed(seed())
             trained     <- prep(rec, training = train_with_y, verbose = FALSE)
             train_baked <- bake(trained, new_data = NULL)
@@ -466,7 +466,7 @@ miss_impute_server <- function(id, get_data, roles, seed = reactive(42)) {
               train_with_y <- train_pred; test_with_y <- test_pred; fml <- ~ .
             }
             rec <- recipe(fml, data = train_with_y) |>
-              step_impute_bag(all_predictors(), trees = input$bag_trees)
+              step_impute_bag(all_predictors(), -has_type("date"), trees = input$bag_trees)
             set.seed(seed())
             withProgress(message = paste0("Fitting Bag (", input$bag_trees, " trees)..."), value = 0.2, {
               trained <- prep(rec, training = train_with_y, verbose = FALSE)
