@@ -22,9 +22,9 @@ meth_nn_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("Quantile Regression Neural Network (QRNN)", value = "qrnn", style = "padding-top:12px;",
+        tabPanel("qrnn", value = "qrnn", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "qrnn", has_tuning = TRUE)),
-        tabPanel("Bayesian Regularized Neural Network (BRNN)", value = "brnn", style = "padding-top:12px;",
+        tabPanel("brnn", value = "brnn", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "brnn", has_tuning = TRUE))
       )
     ),

@@ -22,9 +22,9 @@ meth_ensemble_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("Rule-Based Boosting (Cubist)", value = "cubist", style = "padding-top:12px;",
+        tabPanel("cubist", value = "cubist", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "cubist", has_tuning = TRUE)),
-        tabPanel("Random Forest — Ranger",       value = "ranger", style = "padding-top:12px;",
+        tabPanel("ranger",  value = "ranger", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "ranger",  has_tuning = TRUE))
       )
     ),

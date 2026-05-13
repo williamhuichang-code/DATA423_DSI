@@ -76,9 +76,9 @@ meth_ols_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("Elastic Net Regression (GLMnet)", value = "glmnet", style = "padding-top:12px;",
+        tabPanel("glmnet", value = "glmnet", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "glmnet")),
-        tabPanel("Partial Least Squares (PLS)",    value = "pls",    style = "padding-top:12px;",
+        tabPanel("pls",    value = "pls",    style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "pls"))
       )
     ),

@@ -22,9 +22,9 @@ meth_wildcard_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("Multivariate Adaptive Regression Splines (Earth)", value = "earth", style = "padding-top:12px;",
+        tabPanel("earth", value = "earth", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "earth", has_tuning = TRUE)),
-        tabPanel("M5 Model Tree (M5)",                               value = "M5",    style = "padding-top:12px;",
+        tabPanel("M5",    value = "M5",    style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "M5",    has_tuning = TRUE))
       )
     ),

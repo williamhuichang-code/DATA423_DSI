@@ -22,9 +22,9 @@ meth_kernel_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("Support Vector Machine — Radial", value = "svmRadialSigma", style = "padding-top:12px;",
+        tabPanel("svmRadialSigma", value = "svmRadialSigma", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "svmRadialSigma", has_tuning = TRUE)),
-        tabPanel("Gaussian Process — Radial",       value = "gaussprRadial",  style = "padding-top:12px;",
+        tabPanel("gaussprRadial",  value = "gaussprRadial",  style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "gaussprRadial",  has_tuning = TRUE))
       )
     ),

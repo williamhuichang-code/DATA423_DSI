@@ -67,13 +67,14 @@ stopMode <- function(obj) {
 description <- function(name) {
   regexName <- paste0("^", name, "$")
   mlist     <- caret::getModelInfo(model = regexName)[[name]]
+  line0     <- paste0(mlist$label, " (", name, ")")
   line1     <- paste0("Method \"", name, "\" is able to do ",
                       paste(collapse = " and ", mlist$type), ".")
   line2     <- paste0("It uses parameters: ",
                       paste0(collapse = ", ", mlist$parameters$parameter), ".")
   line3     <- paste0("Its characteristics are: ",
                       paste0(collapse = ", ", mlist$tags))
-  paste(sep = "\n", line1, line2, line3)
+  paste(sep = "\n", line0, "", line1, line2, line3)
 }
 
 saveToRds <- function(model, name) {

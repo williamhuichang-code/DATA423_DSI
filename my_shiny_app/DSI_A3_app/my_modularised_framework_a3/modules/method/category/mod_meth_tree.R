@@ -20,11 +20,11 @@ meth_tree_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("Recursive Partitioning (Rpart)", value = "rpart",  style = "padding-top:12px;",
+        tabPanel("rpart", value = "rpart",  style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "rpart",  has_tuning = TRUE)),
-        tabPanel("Evolutionary Tree (EVTree)",     value = "evtree", style = "padding-top:12px;",
+        tabPanel("evtree", value = "evtree", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "evtree", has_tuning = TRUE)),
-        tabPanel("Random Forest (RF)",             value = "rf",     style = "padding-top:12px;",
+        tabPanel("rf",     value = "rf",     style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "rf",     has_tuning = TRUE))
       )
     ),
