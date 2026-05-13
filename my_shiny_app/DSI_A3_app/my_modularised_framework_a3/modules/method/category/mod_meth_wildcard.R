@@ -1,0 +1,219 @@
+# =================================================================================
+# mod_meth_wildcard.R  — WildCard category  (Earth / MARS + M5 model tree)
+# =================================================================================
+# Two methods assembled under one shared sidebar.
+#
+# UI:     meth_wildcard_ui(id, pp_choices, default_preprocess, model_seed)
+# Server: meth_wildcard_server(id, get_data, roles, seed, model_seed,
+#                               general_preprocess, earth_preprocess,
+#                               m5_preprocess, pp_choices)
+# Returns: list(models = reactiveValues, effective_seed = reactive)
+# =================================================================================
+
+
+# ── UI ───────────────────────────────────────────────────────────────────────
+
+meth_wildcard_ui <- function(id,
+                              pp_choices         = character(0),
+                              default_preprocess = character(0),
+                              model_seed         = NULL) {
+  ns <- NS(id)
+
+  fluidRow(
+    column(9,
+      tabsetPanel(type = "tabs", id = ns("method_inner"),
+        tabPanel("Multivariate Adaptive Regression Splines (Earth)", value = "earth", style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "earth", has_tuning = TRUE)),
+        tabPanel("M5 Model Tree (M5)",                               value = "M5",    style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "M5",    has_tuning = TRUE))
+      )
+    ),
+    column(3,
+      .meth_sidebar_ui(ns,
+                       model_seed         = model_seed,
+                       pp_choices         = pp_choices,
+                       default_preprocess = default_preprocess,
+                       specific_panels    = NULL)
+    )
+  )
+}
+
+
+# ── SERVER ───────────────────────────────────────────────────────────────────
+
+meth_wildcard_server <- function(id, get_data, roles,
+                                  seed               = reactive(2026),
+                                  model_seed         = NULL,
+                                  general_preprocess = NULL,
+                                  earth_preprocess   = NULL,
+                                  m5_preprocess      = NULL,
+                                  pp_choices         = character(0)) {
+  moduleServer(id, function(input, output, session) {
+
+    ns <- session$ns
+
+    models <- reactiveValues()
+
+    # ── Common setup ──────────────────────────────────────────────────────────
+    setup          <- .meth_common_server_setup(input, output, session, get_data, roles, seed,
+                                                model_seed = model_seed)
+    effective_seed <- setup$effective_seed
+    get_train      <- setup$get_train
+
+    current_method <- reactive({ input$method_inner %||% "earth" })
+
+    # ── Standard output renders ───────────────────────────────────────────────
+    .meth_register_outputs(output, "earth", models, ns)
+    .meth_register_outputs(output, "M5",    models, ns)
+
+    # ── Earth tuning plot: facet by degree, x = nprune ───────────────────────
+    # Two tuning params: nprune (number of retained terms), degree (interaction depth)
+    output[["earth_tune_plot"]] <- renderPlot({
+      mod <- models[["earth"]]; req(mod)
+      df  <- mod$results
+
+      has_sd      <- !all(is.na(df$RMSESD))
+      best_nprune <- mod$bestTune$nprune
+      best_degree <- mod$bestTune$degree
+
+      df$deg_label <- paste0("degree = ", df$degree)
+
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = nprune, y = RMSE,
+                                             colour = factor(degree),
+                                             group  = factor(degree)))
+      if (has_sd)
+        p <- p + ggplot2::geom_ribbon(
+          ggplot2::aes(ymin = RMSE - RMSESD, ymax = RMSE + RMSESD,
+                       fill = factor(degree)),
+          alpha = 0.15, colour = NA
+        )
+      p +
+        ggplot2::geom_line(linewidth = 0.9) +
+        ggplot2::geom_point(size = 2.5) +
+        ggplot2::geom_vline(
+          data = data.frame(deg_label = paste0("degree = ", best_degree),
+                            xint      = best_nprune),
+          ggplot2::aes(xintercept = xint),
+          linetype = "dashed", colour = "#dc3545", linewidth = 0.7,
+          inherit.aes = FALSE
+        ) +
+        ggplot2::scale_colour_viridis_d(name = "degree", option = "viridis") +
+        ggplot2::scale_fill_viridis_d(guide = "none",    option = "viridis") +
+        ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
+        ggplot2::facet_wrap(~ deg_label, scales = "free_y") +
+        ggplot2::labs(x        = "Retained terms (nprune)",
+                      y        = "RMSE (Bootstrap)",
+                      title    = "Earth (MARS) tuning: nprune vs RMSE, faceted by degree",
+                      subtitle = "degree = max interaction depth  |  dashed = best nprune") +
+        ggplot2::theme_bw(base_size = 13) +
+        ggplot2::theme(strip.text      = ggplot2::element_text(face = "bold", size = 11),
+                       legend.position = "right",
+                       plot.title      = ggplot2::element_text(face = "bold", size = 14),
+                       plot.subtitle   = ggplot2::element_text(colour = "#6c757d", size = 11),
+                       axis.text       = ggplot2::element_text(size = 13),
+                       axis.title      = ggplot2::element_text(size = 13, face = "bold"))
+    })
+
+    # ── M5 tuning plot: RMSE per pruned × smoothed × rules combination ────────
+    # All three tuning params are categorical (yes/no) — use a dotplot grid.
+    output[["M5_tune_plot"]] <- renderPlot({
+      mod <- models[["M5"]]; req(mod)
+      df  <- mod$results
+
+      has_sd <- !all(is.na(df$RMSESD))
+
+      # Build a combined label for the x-axis
+      df$combo <- paste0(
+        "pruned=", df$pruned, "\n",
+        "smoothed=", df$smoothed, "\n",
+        "rules=", df$rules
+      )
+
+      # Highlight the best combination
+      best_combo <- paste0(
+        "pruned=", mod$bestTune$pruned, "\n",
+        "smoothed=", mod$bestTune$smoothed, "\n",
+        "rules=", mod$bestTune$rules
+      )
+
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = combo, y = RMSE, colour = rules))
+      if (has_sd)
+        p <- p + ggplot2::geom_errorbar(
+          ggplot2::aes(ymin = RMSE - RMSESD, ymax = RMSE + RMSESD),
+          width = 0.2
+        )
+      p +
+        ggplot2::geom_point(size = 4) +
+        ggplot2::geom_point(data = df[df$combo == best_combo, ],
+                            colour = "#dc3545", size = 6, shape = 1, stroke = 1.5) +
+        ggplot2::scale_colour_manual(values = c("yes" = "#0d6efd", "no" = "#6c757d")) +
+        ggplot2::labs(x        = "Parameter combination",
+                      y        = "RMSE (Bootstrap)",
+                      colour   = "rules",
+                      title    = "M5 tuning: RMSE per pruned × smoothed × rules combination",
+                      subtitle = "Red circle = best combination  |  error bars = ± 1 SD") +
+        ggplot2::theme_bw(base_size = 12) +
+        ggplot2::theme(axis.text.x     = ggplot2::element_text(size = 9),
+                       legend.position = "right",
+                       plot.title      = ggplot2::element_text(face = "bold", size = 14),
+                       plot.subtitle   = ggplot2::element_text(colour = "#6c757d", size = 11),
+                       axis.title      = ggplot2::element_text(size = 13, face = "bold"))
+    })
+
+    # ── Preprocessing selector update ─────────────────────────────────────────
+    observe({
+      method   <- current_method()
+      mode     <- input$config_mode
+      selected <- if (is.null(mode) || mode == "general") {
+        general_preprocess %||% character(0)
+      } else {
+        switch(method,
+               "earth" = earth_preprocess %||% general_preprocess %||% character(0),
+               "M5"    = m5_preprocess    %||% general_preprocess %||% character(0),
+               general_preprocess %||% character(0))
+      }
+      updateSelectizeInput(session, "preprocess",
+                           choices  = pp_choices,
+                           selected = selected)
+    }) |> bindEvent(current_method(), input$config_mode)
+
+    # ── Train / Load / Delete ─────────────────────────────────────────────────
+    .meth_action_dispatcher(
+      input, output, session,
+      models         = models,
+      current_method = current_method,
+      train_fns = list(
+
+        earth = function() {
+          library(earth)
+          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed    <- effective_seed()
+          r        <- roles()
+          tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
+          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          set.seed(eseed)
+          caret::train(rec, data = train_df, method = "earth",
+                       metric = "RMSE", trControl = tr_ctrl,
+                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+        },
+
+        M5 = function() {
+          library(RWeka)
+          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed    <- effective_seed()
+          r        <- roles()
+          tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
+          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          set.seed(eseed)
+          caret::train(rec, data = train_df, method = "M5",
+                       metric = "RMSE", trControl = tr_ctrl,
+                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+        }
+
+      )
+    )
+
+    # ── Return ────────────────────────────────────────────────────────────────
+    return(list(models = models, effective_seed = effective_seed))
+  })
+}

@@ -10,6 +10,8 @@ library(dplyr)
 library(waiter)
 library(plotly)
 library(ggrepel)
+library(ggplot2)
+library(DT)
 library(recipes)
 library(shinycssloaders) # busy spinner (compatibility with bs4Dash TBC)
 library(cluster)
@@ -53,6 +55,23 @@ SPLIT_SEED   <- 199
 MODEL_SEED   <- 673
 AUTO_SPLIT   <- TRUE
 SPLIT_RATIO  <- 0.8
+
+# Available Methods explorer — tags to exclude from the table/map by default,
+# and tags to highlight as literature-informed choices.
+# Fall back to character(0) (nothing pre-selected) when not defined.
+av_exclude_tags <- c(
+  "Two Class Only", "ROC Curves", "Text Mining", "String Kernel",
+  "Self-Organising Maps", "Binary Predictors Only",
+  "Categorical Predictors Only", "Cost Sensitive Learning",
+  "Ordinal Outcomes"
+)
+
+av_highlight_tags <- c(
+  "Regularization", "L1 Regularization", "L2 Regularization",
+  "Implicit Feature Selection", "Feature Selection Wrapper",
+  "Handle Missing Predictor Data", "Robust Methods",
+  "Multivariate Adaptive Regression Splines"
+)
 
 # A3_omit_ids <- c(
 #   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
@@ -203,6 +222,8 @@ ui <- dashboardPage(
                # more future subtabs here
       ),
       
+      menuItem("Available Methods", tabName = "meth_available", icon = icon("list-check")),
+
       menuItem("Methods", icon = icon("flask"),
                menuSubItem("Null",            tabName = "meth_null",     icon = icon("minus")),
                menuSubItem("OLS",             tabName = "meth_ols",      icon = icon("chart-line")),
@@ -268,6 +289,10 @@ ui <- dashboardPage(
       tabItem(tabName = "out_summary", out_summary_ui("out_summary")),
       tabItem(tabName = "out_response", out_response_ui("out_response")),
       
+      # Available Methods explorer
+      tabItem(tabName = "meth_available",
+              meth_available_ui("meth_available")),
+
       # Methods — one tabItem per category
       tabItem(tabName = "meth_null",
               meth_null_ui("meth_null",
@@ -288,19 +313,25 @@ ui <- dashboardPage(
                            model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
 
       tabItem(tabName = "meth_nn",
-              tags$p("No methods configured yet.",
-                     style = "color:#adb5bd; font-style:italic; padding:20px;")),
+              meth_nn_ui("meth_nn",
+                         pp_choices         = ppchoices,
+                         default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                         model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
       tabItem(tabName = "meth_kernel",
               meth_kernel_ui("meth_kernel",
                              pp_choices         = ppchoices,
                              default_preprocess = if (exists("general_initial")) general_initial else character(0),
                              model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
       tabItem(tabName = "meth_ensemble",
-              tags$p("No methods configured yet.",
-                     style = "color:#adb5bd; font-style:italic; padding:20px;")),
+              meth_ensemble_ui("meth_ensemble",
+                               pp_choices         = ppchoices,
+                               default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                               model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
       tabItem(tabName = "meth_wildcard",
-              tags$p("No methods configured yet.",
-                     style = "color:#adb5bd; font-style:italic; padding:20px;")),
+              meth_wildcard_ui("meth_wildcard",
+                               pp_choices         = ppchoices,
+                               default_preprocess = if (exists("general_initial")) general_initial else character(0),
+                               model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL)),
 
       tabItem(tabName = "meth_select",
               meth_select_ui("meth_select")),
@@ -415,8 +446,14 @@ server <- function(input, output, session) {
                                     seed = seed_in_use)
   
   
+  # ── AVAILABLE METHODS ────────────────────────────────────────────────────
+  meth_available_server("meth_available",
+    exclude_tags   = if (exists("av_exclude_tags"))   av_exclude_tags   else NULL,
+    highlight_tags = if (exists("av_highlight_tags")) av_highlight_tags else NULL
+  )
+
   # ── PIPELINE (AUTO) ───────────────────────────────────────────────────────
-  
+
   # Methods modules — one server instance per active category
   meth_null <- meth_null_server("meth_null", get_model_data, roles,
                    seed               = seed_in_use,
@@ -444,6 +481,30 @@ server <- function(input, output, session) {
                    general_preprocess = if (exists("general_initial")) general_initial else NULL,
                    pp_choices         = ppchoices)
 
+  meth_ensemble <- meth_ensemble_server("meth_ensemble", get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   cubist_preprocess  = if (exists("cubist_initial"))  cubist_initial  else NULL,
+                   ranger_preprocess  = if (exists("ranger_initial"))  ranger_initial  else NULL,
+                   pp_choices         = ppchoices)
+
+  meth_nn <- meth_nn_server("meth_nn", get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   qrnn_preprocess    = if (exists("qrnn_initial"))    qrnn_initial    else NULL,
+                   brnn_preprocess    = if (exists("brnn_initial"))    brnn_initial    else NULL,
+                   pp_choices         = ppchoices)
+
+  meth_wildcard <- meth_wildcard_server("meth_wildcard", get_model_data, roles,
+                   seed               = seed_in_use,
+                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
+                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   earth_preprocess   = if (exists("earth_initial"))   earth_initial   else NULL,
+                   m5_preprocess      = if (exists("m5_initial"))      m5_initial      else NULL,
+                   pp_choices         = ppchoices)
+
   # ── Aggregate all trained models for Model Selection ──────────────────────
   # Each method module returns $models (reactiveValues). Merge here in the app
   # file so neither module depends on the other.
@@ -452,7 +513,10 @@ server <- function(input, output, session) {
       reactiveValuesToList(meth_null$models),
       reactiveValuesToList(meth_ols$models),
       reactiveValuesToList(meth_tree$models),
-      reactiveValuesToList(meth_kernel$models)
+      reactiveValuesToList(meth_kernel$models),
+      reactiveValuesToList(meth_ensemble$models),
+      reactiveValuesToList(meth_nn$models),
+      reactiveValuesToList(meth_wildcard$models)
     )
     Filter(Negate(is.null), all)
   })

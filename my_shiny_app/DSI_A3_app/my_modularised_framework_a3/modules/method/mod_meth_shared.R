@@ -25,6 +25,11 @@ library(evtree)
 library(kernlab)
 library(randomForest)
 library(Cubist)
+library(ranger)
+library(qrnn)
+library(brnn)
+library(earth)
+library(RWeka)
 
 
 # ── Null-coalescing operator ──────────────────────────────────────────────────
@@ -998,6 +1003,47 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           data.frame(
             Metric = "Best sigma",
             Value  = signif(mod$bestTune$sigma, 4)
+          )
+
+        } else if (meth == "ranger") {
+          imp <- mod$finalModel$variable.importance
+          if (is.null(imp) || length(imp) == 0)
+            return(data.frame(Note = "No variable importance available (set importance = 'impurity' or 'permutation' in train)."))
+          imp_df <- data.frame(
+            Variable   = names(imp),
+            Importance = round(imp, 4)
+          )
+          imp_df[order(imp_df$Importance, decreasing = TRUE), , drop = FALSE]
+
+        } else if (meth == "qrnn") {
+          data.frame(
+            Metric = c("Best n.hidden", "Best penalty", "Best bag"),
+            Value  = c(as.character(mod$bestTune$n.hidden),
+                       signif(mod$bestTune$penalty, 4),
+                       as.character(mod$bestTune$bag))
+          )
+
+        } else if (meth == "brnn") {
+          data.frame(
+            Metric = "Best neurons",
+            Value  = as.character(mod$bestTune$neurons)
+          )
+
+        } else if (meth == "earth") {
+          co <- tryCatch(mod$finalModel$coefficients, error = function(e) NULL)
+          if (is.null(co) || length(co) == 0)
+            return(data.frame(Note = "No MARS coefficients available."))
+          data.frame(
+            Term        = names(co),
+            Coefficient = round(co, 6)
+          )
+
+        } else if (meth == "M5") {
+          data.frame(
+            Metric = c("Best pruned", "Best smoothed", "Best rules"),
+            Value  = c(as.character(mod$bestTune$pruned),
+                       as.character(mod$bestTune$smoothed),
+                       as.character(mod$bestTune$rules))
           )
 
         } else {
