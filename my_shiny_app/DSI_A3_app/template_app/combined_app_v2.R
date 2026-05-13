@@ -141,6 +141,21 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     stop("The preprocess list is NULL - check that you are using the correct control identifier")
   }
   
+  # capture original column roles before dummy has acted
+  # recipe$var_info is available at build time (before prep)
+  var_info <- recipe$var_info
+  orig_numeric <- var_info$variable[var_info$role == "predictor" & 
+                                      sapply(var_info$type, function(t) "double" %in% t)]
+  orig_nominal <- var_info$variable[var_info$role == "predictor" & 
+                                      sapply(var_info$type, function(t) "nominal" %in% t)]
+  
+  # debug — remove once confirmed
+  cat("=== dynamicSteps debug ===\n")
+  cat("orig_nominal:", paste(orig_nominal, collapse = ", "), "\n")
+  cat("orig_numeric:", paste(orig_numeric, collapse = ", "), "\n")
+  cat("var_info types present:", paste(unique(var_info$type), collapse = ", "), "\n")
+  
+  
   for (s in preprocess) {
     if (s == "impute_knn") {
       recipe <- step_impute_knn(recipe, all_numeric_predictors(), all_nominal_predictors(),
@@ -234,15 +249,23 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                                    degree = cfg$poly_degree %||% 2)
       
     } else if (s == "interact") {
-      interact_type <- cfg$interact_type %||% "numeric_numeric"
+      interact_type <- cfg$interact_type %||% "all"
+      
       terms <- switch(interact_type,
+                      "all" = ~ all_numeric_predictors():all_numeric_predictors(),
+                      "nominal_numeric" = {
+                        # after dummy, nominal cols become "origname_level" — match by prefix
+                        pattern <- paste0("^(", paste(orig_nominal, collapse = "|"), ")_")
+                        as.formula(paste0("~ matches('", pattern, "'):all_numeric_predictors()"))
+                      },
+                      "nominal_nominal" = {
+                        pattern <- paste0("^(", paste(orig_nominal, collapse = "|"), ")_")
+                        as.formula(paste0("~ matches('", pattern, "'):matches('", pattern, "')"))
+                      },
                       "numeric_numeric" = ~ all_numeric_predictors():all_numeric_predictors(),
-                      "nominal_numeric" = ~ all_nominal_predictors():all_numeric_predictors(),
-                      "nominal_nominal" = ~ all_nominal_predictors():all_nominal_predictors(),
-                      "all"             = ~ (all_numeric_predictors() + all_nominal_predictors()):
-                        (all_numeric_predictors() + all_nominal_predictors()),
                       stop(paste("Unknown interact_type:", interact_type))
       )
+      
       recipe <- recipes::step_interact(recipe, terms = terms)
       
     } else if (s == "lincomb") {
@@ -2120,7 +2143,7 @@ server <- function(input, output, session) {
         other_label          = "other",
         poly_degree          = val("poly_degree", defs$poly),
         corr_threshold       = val("corr_threshold", defs$corr),
-        interact_type        = val("interact_type", "numeric_numeric")
+        interact_type        = val("interact_type", "all")
       )
     })
     
