@@ -135,6 +135,17 @@ meth_ols_server <- function(id, get_data, roles,
     # Active method driven by the method_inner tab
     current_method <- reactive({ input$method_inner %||% "lm" })
 
+    # ── PLS tune_length default: set slider to 25 when PLS tab is active ─────
+    # PLS needs tuneLength=25 to find its real ncomp optimum (template uses 25).
+    # Other methods default to 5. Slider reverts when switching away from PLS.
+    observe({
+      if (current_method() == "pls") {
+        updateSliderInput(session, "tune_length", value = 25)
+      } else {
+        updateSliderInput(session, "tune_length", value = 5)
+      }
+    }) |> bindEvent(current_method())
+
     # ── Standard output renders ───────────────────────────────────────────────
     .meth_register_outputs(output, "lm",     models, ns)
     .meth_register_outputs(output, "rlm",    models, ns)
@@ -452,7 +463,7 @@ meth_ols_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "pls",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 25, na.action = na.pass)
         },
 
         rlm = function() {

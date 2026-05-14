@@ -655,15 +655,47 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
   #      per-resample RNG is controlled identically across parallel workers.
   set.seed(eseed)
 
+  # ╔══════════════════════════════════════════════════════════════════════════════╗
+  # ║  !! DO NOT MODIFY THIS SEEDING BLOCK WITHOUT UNDERSTANDING THE CONSEQUENCES ║
+  # ║                                                                              ║
+  # ║  BURN-IN: runif(n = 55, ...) is called once per resample BEFORE             ║
+  # ║  createFolds / createMultiFolds / createResample.                            ║
+  # ║  This exact RNG consumption (55 × n_total + 1 draws) was calibrated to      ║
+  # ║  match the assignment template's resampling infrastructure.                  ║
+  # ║                                                                              ║
+  # ║  Verified template matches (Bootstrap, seed = 673):                         ║
+  # ║    null   — RMSE 932.732  MAE 730.013                                       ║
+  # ║    glmnet — confirmed ✓                                                     ║
+  # ║    pls    — confirmed ✓                                                     ║
+  # ║    rpart  — cp 0.026  RMSE 752.397  MAE 579.971  RMSESD 32.570  ✓          ║
+  # ║                                                                              ║
+  # ║  Changing n=55, the order of runif vs createFolds, or the seed call         ║
+  # ║  WILL shift fold/resample assignments and break all template comparisons.   ║
+  # ║                                                                              ║
+  # ║  .pad_seeds() extends each 55-element vector to 500 elements AFTER fold     ║
+  # ║  creation so large custom tuning grids (>55 combos) don't hit caret's       ║
+  # ║  "bad seeds" error. The padding is deterministic and does NOT consume RNG.  ║
+  # ╚══════════════════════════════════════════════════════════════════════════════╝
+  .pad_seeds <- function(seeds, n_total) {
+    for (i in seq_len(n_total)) {
+      sv  <- seeds[[i]]
+      gap <- 500L - length(sv)
+      if (gap > 0L)
+        seeds[[i]] <- c(sv, as.integer((as.numeric(sv[[1L]]) * seq_len(gap) * 7919) %% 4000 + 1000))
+    }
+    seeds
+  }
+
   if (method == "cv") {
     n       <- input$cv_folds %||% 10
     reps    <- NA
     n_total <- n
     seeds   <- vector(mode = "list", length = n_total + 1L)
     for (i in seq_len(n_total))
-      seeds[[i]] <- as.integer(runif(n = 500, min = 1000, max = 5000))
+      seeds[[i]] <- as.integer(runif(n = 55, min = 1000, max = 5000))  # !! DO NOT CHANGE n=55
     seeds[[n_total + 1L]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
-    idx <- caret::createFolds(y = train_y, k = n, returnTrain = TRUE)
+    idx   <- caret::createFolds(y = train_y, k = n, returnTrain = TRUE)
+    seeds <- .pad_seeds(seeds, n_total)
 
   } else if (method == "repeatedcv") {
     n       <- input$rcv_folds   %||% 4
@@ -671,9 +703,10 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     n_total <- n * reps
     seeds   <- vector(mode = "list", length = n_total + 1L)
     for (i in seq_len(n_total))
-      seeds[[i]] <- as.integer(runif(n = 500, min = 1000, max = 5000))
+      seeds[[i]] <- as.integer(runif(n = 55, min = 1000, max = 5000))  # !! DO NOT CHANGE n=55
     seeds[[n_total + 1L]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
-    idx <- caret::createMultiFolds(y = train_y, k = n, times = reps)
+    idx   <- caret::createMultiFolds(y = train_y, k = n, times = reps)
+    seeds <- .pad_seeds(seeds, n_total)
 
   } else {
     method  <- "boot"
@@ -681,9 +714,10 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     reps    <- NA
     seeds   <- vector(mode = "list", length = n + 1L)
     for (i in seq_len(n))
-      seeds[[i]] <- as.integer(runif(n = 500, min = 1000, max = 5000))
+      seeds[[i]] <- as.integer(runif(n = 55, min = 1000, max = 5000))  # !! DO NOT CHANGE n=55
     seeds[[n + 1L]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
-    idx <- caret::createResample(y = train_y, times = n)
+    idx   <- caret::createResample(y = train_y, times = n)
+    seeds <- .pad_seeds(seeds, n)
   }
 
   trainControl(
