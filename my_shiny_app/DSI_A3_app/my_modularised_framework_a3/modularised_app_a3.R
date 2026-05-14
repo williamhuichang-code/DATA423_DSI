@@ -59,6 +59,22 @@ ppr_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
                  "interact", "lincomb",
                  "zv", "nzv", "center", "scale")
 
+svmpl_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                 "other", "YeoJohnson", "dummy", 
+                 "interact", "lincomb",
+                 "zv", "nzv", "center", "scale")
+
+krls_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                  "other", "YeoJohnson", "dummy", 
+                  "interact", "lincomb",
+                  "zv", "nzv", "center", "scale")
+
+gausspr_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                     "other", "YeoJohnson", "dummy", 
+                     "interact", "lincomb",
+                     "zv", "nzv", "center", "scale")
+
+
 task_specific_roles <- list(
   Patient         = "obs_id",
   Response        = "outcome",
@@ -493,11 +509,16 @@ server <- function(input, output, session) {
                    pp_choices         = ppchoices)
 
   meth_kernel <- meth_kernel_server("meth_kernel", get_model_data, roles,
-                   seed               = seed_in_use,
-                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
-                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
-                   svm_preprocess     = if (exists("svmrs_initial"))   svmrs_initial   else NULL,
-                   pp_choices         = ppchoices)
+                   seed                     = seed_in_use,
+                   model_seed               = if (exists("MODEL_SEED"))       MODEL_SEED      else NULL,
+                   general_preprocess       = if (exists("general_initial"))  general_initial else NULL,
+                   svm_preprocess           = if (exists("svmrs_initial"))    svmrs_initial   else NULL,
+                   svmpoly_preprocess       = if (exists("svmpl_initial"))    svmpl_initial   else NULL,
+                   krlspoly_preprocess      = if (exists("krls_initial"))     krls_initial    else NULL,
+                   gp_preprocess            = if (exists("gausspr_initial"))  gausspr_initial else NULL,
+                   gaussprpoly_preprocess   = if (exists("gausspr_initial"))  gausspr_initial else NULL,
+                   gaussprlinear_preprocess = if (exists("gausspr_initial"))  gausspr_initial else NULL,
+                   pp_choices               = ppchoices)
 
   meth_ensemble <- meth_ensemble_server("meth_ensemble", get_model_data, roles,
                    seed               = seed_in_use,
@@ -509,10 +530,14 @@ server <- function(input, output, session) {
 
   meth_nn <- meth_nn_server("meth_nn", get_model_data, roles,
                    seed               = seed_in_use,
-                   model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
-                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
-                   qrnn_preprocess    = if (exists("qrnn_initial"))    qrnn_initial    else NULL,
-                   brnn_preprocess    = if (exists("brnn_initial"))    brnn_initial    else NULL,
+                   model_seed         = if (exists("MODEL_SEED"))        MODEL_SEED       else NULL,
+                   general_preprocess = if (exists("general_initial"))   general_initial  else NULL,
+                   qrnn_preprocess    = if (exists("qrnn_initial"))      qrnn_initial     else NULL,
+                   brnn_preprocess    = if (exists("brnn_initial"))      brnn_initial     else NULL,
+                   pcannet_preprocess = if (exists("pcannet_initial"))   pcannet_initial  else NULL,
+                   mlpwd_preprocess   = if (exists("mlpwd_initial"))     mlpwd_initial    else NULL,
+                   mlpml_preprocess   = if (exists("mlpml_initial"))     mlpml_initial    else NULL,
+                   monmlp_preprocess  = if (exists("monmlp_initial"))    monmlp_initial   else NULL,
                    pp_choices         = ppchoices)
 
   meth_wildcard <- meth_wildcard_server("meth_wildcard", get_model_data, roles,

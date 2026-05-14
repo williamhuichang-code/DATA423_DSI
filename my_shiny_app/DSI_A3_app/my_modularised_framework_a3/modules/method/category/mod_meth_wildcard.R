@@ -22,12 +22,13 @@ meth_wildcard_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("earth", value = "earth", style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "earth", has_tuning = TRUE)),
-        tabPanel("M5",    value = "M5",    style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "M5",    has_tuning = TRUE)),
         tabPanel("ppr",   value = "ppr",   style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "ppr",   has_tuning = TRUE))
+                 .meth_subtabs_ui(ns, "ppr",   has_tuning = TRUE)),
+        tabPanel("earth", value = "earth", style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "earth", has_tuning = TRUE))
+        # tabPanel("M5",    value = "M5",    style = "padding-top:12px;",
+        #          .meth_subtabs_ui(ns, "M5",    has_tuning = TRUE))
+
       )
     ),
     column(3,
@@ -63,7 +64,7 @@ meth_wildcard_server <- function(id, get_data, roles,
     effective_seed <- setup$effective_seed
     get_train      <- setup$get_train
 
-    current_method <- reactive({ input$method_inner %||% "earth" })
+    current_method <- reactive({ input$method_inner %||% "ppr" })
 
     # ── Standard output renders ───────────────────────────────────────────────
     .meth_register_outputs(output, "earth", models, ns)

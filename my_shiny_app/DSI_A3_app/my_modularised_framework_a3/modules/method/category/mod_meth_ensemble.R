@@ -22,10 +22,11 @@ meth_ensemble_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
-        tabPanel("cubist", value = "cubist", style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "cubist", has_tuning = TRUE)),
-        tabPanel("ranger",  value = "ranger", style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "ranger",  has_tuning = TRUE))
+        tabPanel("ranger", value = "ranger", style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "ranger", has_tuning = TRUE))
+        # tabPanel("cubist", value = "cubist", style = "padding-top:12px;",
+        #          .meth_subtabs_ui(ns, "cubist", has_tuning = TRUE))
+
       )
     ),
     column(3,
@@ -60,7 +61,7 @@ meth_ensemble_server <- function(id, get_data, roles,
     effective_seed <- setup$effective_seed
     get_train      <- setup$get_train
 
-    current_method <- reactive({ input$method_inner %||% "cubist" })
+    current_method <- reactive({ input$method_inner %||% "ranger" })
 
     # ── Standard output renders ───────────────────────────────────────────────
     .meth_register_outputs(output, "cubist", models, ns)

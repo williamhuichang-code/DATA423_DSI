@@ -21,11 +21,12 @@ meth_tree_ui <- function(id,
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
         tabPanel("rpart", value = "rpart",  style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "rpart",  has_tuning = TRUE)),
-        tabPanel("evtree", value = "evtree", style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "evtree", has_tuning = TRUE)),
-        tabPanel("rf",     value = "rf",     style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "rf",     has_tuning = TRUE))
+                 .meth_subtabs_ui(ns, "rpart",  has_tuning = TRUE))
+        # tabPanel("evtree", value = "evtree", style = "padding-top:12px;",
+        #          .meth_subtabs_ui(ns, "evtree", has_tuning = TRUE)),
+        # tabPanel("rf",     value = "rf",     style = "padding-top:12px;",
+        #          .meth_subtabs_ui(ns, "rf",     has_tuning = TRUE))
+
       )
     ),
     column(3,

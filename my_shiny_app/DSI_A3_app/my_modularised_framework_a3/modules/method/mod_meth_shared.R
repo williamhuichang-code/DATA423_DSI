@@ -1124,10 +1124,65 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
             Value  = c(fm@nSV, signif(mod$bestTune$C, 4), signif(mod$bestTune$sigma, 4))
           )
 
+        } else if (meth == "svmPoly") {
+          fm <- mod$finalModel
+          data.frame(
+            Metric = c("Support vectors", "Best degree", "Best scale", "Best C"),
+            Value  = c(fm@nSV,
+                       as.character(mod$bestTune$degree),
+                       signif(mod$bestTune$scale, 4),
+                       signif(mod$bestTune$C, 4))
+          )
+
+        } else if (meth == "krlsPoly") {
+          data.frame(
+            Metric = c("Best degree", "Best lambda"),
+            Value  = c(as.character(mod$bestTune$degree),
+                       signif(mod$bestTune$lambda, 4))
+          )
+
         } else if (meth == "gaussprRadial") {
           data.frame(
             Metric = "Best sigma",
             Value  = signif(mod$bestTune$sigma, 4)
+          )
+
+        } else if (meth == "gaussprPoly") {
+          data.frame(
+            Metric = "Best degree",
+            Value  = as.character(mod$bestTune$degree)
+          )
+
+        } else if (meth == "gaussprLinear") {
+          data.frame(Note = "Gaussian Process Linear has no tuning parameters.")
+
+        } else if (meth == "pcaNNet") {
+          data.frame(
+            Metric = c("Best size (hidden units)", "Best decay"),
+            Value  = c(as.character(mod$bestTune$size),
+                       signif(mod$bestTune$decay, 4))
+          )
+
+        } else if (meth == "mlpWeightDecay") {
+          data.frame(
+            Metric = c("Best size (hidden units)", "Best decay"),
+            Value  = c(as.character(mod$bestTune$size),
+                       signif(mod$bestTune$decay, 4))
+          )
+
+        } else if (meth == "mlpML") {
+          data.frame(
+            Metric = c("Best layer1", "Best layer2", "Best layer3"),
+            Value  = c(as.character(mod$bestTune$layer1),
+                       as.character(mod$bestTune$layer2),
+                       as.character(mod$bestTune$layer3))
+          )
+
+        } else if (meth == "monmlp") {
+          data.frame(
+            Metric = c("Best hidden1", "Best n.ensemble"),
+            Value  = c(as.character(mod$bestTune$hidden1),
+                       as.character(mod$bestTune$n.ensemble))
           )
 
         } else if (meth == "ranger") {
