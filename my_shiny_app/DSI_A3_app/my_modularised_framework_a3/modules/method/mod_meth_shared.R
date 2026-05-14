@@ -319,6 +319,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       title = tagList(icon("list"), " Summary"),
       style = "padding-top:14px;",
       verbatimTextOutput(ns(paste0(m, "_desc"))),
+      uiOutput(ns(paste0(m, "_na_hint"))),
       hr(),
       tags$h6("Resampled performance",
               style = "font-weight:700; color:#343a40; margin-bottom:8px;"),
@@ -995,6 +996,65 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
 #   models  — reactiveValues() storing trained caret models keyed by method name
 #   ns      — namespace function from session$ns
 
+# ── Per-method NA action hints ────────────────────────────────────────────────
+.na_action_info <- list(
+  # na.pass — recipe is responsible
+  null           = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  lm             = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  rlm            = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  glmnet         = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  pls            = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  svmRadialSigma = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  svmPoly        = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  krlsPoly       = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  gaussprRadial  = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  gaussprPoly    = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  gaussprLinear  = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  evtree         = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  cubist         = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  ppr            = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  M5             = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  qrnn           = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  brnn           = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  pcaNNet        = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  mlpWeightDecay = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  mlpML          = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  monmlp         = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  # na.rpart — model handles NAs natively
+  rpart          = list(action = "na.rpart",    severity = "success",
+                        note = "rpart handles NAs natively via surrogate splits — no preprocessing required. However, explicit imputation is still recommended for consistency across models."),
+  # na.roughfix — model imputes NAs
+  rf             = list(action = "na.roughfix", severity = "success",
+                        note = "randomForest applies rough-fix imputation (median/mode) to NAs automatically. Explicit imputation in preprocessing is still recommended for consistency."),
+  # na.fail — NAs will cause an error
+  earth          = list(action = "na.fail",     severity = "danger",
+                        note = "earth requires zero NAs in the data. Add naomit or an imputation step to your preprocessing — earth will error on every resample if any NAs remain."),
+  # omitted — ranger handles internally
+  ranger         = list(action = "omitted",     severity = "warning",
+                        note = "ranger handles NA action internally via string comparison and does not accept a function argument. Ensure NAs are handled in your preprocessing pipeline.")
+)
+
 .meth_register_outputs <- function(output, m, models, ns) {
   local({
     meth <- m
@@ -1002,6 +1062,35 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     # Method description
     output[[paste0(meth, "_desc")]] <- renderText({
       tryCatch(description(meth), error = function(e) paste("Method:", meth))
+    })
+
+    # NA action hint box
+    output[[paste0(meth, "_na_hint")]] <- renderUI({
+      info <- .na_action_info[[meth]]
+      if (is.null(info)) return(NULL)
+      cfg <- switch(info$severity,
+        "danger"  = list(bg = "#fff5f5", border = "#dc3545", icon_col = "#dc3545",
+                         icon = "circle-xmark",    label = "NA handling: REQUIRED in preprocessing"),
+        "warning" = list(bg = "#fff9e6", border = "#ffc107", icon_col = "#856404",
+                         icon = "triangle-exclamation", label = "NA handling: handle in preprocessing"),
+        "success" = list(bg = "#f0fff4", border = "#198754", icon_col = "#198754",
+                         icon = "circle-check",    label = "NA handling: model tolerates NAs"),
+        # info (default)
+                    list(bg = "#e8f0fe", border = "#0d6efd", icon_col = "#0d6efd",
+                         icon = "circle-info",     label = "NA handling: recipe is responsible")
+      )
+      div(
+        style = paste0(
+          "background:", cfg$bg, "; border-left:4px solid ", cfg$border, ";",
+          "border-radius:6px; padding:8px 12px; margin:8px 0 4px;",
+          "font-size:12px; color:#343a40;"
+        ),
+        icon(cfg$icon, style = paste0("color:", cfg$icon_col, ";")),
+        HTML(paste0(
+          " <b>", cfg$label, "</b> &nbsp;|&nbsp; <code>na.action = ", info$action, "</code>",
+          "<br><span style='color:#6c757d;'>", info$note, "</span>"
+        ))
+      )
     })
 
     # Resampled metrics — best-RMSE row + three timing columns appended
