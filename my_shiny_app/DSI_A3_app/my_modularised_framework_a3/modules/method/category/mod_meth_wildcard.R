@@ -1,12 +1,12 @@
 # =================================================================================
-# mod_meth_wildcard.R  — WildCard category  (Earth / MARS + M5 model tree)
+# mod_meth_wildcard.R  — WildCard category  (Earth / MARS + M5 model tree + PPR)
 # =================================================================================
-# Two methods assembled under one shared sidebar.
+# Three methods assembled under one shared sidebar.
 #
 # UI:     meth_wildcard_ui(id, pp_choices, default_preprocess, model_seed)
 # Server: meth_wildcard_server(id, get_data, roles, seed, model_seed,
 #                               general_preprocess, earth_preprocess,
-#                               m5_preprocess, pp_choices)
+#                               m5_preprocess, ppr_preprocess, pp_choices)
 # Returns: list(models = reactiveValues, effective_seed = reactive)
 # =================================================================================
 
@@ -25,7 +25,9 @@ meth_wildcard_ui <- function(id,
         tabPanel("earth", value = "earth", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "earth", has_tuning = TRUE)),
         tabPanel("M5",    value = "M5",    style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "M5",    has_tuning = TRUE))
+                 .meth_subtabs_ui(ns, "M5",    has_tuning = TRUE)),
+        tabPanel("ppr",   value = "ppr",   style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "ppr",   has_tuning = TRUE))
       )
     ),
     column(3,
@@ -47,6 +49,7 @@ meth_wildcard_server <- function(id, get_data, roles,
                                   general_preprocess = NULL,
                                   earth_preprocess   = NULL,
                                   m5_preprocess      = NULL,
+                                  ppr_preprocess     = NULL,
                                   pp_choices         = character(0)) {
   moduleServer(id, function(input, output, session) {
 
@@ -65,6 +68,7 @@ meth_wildcard_server <- function(id, get_data, roles,
     # ── Standard output renders ───────────────────────────────────────────────
     .meth_register_outputs(output, "earth", models, ns)
     .meth_register_outputs(output, "M5",    models, ns)
+    .meth_register_outputs(output, "ppr",   models, ns)
 
     # ── Earth tuning plot: facet by degree, x = nprune ───────────────────────
     # Two tuning params: nprune (number of retained terms), degree (interaction depth)
@@ -160,6 +164,43 @@ meth_wildcard_server <- function(id, get_data, roles,
                        axis.title      = ggplot2::element_text(size = 13, face = "bold"))
     })
 
+    # ── PPR tuning plot: RMSE vs nterms ──────────────────────────────────────
+    # Single tuning parameter: nterms (number of projection pursuit terms).
+    output[["ppr_tune_plot"]] <- renderPlot({
+      mod    <- models[["ppr"]]; req(mod)
+      df     <- mod$results
+      has_sd <- !all(is.na(df$RMSESD))
+      best_n <- mod$bestTune$nterms
+
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = nterms, y = RMSE))
+      if (has_sd)
+        p <- p + ggplot2::geom_ribbon(
+          ggplot2::aes(ymin = RMSE - RMSESD, ymax = RMSE + RMSESD),
+          fill = "#20c997", alpha = 0.2
+        )
+      p +
+        ggplot2::geom_line(colour = "#20c997", linewidth = 1) +
+        ggplot2::geom_point(colour = "#20c997", size = 2.5) +
+        ggplot2::geom_vline(xintercept = best_n,
+                            linetype = "dashed", colour = "#dc3545", linewidth = 0.8) +
+        ggplot2::annotate("text",
+                          x     = best_n,
+                          y     = max(df$RMSE, na.rm = TRUE),
+                          label = paste0("best nterms = ", best_n),
+                          hjust = -0.1, vjust = 1,
+                          colour = "#dc3545", size = 4, fontface = "bold") +
+        ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
+        ggplot2::labs(x        = "Number of terms (nterms)",
+                      y        = "RMSE (Bootstrap)",
+                      title    = "PPR tuning: nterms vs RMSE",
+                      subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best nterms") +
+        ggplot2::theme_bw(base_size = 13) +
+        ggplot2::theme(plot.title    = ggplot2::element_text(face = "bold", size = 14),
+                       plot.subtitle = ggplot2::element_text(colour = "#6c757d", size = 11),
+                       axis.text     = ggplot2::element_text(size = 13),
+                       axis.title    = ggplot2::element_text(size = 13, face = "bold"))
+    })
+
     # ── Preprocessing selector update ─────────────────────────────────────────
     observe({
       method   <- current_method()
@@ -170,6 +211,7 @@ meth_wildcard_server <- function(id, get_data, roles,
         switch(method,
                "earth" = earth_preprocess %||% general_preprocess %||% character(0),
                "M5"    = m5_preprocess    %||% general_preprocess %||% character(0),
+               "ppr"   = ppr_preprocess   %||% general_preprocess %||% character(0),
                general_preprocess %||% character(0))
       }
       updateSelectizeInput(session, "preprocess",
@@ -206,6 +248,18 @@ meth_wildcard_server <- function(id, get_data, roles,
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "M5",
+                       metric = "RMSE", trControl = tr_ctrl,
+                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+        },
+
+        ppr = function() {
+          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed    <- effective_seed()
+          r        <- roles()
+          tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
+          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          set.seed(eseed)
+          caret::train(rec, data = train_df, method = "ppr",
                        metric = "RMSE", trControl = tr_ctrl,
                        tuneLength = input$tune_length %||% 5, na.action = na.omit)
         }

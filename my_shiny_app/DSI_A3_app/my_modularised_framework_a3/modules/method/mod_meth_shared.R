@@ -661,7 +661,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     n_total <- n
     seeds   <- vector(mode = "list", length = n_total + 1L)
     for (i in seq_len(n_total))
-      seeds[[i]] <- as.integer(runif(n = 55, min = 1000, max = 5000))
+      seeds[[i]] <- as.integer(runif(n = 500, min = 1000, max = 5000))
     seeds[[n_total + 1L]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
     idx <- caret::createFolds(y = train_y, k = n, returnTrain = TRUE)
 
@@ -671,7 +671,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     n_total <- n * reps
     seeds   <- vector(mode = "list", length = n_total + 1L)
     for (i in seq_len(n_total))
-      seeds[[i]] <- as.integer(runif(n = 55, min = 1000, max = 5000))
+      seeds[[i]] <- as.integer(runif(n = 500, min = 1000, max = 5000))
     seeds[[n_total + 1L]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
     idx <- caret::createMultiFolds(y = train_y, k = n, times = reps)
 
@@ -681,7 +681,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     reps    <- NA
     seeds   <- vector(mode = "list", length = n + 1L)
     for (i in seq_len(n))
-      seeds[[i]] <- as.integer(runif(n = 55, min = 1000, max = 5000))
+      seeds[[i]] <- as.integer(runif(n = 500, min = 1000, max = 5000))
     seeds[[n + 1L]] <- as.integer(runif(n = 1, min = 1000, max = 5000))
     idx <- caret::createResample(y = train_y, times = n)
   }
@@ -905,15 +905,28 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       tryCatch(description(meth), error = function(e) paste("Method:", meth))
     })
 
-    # Resampled metrics — best-RMSE row, wall-clock time substituted in
+    # Resampled metrics — best-RMSE row + three timing columns appended
     output[[paste0(meth, "_metrics")]] <- renderTable({
       mod  <- models[[meth]]; req(mod)
       best <- mod$results[which.min(mod$results[["RMSE"]]), ]
-      if (!is.null(mod$.wall_total)) {
-        best$TimedFitStepSeconds <- NULL
-        best$WallClockSecs       <- mod$.wall_total
+
+      # AvgFoldSecs: prefer caret's built-in, fall back to wall_train / n_resamples
+      if ("TimedFitStepSeconds" %in% names(best)) {
+        names(best)[names(best) == "TimedFitStepSeconds"] <- "AvgFoldSecs"
+      } else {
+        n_folds <- if (!is.null(mod$resample)) nrow(mod$resample) else NA
+        if (!is.null(mod$.wall_train) && !is.na(n_folds) && n_folds > 0)
+          best$AvgFoldSecs <- round(mod$.wall_train / n_folds, 3)
       }
-      best
+
+      # Append custom timers (train-only, then train+save)
+      if (!is.null(mod$.wall_train)) best$FinalFitSecs  <- mod$.wall_train
+      if (!is.null(mod$.wall_total)) best$WallClockSecs <- mod$.wall_total
+
+      # Enforce column order: metrics first, then FinalFitSecs → WallClockSecs → AvgFoldSecs
+      time_cols <- intersect(c("FinalFitSecs", "WallClockSecs", "AvgFoldSecs"), names(best))
+      non_time  <- setdiff(names(best), time_cols)
+      best[, c(non_time, time_cols), drop = FALSE]
     }, digits = 3)
 
     # Tuning plot — null model gets a "no parameters" placeholder
@@ -957,19 +970,29 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       tryCatch({
         if (meth == "glmnet") {
           co <- as.matrix(coef(mod$finalModel, s = mod$bestTune$lambda))
-          df <- data.frame(Coefficient = co[, 1], row.names = rownames(co))
-          df[df$Coefficient != 0, , drop = FALSE]
+          df <- data.frame(Coefficient = round(co[, 1], 6), row.names = rownames(co))
+          df <- df[df$Coefficient != 0, , drop = FALSE]
+          # Sort: (Intercept) pinned top, rest by |Coefficient| descending
+          has_int  <- "(Intercept)" %in% rownames(df)
+          int_row  <- if (has_int) df["(Intercept)", , drop = FALSE] else NULL
+          rest     <- df[rownames(df) != "(Intercept)", , drop = FALSE]
+          rest     <- rest[order(abs(rest$Coefficient), decreasing = TRUE), , drop = FALSE]
+          if (!is.null(int_row)) rbind(int_row, rest) else rest
 
         } else if (meth == "pls") {
-          co <- coef(mod$finalModel)
-          as.data.frame(co, row.names = rownames(co))
+          co  <- coef(mod$finalModel)
+          df  <- as.data.frame(co, row.names = rownames(co))
+          # Sort all rows by |first coefficient column| descending
+          df[order(abs(df[[1]]), decreasing = TRUE), , drop = FALSE]
 
         } else if (meth %in% c("lm", "rlm")) {
-          co <- coef(mod$finalModel)
-          data.frame(
-            Variable    = names(co),
-            Coefficient = round(co, 6)
-          )
+          co  <- coef(mod$finalModel)
+          df  <- data.frame(Variable = names(co), Coefficient = round(co, 6),
+                            stringsAsFactors = FALSE)
+          # (Intercept) pinned top, rest by |Coefficient| descending
+          int_idx  <- which(df$Variable == "(Intercept)")
+          rest_idx <- setdiff(order(abs(df$Coefficient), decreasing = TRUE), int_idx)
+          df[c(int_idx, rest_idx), , drop = FALSE]
 
         } else if (meth == "rpart") {
           vi <- mod$finalModel$variable.importance
@@ -1042,10 +1065,12 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           co <- tryCatch(mod$finalModel$coefficients, error = function(e) NULL)
           if (is.null(co) || length(co) == 0)
             return(data.frame(Note = "No MARS coefficients available."))
-          data.frame(
-            Term        = names(co),
-            Coefficient = round(co, 6)
-          )
+          df  <- data.frame(Term = names(co), Coefficient = round(co, 6),
+                            stringsAsFactors = FALSE)
+          # (Intercept) pinned top, rest by |Coefficient| descending
+          int_idx  <- which(df$Term == "(Intercept)")
+          rest_idx <- setdiff(order(abs(df$Coefficient), decreasing = TRUE), int_idx)
+          df[c(int_idx, rest_idx), , drop = FALSE]
 
         } else if (meth == "M5") {
           data.frame(

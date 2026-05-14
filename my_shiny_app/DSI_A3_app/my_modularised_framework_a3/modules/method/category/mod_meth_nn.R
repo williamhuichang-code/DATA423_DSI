@@ -33,7 +33,34 @@ meth_nn_ui <- function(id,
                        model_seed         = model_seed,
                        pp_choices         = pp_choices,
                        default_preprocess = default_preprocess,
-                       specific_panels    = NULL)
+                       specific_panels    = tagList(
+
+        # ── brnn-specific controls ───────────────────────────────────────────
+        conditionalPanel(
+          condition = sprintf("input['%s'] === 'brnn'", ns("method_inner")),
+
+          tags$label("Tuning grid:", style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+          selectInput(ns("brnn_grid_type"), NULL,
+                      choices  = c("Tune length default"    = "tunelength",
+                                   "Custom neurons range"   = "custom"),
+                      selected = "custom", width = "100%"),
+
+          conditionalPanel(
+            condition = sprintf("input['%s'] === 'custom'", ns("brnn_grid_type")),
+
+            tags$label("Neurons minimum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("brnn_neurons_min"),  NULL, min = 1, max = 5,  value = 1,  step = 1, width = "100%"),
+            tags$label("Neurons maximum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("brnn_neurons_max"),  NULL, min = 2, max = 20, value = 10, step = 1, width = "100%"),
+            tags$label("Neurons step:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("brnn_neurons_step"), NULL, min = 1, max = 5,  value = 1,  step = 1, width = "100%")
+          )
+        )
+
+      ))
     )
   )
 }
@@ -199,9 +226,18 @@ meth_nn_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
-          caret::train(rec, data = train_df, method = "brnn",
-                       metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+          if (isTRUE(input$config_mode == "specific") &&
+              isTRUE(input$brnn_grid_type == "custom")) {
+            neurons_g <- seq(input$brnn_neurons_min, input$brnn_neurons_max,
+                             by = input$brnn_neurons_step)
+            caret::train(rec, data = train_df, method = "brnn",
+                         metric = "RMSE", trControl = tr_ctrl,
+                         tuneGrid = data.frame(neurons = neurons_g), na.action = na.omit)
+          } else {
+            caret::train(rec, data = train_df, method = "brnn",
+                         metric = "RMSE", trControl = tr_ctrl,
+                         tuneLength = input$tune_length %||% 5, na.action = na.omit)
+          }
         }
 
       )

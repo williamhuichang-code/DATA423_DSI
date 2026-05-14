@@ -36,12 +36,24 @@ meth_ols_ui <- function(id,
                                "Lasso (alpha = 1)"                 = "lasso"),
                   selected = "elasticnet", width = "100%"),
 
+      # Fixed-alpha hint shown for ridge / lasso
+      conditionalPanel(
+        condition = sprintf("input['%s'] !== 'elasticnet'", ns("glmnet_penalty")),
+        div(
+          style = "font-size:12px; color:#185FA5; background:#e8f0fe;
+                   border-left:3px solid #a8c0fd; padding:6px 10px;
+                   border-radius:4px; margin-bottom:8px;",
+          icon("circle-info", style = "color:#185FA5; margin-right:4px;"),
+          HTML("Alpha is <strong>fixed</strong> by the penalty type — only lambda is tuned.")
+        )
+      ),
+
       tags$label("Tuning grid:",
                  style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
       selectInput(ns("glmnet_grid_type"), NULL,
                   choices  = c("Tune length default"      = "tunelength",
                                "Custom alpha/lambda grid" = "custom"),
-                  selected = "tunelength", width = "100%"),
+                  selected = "custom", width = "100%"),
 
       # Custom grid controls
       conditionalPanel(
@@ -57,18 +69,18 @@ meth_ols_ui <- function(id,
           sliderInput(ns("glmnet_alpha_max"),  NULL, min = 0,    max = 1,   value = 1.0,  step = 0.05, width = "100%"),
           tags$label("Alpha step:",
                      style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-          sliderInput(ns("glmnet_alpha_step"), NULL, min = 0.05, max = 0.5, value = 0.1,  step = 0.05, width = "100%")
+          sliderInput(ns("glmnet_alpha_step"), NULL, min = 0.01, max = 0.5, value = 0.23, step = 0.01, width = "100%")
         ),
 
         tags$label("Log10 lambda minimum:",
                    style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-        sliderInput(ns("glmnet_log_lam_min"), NULL, min = -6, max = 2,   value = -3,  step = 0.5, width = "100%"),
+        sliderInput(ns("glmnet_log_lam_min"), NULL, min = -6, max = 2,   value = -5,  step = 0.5, width = "100%"),
         tags$label("Log10 lambda maximum:",
                    style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-        sliderInput(ns("glmnet_log_lam_max"), NULL, min = -2, max = 6,   value = 3,   step = 0.5, width = "100%"),
+        sliderInput(ns("glmnet_log_lam_max"), NULL, min = -2, max = 6,   value = -1,  step = 0.5, width = "100%"),
         tags$label("Lambda values:",
                    style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-        sliderInput(ns("glmnet_lam_n"),       NULL, min = 10, max = 100, value = 50,  step = 5,   width = "100%")
+        sliderInput(ns("glmnet_lam_n"),       NULL, min = 5,  max = 100, value = 5,   step = 5,   width = "100%")
       )
     )
   )

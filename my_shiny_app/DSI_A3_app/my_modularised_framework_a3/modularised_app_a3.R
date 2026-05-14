@@ -44,6 +44,16 @@ glmnet_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
                     "interact", "lincomb",
                     "zv", "nzv", "center", "scale")
 
+svmrs_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                    "other", "YeoJohnson", "dummy", 
+                    "interact", "lincomb",
+                    "zv", "nzv", "center", "scale")
+
+brnn_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
+                   "other", "YeoJohnson", "dummy", 
+                   "interact", "lincomb",
+                   "zv", "nzv", "center", "scale")
+
 task_specific_roles <- list(
   Patient         = "obs_id",
   Response        = "outcome",
@@ -72,14 +82,14 @@ av_highlight_tags <- c(
   "Multivariate Adaptive Regression Splines"
 )
 
-# A3_omit_ids <- c(
-#   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
-#   "tid-57689", "tid-57787", "tid-57761", "tid-57431",
-#   "tid-57479", "tid-57487", "tid-57600", "tid-57732",
-#   "tid-57739", "tid-57808", "tid-57845", "tid-57859",
-#   "tid-57921", "tid-57928", "tid-58050", "tid-58055",
-#   "tid-57470", "tid-57569", "tid-57580", "tid-57899"
-# )
+A3_omit_ids <- c(
+  "tid-57748", "tid-57237", "tid-57537", "tid-57651",
+  "tid-57689", "tid-57787", "tid-57761", "tid-57431",
+  "tid-57479", "tid-57487", "tid-57600", "tid-57732",
+  "tid-57739", "tid-57808", "tid-57845", "tid-57859",
+  "tid-57921", "tid-57928", "tid-58050", "tid-58055",
+  "tid-57470", "tid-57569", "tid-57580", "tid-57899"
+)
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
@@ -481,6 +491,7 @@ server <- function(input, output, session) {
                    seed               = seed_in_use,
                    model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
                    general_preprocess = if (exists("general_initial")) general_initial else NULL,
+                   svm_preprocess     = if (exists("svmrs_initial"))   svmrs_initial   else NULL,
                    pp_choices         = ppchoices)
 
   meth_ensemble <- meth_ensemble_server("meth_ensemble", get_model_data, roles,
@@ -505,6 +516,7 @@ server <- function(input, output, session) {
                    general_preprocess = if (exists("general_initial")) general_initial else NULL,
                    earth_preprocess   = if (exists("earth_initial"))   earth_initial   else NULL,
                    m5_preprocess      = if (exists("m5_initial"))      m5_initial      else NULL,
+                   ppr_preprocess     = if (exists("ppr_initial"))     ppr_initial     else NULL,
                    pp_choices         = ppchoices)
 
   # ── Aggregate all trained models for Model Selection ──────────────────────
