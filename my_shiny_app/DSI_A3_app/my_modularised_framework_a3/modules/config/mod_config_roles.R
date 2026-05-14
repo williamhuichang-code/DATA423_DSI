@@ -8,7 +8,7 @@
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 
-data_roles_ui <- function(id, default_seed = NULL) {
+data_roles_ui <- function(id, default_seed = NULL, split_ratio = NULL) {
   ns <- NS(id)
   sidebarLayout(
     position = "right",
@@ -53,7 +53,7 @@ data_roles_ui <- function(id, default_seed = NULL) {
       conditionalPanel(
         condition = sprintf("input['%s'] === 'two_partition'", ns("split_method")),
         sliderInput(ns("p2_train"), "Train proportion",
-                    min = 0.05, max = 0.95, value = 0.8, step = 0.05, width = "100%"),
+                    min = 0.05, max = 0.95, value = split_ratio %||% 0.8, step = 0.05, width = "100%"),
         tags$label("Stratify by (y =):", style = "font-weight:600; font-size:13px; color:#343a40;"),
         selectInput(ns("p2_stratify"), label = NULL, choices = NULL, width = "100%"),
         div(style = "margin:6px 0;",
@@ -194,10 +194,13 @@ data_roles_ui <- function(id, default_seed = NULL) {
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
 data_roles_server <- function(id, get_raw, default_roles = NULL,
-                              auto_split = FALSE, split_ratio = 0.7) {
+                              auto_split = FALSE, split_ratio = NULL) {
   moduleServer(id, function(input, output, session) {
 
     ns <- session$ns
+
+    # Resolve split_ratio default here so every downstream use is consistent
+    split_ratio <- split_ratio %||% 0.8
 
     # ── Role definitions ─────────────────────────────────────────────────────
 

@@ -44,7 +44,7 @@ glmnet_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
                     "interact", "lincomb",
                     "zv", "nzv", "center", "scale")
 
-A3_default_roles <- list(
+task_specific_roles <- list(
   Patient         = "obs_id",
   Response        = "outcome",
   ObservationDate = "date"
@@ -72,14 +72,14 @@ av_highlight_tags <- c(
   "Multivariate Adaptive Regression Splines"
 )
 
-A3_omit_ids <- c(
-  "tid-57748", "tid-57237", "tid-57537", "tid-57651",
-  "tid-57689", "tid-57787", "tid-57761", "tid-57431",
-  "tid-57479", "tid-57487", "tid-57600", "tid-57732",
-  "tid-57739", "tid-57808", "tid-57845", "tid-57859",
-  "tid-57921", "tid-57928", "tid-58050", "tid-58055",
-  "tid-57470", "tid-57569", "tid-57580", "tid-57899"
-)
+# A3_omit_ids <- c(
+#   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
+#   "tid-57689", "tid-57787", "tid-57761", "tid-57431",
+#   "tid-57479", "tid-57487", "tid-57600", "tid-57732",
+#   "tid-57739", "tid-57808", "tid-57845", "tid-57859",
+#   "tid-57921", "tid-57928", "tid-58050", "tid-58055",
+#   "tid-57470", "tid-57569", "tid-57580", "tid-57899"
+# )
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
@@ -121,11 +121,6 @@ list.files("modules", pattern = "\\.R$", recursive = TRUE, full.names = TRUE) |>
 
 # sets R to display numbers with n significant digits globally (set it in global config)
 options(digits = DIGITS)
-
-
-# ── MODEL UTILITIES ───────────────────────────────────────────────────────────
-# defined in modules/mod_meth_tune.R (sourced into globalenv)
-
 
 
 
@@ -250,7 +245,8 @@ ui <- dashboardPage(
       
       # Config
       tabItem(tabName = "data_roles",       data_roles_ui("data_roles",
-                                            default_seed = if (exists("SPLIT_SEED")) SPLIT_SEED else NULL)),
+                                            default_seed = if (exists("SPLIT_SEED"))  SPLIT_SEED  else NULL,
+                                            split_ratio  = if (exists("SPLIT_RATIO")) SPLIT_RATIO else NULL)),
       tabItem(tabName = "data_download",    data_download_ui("data_download")),
       
       # EDA
@@ -378,9 +374,9 @@ server <- function(input, output, session) {
   # ── DOMAIN CONFIGS ────────────────────────────────────────────────────────
   
   config         <- data_roles_server("data_roles", get_raw,
-                                     default_roles = if (exists("A3_default_roles")) A3_default_roles else NULL,
+                                     default_roles = if (exists("task_specific_roles")) task_specific_roles else NULL,
                                      auto_split    = if (exists("AUTO_SPLIT"))  AUTO_SPLIT  else FALSE,
-                                     split_ratio   = if (exists("SPLIT_RATIO")) SPLIT_RATIO else 0.7)
+                                     split_ratio   = if (exists("SPLIT_RATIO")) SPLIT_RATIO else NULL)
   config_data    <- config$data            # reactive df (raw + optional split col)
   roles          <- config$roles           # reactive named list of role assignments
   important_vars <- config$important_vars  # reactive character vector
@@ -471,6 +467,7 @@ server <- function(input, output, session) {
                    general_preprocess = if (exists("general_initial")) general_initial else NULL,
                    glmnet_preprocess  = if (exists("glmnet_initial"))  glmnet_initial  else NULL,
                    rlm_preprocess     = if (exists("rlm_initial"))     rlm_initial     else NULL,
+                   lm_preprocess      = if (exists("lm_initial"))      lm_initial      else NULL,
                    pp_choices         = ppchoices)
 
   meth_tree <- meth_tree_server("meth_tree", get_model_data, roles,

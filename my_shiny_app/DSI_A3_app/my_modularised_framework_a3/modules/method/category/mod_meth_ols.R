@@ -1,5 +1,5 @@
 # =================================================================================
-# mod_meth_ols.R  — OLS category module  (GLMnet + PLS + RLM)
+# mod_meth_ols.R  — OLS category module  (LM + RLM + GLMnet + PLS)
 # =================================================================================
 # Three methods assembled under one shared sidebar.
 # The active method is tracked via the method_inner tabsetPanel.
@@ -7,7 +7,7 @@
 # UI:     meth_ols_ui(id, pp_choices, default_preprocess)
 # Server: meth_ols_server(id, get_data, roles, seed,
 #                          general_preprocess, glmnet_preprocess,
-#                          pls_preprocess, rlm_preprocess, pp_choices)
+#                          pls_preprocess, rlm_preprocess, lm_preprocess, pp_choices)
 # Returns: list(models = reactiveValues, effective_seed = reactive)
 # =================================================================================
 
@@ -76,12 +76,14 @@ meth_ols_ui <- function(id,
   fluidRow(
     column(9,
       tabsetPanel(type = "tabs", id = ns("method_inner"),
+        tabPanel("lm",     value = "lm",     style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "lm",     has_tuning = TRUE)),
+        tabPanel("rlm",    value = "rlm",    style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "rlm",    has_tuning = TRUE)),
         tabPanel("glmnet", value = "glmnet", style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "glmnet")),
         tabPanel("pls",    value = "pls",    style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "pls")),
-        tabPanel("rlm",    value = "rlm",    style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "rlm",    has_tuning = TRUE))
+                 .meth_subtabs_ui(ns, "pls"))
       )
     ),
     column(3,
@@ -104,6 +106,7 @@ meth_ols_server <- function(id, get_data, roles,
                              glmnet_preprocess  = NULL,
                              pls_preprocess     = NULL,
                              rlm_preprocess     = NULL,
+                             lm_preprocess      = NULL,
                              pp_choices         = character(0)) {
   moduleServer(id, function(input, output, session) {
 
@@ -118,12 +121,13 @@ meth_ols_server <- function(id, get_data, roles,
     get_train      <- setup$get_train
 
     # Active method driven by the method_inner tab
-    current_method <- reactive({ input$method_inner %||% "glmnet" })
+    current_method <- reactive({ input$method_inner %||% "lm" })
 
     # ── Standard output renders ───────────────────────────────────────────────
+    .meth_register_outputs(output, "lm",     models, ns)
+    .meth_register_outputs(output, "rlm",    models, ns)
     .meth_register_outputs(output, "glmnet", models, ns)
     .meth_register_outputs(output, "pls",    models, ns)
-    .meth_register_outputs(output, "rlm",    models, ns)
 
     # ── Override GLMnet tuning plot: facet by λ, colour gradient for α ────────
     # The default plot(mod) puts all λ values in the legend, which is unreadable.
@@ -241,6 +245,53 @@ meth_ols_server <- function(id, get_data, roles,
         )
     })
 
+    # ── LM tuning plot: RMSE for intercept TRUE vs FALSE ─────────────────────
+    # Single binary tuning param: intercept (TRUE/FALSE).
+    output[["lm_tune_plot"]] <- renderPlot({
+      mod <- models[["lm"]]; req(mod)
+      df  <- mod$results
+
+      has_sd  <- !all(is.na(df$RMSESD))
+      best_ic <- mod$bestTune$intercept
+
+      df$label <- ifelse(df$intercept, "With intercept", "No intercept")
+
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = label, y = RMSE,
+                                             colour = label, fill = label))
+      if (has_sd)
+        p <- p + ggplot2::geom_errorbar(
+          ggplot2::aes(ymin = RMSE - RMSESD, ymax = RMSE + RMSESD),
+          width = 0.12, linewidth = 0.8
+        )
+      p +
+        ggplot2::geom_point(size = 5) +
+        ggplot2::geom_point(
+          data   = df[df$intercept == best_ic, ],
+          colour = "#dc3545", size = 7, shape = 1, stroke = 1.8
+        ) +
+        ggplot2::scale_colour_manual(
+          values = c("With intercept" = "#185FA5", "No intercept" = "#6c757d"),
+          guide  = "none"
+        ) +
+        ggplot2::scale_fill_manual(
+          values = c("With intercept" = "#185FA5", "No intercept" = "#6c757d"),
+          guide  = "none"
+        ) +
+        ggplot2::labs(
+          x        = "Intercept setting",
+          y        = "RMSE (Bootstrap)",
+          title    = "LM tuning: intercept TRUE vs FALSE",
+          subtitle = "Red circle = selected best  |  error bars = ± 1 SD"
+        ) +
+        ggplot2::theme_bw(base_size = 13) +
+        ggplot2::theme(
+          plot.title    = ggplot2::element_text(face = "bold", size = 14),
+          plot.subtitle = ggplot2::element_text(colour = "#6c757d", size = 11),
+          axis.text     = ggplot2::element_text(size = 13),
+          axis.title    = ggplot2::element_text(size = 13, face = "bold")
+        )
+    })
+
     # ── RLM tuning plot: RMSE per intercept × psi combination ────────────────
     # Two categorical tuning params: intercept (TRUE/FALSE), psi (3 options).
     output[["rlm_tune_plot"]] <- renderPlot({
@@ -300,9 +351,10 @@ meth_ols_server <- function(id, get_data, roles,
         general_preprocess %||% character(0)
       } else {
         switch(method,
+               "lm"     = lm_preprocess     %||% general_preprocess %||% character(0),
+               "rlm"    = rlm_preprocess    %||% general_preprocess %||% character(0),
                "glmnet" = glmnet_preprocess %||% general_preprocess %||% character(0),
                "pls"    = pls_preprocess    %||% general_preprocess %||% character(0),
-               "rlm"    = rlm_preprocess    %||% general_preprocess %||% character(0),
                general_preprocess %||% character(0))
       }
       updateSelectizeInput(session, "preprocess",
@@ -330,6 +382,20 @@ meth_ols_server <- function(id, get_data, roles,
       models         = models,
       current_method = current_method,
       train_fns = list(
+
+        lm = function() {
+          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed    <- effective_seed()
+          r        <- roles()
+          tr_ctrl  <- .meth_build_tr_control(
+            input, eseed, train_df[[names(r)[r == "outcome"][1]]]
+          )
+          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          set.seed(eseed)
+          caret::train(rec, data = train_df, method = "lm",
+                       metric = "RMSE", trControl = tr_ctrl,
+                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+        },
 
         glmnet = function() {
           library(glmnet)

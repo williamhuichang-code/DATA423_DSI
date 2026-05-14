@@ -50,6 +50,7 @@ startMode <- function(parallel = TRUE) {
     registerDoParallel(clus)
     list(cluster = clus, outfile = outfile)
   } else {
+    registerDoSEQ()   # ensure any previously registered parallel backend is cleared
     NULL
   }
 }
@@ -963,7 +964,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           co <- coef(mod$finalModel)
           as.data.frame(co, row.names = rownames(co))
 
-        } else if (meth == "rlm") {
+        } else if (meth %in% c("lm", "rlm")) {
           co <- coef(mod$finalModel)
           data.frame(
             Variable    = names(co),

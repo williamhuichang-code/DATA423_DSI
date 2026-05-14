@@ -34,7 +34,9 @@ library(ggrepel)
 
 # ── UI: Method Table tab ─────────────────────────────────────────────────────
 # Contains: filter sidebar (right) + DT table (main)
-# All filter inputs live here; the server reads them for both table and map.
+# Inputs: method type, exclude tags, lit highlights.
+# Group colour inputs (av_g1–av_g6) live in the map tab — they are always in
+# the DOM (bs4Dash pre-renders all tabItems) so the server reads them from there.
 
 meth_available_table_ui <- function(id) {
   ns <- NS(id)
@@ -58,8 +60,9 @@ meth_available_table_ui <- function(id) {
           icon("circle-info", style = "color:#0d6efd;"), HTML("&nbsp;"),
           HTML("<strong>How to use:</strong><br>
                Filter methods using the controls below.
-               The table updates instantly. Switch to the
-               <strong>Method Map</strong> tab to visualise clusters.")
+               The table updates instantly. Configure colour
+               groups and map layout in the
+               <strong>Method Map</strong> tab.")
         ),
 
         # ── 1st: Model Constraints ────────────────────────────────────────────
@@ -98,6 +101,55 @@ meth_available_table_ui <- function(id) {
                        multiple = TRUE,
                        options  = list(placeholder = "e.g. Regularization")),
         hr(),
+
+        tags$label("Matching methods",
+                   style = "font-weight:600; font-size:13px; color:#343a40;
+                            display:block; margin-bottom:4px; margin-top:10px;"),
+        verbatimTextOutput(ns("av_filter_summary"))
+      ),
+
+      mainPanel(
+        width = 9,
+        h4("Filtered caret methods",
+           style = "border-left:3px solid #534AB7; padding-left:8px;
+                    font-size:14px; margin-top:4px; margin-bottom:8px;"),
+        shinycssloaders::withSpinner(DT::dataTableOutput(ns("av_method_table")))
+      )
+    )
+  )
+}
+
+
+# ── UI: Method Map tab ───────────────────────────────────────────────────────
+# Contains: map controls sidebar (right) + similarity map (main)
+# Filter inputs live in the table tab; they're always in the DOM (bs4Dash
+# pre-renders all tabItems), so the server can read them here too.
+
+meth_available_map_ui <- function(id) {
+  ns <- NS(id)
+
+  tagList(
+    .av_css,
+
+    sidebarLayout(
+      position = "right",
+
+      sidebarPanel(
+        width = 3,
+        style = "background-color:#f4f6fb; border-left:3px solid #6a9fd8;
+                 min-height:100vh; padding:16px 14px;",
+
+        # Info note
+        div(
+          style = "font-size:13px; color:#343a40; background-color:white;
+                   padding:10px; border-left:4px solid #ffc107; border-radius:6px;
+                   margin-bottom:12px;",
+          icon("circle-info", style = "color:#ffc107;"), HTML("&nbsp;"),
+          HTML("<strong>Tip:</strong><br>
+               Set model type, exclusions and highlights in the
+               <strong>Method Table</strong> tab — they apply here too.
+               Colour groups and map layout are configured below.")
+        ),
 
         # ── 3rd: Sample Model Flavours ────────────────────────────────────────
         div(style = "background:#d1ecf1; border-left:3px solid #0dcaf0;
@@ -149,55 +201,6 @@ meth_available_table_ui <- function(id) {
         selectizeInput(ns("av_g6"), label = NULL, choices = NULL, multiple = TRUE,
                        options = list(placeholder = "e.g. anything...")),
         hr(),
-
-        tags$label("Matching methods",
-                   style = "font-weight:600; font-size:13px; color:#343a40;
-                            display:block; margin-bottom:4px; margin-top:10px;"),
-        verbatimTextOutput(ns("av_filter_summary"))
-      ),
-
-      mainPanel(
-        width = 9,
-        h4("Filtered caret methods",
-           style = "border-left:3px solid #534AB7; padding-left:8px;
-                    font-size:14px; margin-top:4px; margin-bottom:8px;"),
-        shinycssloaders::withSpinner(DT::dataTableOutput(ns("av_method_table")))
-      )
-    )
-  )
-}
-
-
-# ── UI: Method Map tab ───────────────────────────────────────────────────────
-# Contains: map controls sidebar (right) + similarity map (main)
-# Filter inputs live in the table tab; they're always in the DOM (bs4Dash
-# pre-renders all tabItems), so the server can read them here too.
-
-meth_available_map_ui <- function(id) {
-  ns <- NS(id)
-
-  tagList(
-    .av_css,
-
-    sidebarLayout(
-      position = "right",
-
-      sidebarPanel(
-        width = 3,
-        style = "background-color:#f4f6fb; border-left:3px solid #6a9fd8;
-                 min-height:100vh; padding:16px 14px;",
-
-        # Info note
-        div(
-          style = "font-size:13px; color:#343a40; background-color:white;
-                   padding:10px; border-left:4px solid #ffc107; border-radius:6px;
-                   margin-bottom:12px;",
-          icon("circle-info", style = "color:#ffc107;"), HTML("&nbsp;"),
-          HTML("<strong>Tip:</strong><br>
-               Configure model type, exclusions, highlights and colour
-               groups in the <strong>Method Table</strong> tab.
-               Changes reflect here instantly.")
-        ),
 
         # ── Map Configs ───────────────────────────────────────────────────────
         div(style = "background:#e2e3e5; border-left:3px solid #6c757d;
