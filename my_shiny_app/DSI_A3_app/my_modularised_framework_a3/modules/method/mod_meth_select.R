@@ -72,13 +72,20 @@ meth_select_server <- function(id, get_models) {
 
     # ── Resamples (mirrors template getResamples) ─────────────────────────────
 
+    # Stores the last resamples() error message for display
+    resample_error <- reactiveVal(NULL)
+
     get_resamples <- reactive({
       models2 <- Filter(Negate(is.null), get_models())
       req(length(models2) > 1)
 
+      resample_error(NULL)   # clear previous error
       results <- tryCatch(
         caret::resamples(models2),
-        error = function(e) NULL
+        error = function(e) {
+          resample_error(conditionMessage(e))
+          NULL
+        }
       )
       req(results)
 
@@ -144,6 +151,18 @@ meth_select_server <- function(id, get_models) {
           icon("triangle-exclamation", style = "color:#ffc107;"),
           HTML(paste0("&nbsp; Only <b>1</b> model trained (<b>", names(models2)[1],
                       "</b>). Train at least <b>2</b> models to compare."))
+        )
+      } else if (!is.null(resample_error())) {
+        div(
+          style = "background:#fff5f5; border-left:4px solid #dc3545;
+                   border-radius:6px; padding:12px 16px; margin-bottom:12px;
+                   font-size:13px; color:#842029;",
+          icon("circle-xmark", style = "color:#dc3545;"),
+          HTML(paste0("&nbsp; <b>resamples() failed:</b> ", resample_error(),
+                      "<br><br>Most likely cause: models were trained with different seeds,
+                       different resampling methods (boot vs cv), or different numbers of
+                       folds/bootstraps. Retrain all models with the same seed and resampling
+                       settings to compare them."))
         )
       } else {
         NULL  # plot takes over
