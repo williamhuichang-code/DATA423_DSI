@@ -209,7 +209,7 @@ meth_tree_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "evtree",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         rf = function() {

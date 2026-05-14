@@ -235,9 +235,10 @@ meth_wildcard_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # earth only accepts na.action = na.fail — NAs must be handled in the recipe.
           caret::train(rec, data = train_df, method = "earth",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.fail)
         },
 
         M5 = function() {
@@ -250,7 +251,7 @@ meth_wildcard_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "M5",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         ppr = function() {
@@ -262,7 +263,7 @@ meth_wildcard_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "ppr",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         }
 
       )

@@ -437,11 +437,11 @@ meth_kernel_server <- function(id, get_data, roles,
               isTRUE(input$svm_grid_type == "custom")) {
             caret::train(rec, data = train_df, method = "svmRadialSigma",
                          metric = "RMSE", trControl = tr_ctrl,
-                         tuneGrid = build_svm_grid(), na.action = na.omit)
+                         tuneGrid = build_svm_grid(), na.action = na.pass)
           } else {
             caret::train(rec, data = train_df, method = "svmRadialSigma",
                          metric = "RMSE", trControl = tr_ctrl,
-                         tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                         tuneLength = input$tune_length %||% 5, na.action = na.pass)
           }
         },
 
@@ -467,11 +467,11 @@ meth_kernel_server <- function(id, get_data, roles,
               isTRUE(input$svmpoly_grid_type == "custom")) {
             caret::train(rec, data = train_df, method = "svmPoly",
                          metric = "RMSE", trControl = tr_ctrl,
-                         tuneGrid = build_svmpoly_grid(), na.action = na.omit)
+                         tuneGrid = build_svmpoly_grid(), na.action = na.pass)
           } else {
             caret::train(rec, data = train_df, method = "svmPoly",
                          metric = "RMSE", trControl = tr_ctrl,
-                         tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                         tuneLength = input$tune_length %||% 5, na.action = na.pass)
           }
         },
 
@@ -485,7 +485,7 @@ meth_kernel_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "krlsPoly",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         gaussprRadial = function() {
@@ -498,7 +498,7 @@ meth_kernel_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "gaussprRadial",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         gaussprPoly = function() {
@@ -511,7 +511,7 @@ meth_kernel_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "gaussprPoly",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         gaussprLinear = function() {
@@ -525,7 +525,7 @@ meth_kernel_server <- function(id, get_data, roles,
           # gaussprLinear has no tuning parameters — tuneLength is ignored by caret
           caret::train(rec, data = train_df, method = "gaussprLinear",
                        metric = "RMSE", trControl = tr_ctrl,
-                       na.action = na.omit)
+                       na.action = na.pass)
         }
 
       )

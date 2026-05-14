@@ -574,15 +574,15 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     ),
     conditionalPanel(
       condition = sprintf("(input['%s'] || []).includes('month')", ns("preprocess")),
-      checkboxInput(ns("cyclic_month"), "Cyclic month (sin/cos, period = 12)", value = TRUE)
+      checkboxInput(ns("cyclic_month"), "Cyclic month (sin/cos, period = 12)", value = FALSE)
     ),
     conditionalPanel(
       condition = sprintf("(input['%s'] || []).includes('week')", ns("preprocess")),
-      checkboxInput(ns("cyclic_week"),  "Cyclic week (sin/cos, period = 52)",  value = TRUE)
+      checkboxInput(ns("cyclic_week"),  "Cyclic week (sin/cos, period = 52)",  value = FALSE)
     ),
     conditionalPanel(
       condition = sprintf("(input['%s'] || []).includes('dow')", ns("preprocess")),
-      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = TRUE)
+      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = FALSE)
     ),
 
     tags$label("Tune length:",
@@ -927,13 +927,19 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       })
 
     }, error = function(e) {
-      msg <- conditionMessage(e)
+      msg    <- conditionMessage(e)
+      is_na  <- grepl("NA|missing|na\\.fail|na\\.action", msg, ignore.case = TRUE)
+      hint   <- if (is_na)
+        "<br><br><b>Hint:</b> Your data may contain NAs that are not handled in the
+         preprocessing pipeline. Add <code>naomit</code>, <code>impute_bag</code>, or
+         <code>impute_knn</code> to your preprocessing steps and retrain."
+      else ""
       output$action_feedback <- renderUI({
         div(
           style = "margin-top:8px; font-size:12px; color:#dc3545; background:#fff5f5;
                    border-left:3px solid #f5c2c7; padding:6px 10px; border-radius:6px;",
           icon("circle-xmark", style = "color:#dc3545;"),
-          HTML(paste0(" <b>Error:</b> ", msg))
+          HTML(paste0(" <b>Error:</b> ", msg, hint))
         )
       })
     }, finally = {

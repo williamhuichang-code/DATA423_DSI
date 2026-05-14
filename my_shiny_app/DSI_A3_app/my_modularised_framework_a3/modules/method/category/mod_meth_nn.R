@@ -403,7 +403,7 @@ meth_nn_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "qrnn",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         brnn = function() {
@@ -420,11 +420,11 @@ meth_nn_server <- function(id, get_data, roles,
                              by = input$brnn_neurons_step)
             caret::train(rec, data = train_df, method = "brnn",
                          metric = "RMSE", trControl = tr_ctrl,
-                         tuneGrid = data.frame(neurons = neurons_g), na.action = na.omit)
+                         tuneGrid = data.frame(neurons = neurons_g), na.action = na.pass)
           } else {
             caret::train(rec, data = train_df, method = "brnn",
                          metric = "RMSE", trControl = tr_ctrl,
-                         tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                         tuneLength = input$tune_length %||% 5, na.action = na.pass)
           }
         },
 
@@ -438,7 +438,7 @@ meth_nn_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "pcaNNet",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         mlpWeightDecay = function() {
@@ -451,7 +451,7 @@ meth_nn_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "mlpWeightDecay",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         mlpML = function() {
@@ -464,7 +464,7 @@ meth_nn_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "mlpML",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         },
 
         monmlp = function() {
@@ -477,7 +477,7 @@ meth_nn_server <- function(id, get_data, roles,
           set.seed(eseed)
           caret::train(rec, data = train_df, method = "monmlp",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
         }
 
       )
