@@ -178,16 +178,53 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       recipe <- recipes::step_date(recipe, has_type("date"), features = c("year"),    ordinal = FALSE)
 
     } else if (s == "quarter") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("quarter"), ordinal = FALSE)
+      if (isTRUE(cfg$cyclic_quarter)) {
+        # Cyclic sin/cos encoding (period = 4). Quarter derived from month: ceiling(month/3).
+        recipe <- recipes::step_mutate(recipe,
+          dplyr::across(where(~inherits(., "Date")),
+            list(quarter_sin = ~sin(2 * pi * ceiling(as.integer(format(., "%m")) / 3) / 4),
+                 quarter_cos = ~cos(2 * pi * ceiling(as.integer(format(., "%m")) / 3) / 4)),
+            .names = "{.col}_{.fn}"))
+      } else {
+        recipe <- recipes::step_date(recipe, recipes::has_type("date"), features = "quarter", ordinal = FALSE)
+      }
 
     } else if (s == "month") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("month"),   ordinal = FALSE)
+      if (isTRUE(cfg$cyclic_month)) {
+        # Cyclic sin/cos encoding (period = 12) applied directly to raw date columns.
+        # The date column itself is removed by step_rm(has_type("date")) in .meth_build_recipe().
+        recipe <- recipes::step_mutate(recipe,
+          dplyr::across(where(~inherits(., "Date")),
+            list(month_sin = ~sin(2 * pi * as.integer(format(., "%m")) / 12),
+                 month_cos = ~cos(2 * pi * as.integer(format(., "%m")) / 12)),
+            .names = "{.col}_{.fn}"))
+      } else {
+        recipe <- recipes::step_date(recipe, recipes::has_type("date"), features = "month", ordinal = FALSE)
+      }
 
     } else if (s == "week") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("week"),    ordinal = FALSE)
+      if (isTRUE(cfg$cyclic_week)) {
+        # Cyclic sin/cos encoding (period = 52, ISO week).
+        recipe <- recipes::step_mutate(recipe,
+          dplyr::across(where(~inherits(., "Date")),
+            list(week_sin = ~sin(2 * pi * as.integer(format(., "%V")) / 52),
+                 week_cos = ~cos(2 * pi * as.integer(format(., "%V")) / 52)),
+            .names = "{.col}_{.fn}"))
+      } else {
+        recipe <- recipes::step_date(recipe, recipes::has_type("date"), features = "week", ordinal = FALSE)
+      }
 
     } else if (s == "dow") {
-      recipe <- recipes::step_date(recipe, has_type("date"), features = c("dow"),     ordinal = FALSE)
+      if (isTRUE(cfg$cyclic_dow)) {
+        # Cyclic sin/cos encoding (period = 7, %u: Mon=1 … Sun=7 → remap to 0–6).
+        recipe <- recipes::step_mutate(recipe,
+          dplyr::across(where(~inherits(., "Date")),
+            list(dow_sin = ~sin(2 * pi * (as.integer(format(., "%u")) - 1L) / 7),
+                 dow_cos = ~cos(2 * pi * (as.integer(format(., "%u")) - 1L) / 7)),
+            .names = "{.col}_{.fn}"))
+      } else {
+        recipe <- recipes::step_date(recipe, recipes::has_type("date"), features = "dow", ordinal = FALSE)
+      }
 
     } else if (s == "dateDecimal") {
       recipe <- recipes::step_date(recipe, has_type("date"), features = c("decimal"), ordinal = FALSE)
@@ -530,6 +567,24 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       sliderInput(ns("corr_threshold"), NULL, min = 0.1, max = 0.99, value = 0.9, step = 0.01, width = "100%")
     ),
 
+    # ── Cyclic encoding toggles (appear when the matching date step is selected) ──
+    conditionalPanel(
+      condition = sprintf("(input['%s'] || []).includes('quarter')", ns("preprocess")),
+      checkboxInput(ns("cyclic_quarter"), "Cyclic quarter (sin/cos, period = 4)", value = FALSE)
+    ),
+    conditionalPanel(
+      condition = sprintf("(input['%s'] || []).includes('month')", ns("preprocess")),
+      checkboxInput(ns("cyclic_month"), "Cyclic month (sin/cos, period = 12)", value = TRUE)
+    ),
+    conditionalPanel(
+      condition = sprintf("(input['%s'] || []).includes('week')", ns("preprocess")),
+      checkboxInput(ns("cyclic_week"),  "Cyclic week (sin/cos, period = 52)",  value = TRUE)
+    ),
+    conditionalPanel(
+      condition = sprintf("(input['%s'] || []).includes('dow')", ns("preprocess")),
+      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = TRUE)
+    ),
+
     tags$label("Tune length:",
                style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
     sliderInput(ns("tune_length"), NULL, min = 1, max = 50, value = 5, step = 1, width = "100%"),
@@ -600,7 +655,11 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     pls_num_comp         = input$pls_num_comp,
     ica_num_comp         = input$ica_num_comp,
     poly_degree          = input$poly_degree,
-    corr_threshold       = input$corr_threshold
+    corr_threshold       = input$corr_threshold,
+    cyclic_quarter       = input$cyclic_quarter,
+    cyclic_month         = input$cyclic_month,
+    cyclic_week          = input$cyclic_week,
+    cyclic_dow           = input$cyclic_dow
   )
 }
 

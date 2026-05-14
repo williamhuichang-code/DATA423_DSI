@@ -208,9 +208,14 @@ meth_ensemble_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # NOTE: na.action is intentionally omitted for ranger.
+          # ranger internally does `na.action == "na.fail"` as a string comparison,
+          # which throws "comparison is possible only for atomic and list types" when
+          # na.action is a function object (e.g. na.omit). Handle NAs via recipe
+          # preprocessing steps (naomit / imputation) instead.
           caret::train(rec, data = train_df, method = "ranger",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.omit,
+                       tuneLength = input$tune_length %||% 5,
                        num.threads = 1)   # disable ranger's own threading — caret handles parallelism
         }
 

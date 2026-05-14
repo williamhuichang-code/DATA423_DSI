@@ -36,7 +36,7 @@ DIGITS = 3
 FILE_OF_INTEREST <- "Ass3Data.csv"
 
 general_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                     "other", "YeoJohnson", "dummy", 
+                     "other", "dummy", 
                      "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
@@ -87,14 +87,14 @@ av_highlight_tags <- c(
   "Multivariate Adaptive Regression Splines"
 )
 
-# A3_omit_ids <- c(
-#   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
-#   "tid-57689", "tid-57787", "tid-57761", "tid-57431",
-#   "tid-57479", "tid-57487", "tid-57600", "tid-57732",
-#   "tid-57739", "tid-57808", "tid-57845", "tid-57859",
-#   "tid-57921", "tid-57928", "tid-58050", "tid-58055",
-#   "tid-57470", "tid-57569", "tid-57580", "tid-57899"
-# )
+A3_omit_ids <- c(
+  "tid-57748", "tid-57237", "tid-57537", "tid-57651",
+  "tid-57689", "tid-57787", "tid-57761", "tid-57431",
+  "tid-57479", "tid-57487", "tid-57600", "tid-57732",
+  "tid-57739", "tid-57808", "tid-57845", "tid-57859",
+  "tid-57921", "tid-57928", "tid-58050", "tid-58055",
+  "tid-57470", "tid-57569", "tid-57580", "tid-57899"
+)
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
