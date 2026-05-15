@@ -35,9 +35,10 @@ DIGITS = 3
 # Assignment 3 specific starting values, might comment out for general use
 FILE_OF_INTEREST <- "Ass3Data.csv"
 
-general_initial <- c("impute_bag", "dow", 
+general_initial <- c("impute_bag", 
+                     # "dow", 
                      "other", 
-                     "YeoJohnson",
+                     # "YeoJohnson",
                      "dummy", 
                      "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
