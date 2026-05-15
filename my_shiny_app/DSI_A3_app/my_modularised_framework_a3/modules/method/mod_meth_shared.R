@@ -583,7 +583,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     ),
     conditionalPanel(
       condition = sprintf("(input['%s'] || []).includes('dow')", ns("preprocess")),
-      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = FALSE)
+      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = TRUE)
     ),
 
     tags$label("Tune length:",
