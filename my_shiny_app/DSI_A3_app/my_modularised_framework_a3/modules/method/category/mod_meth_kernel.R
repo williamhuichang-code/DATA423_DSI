@@ -71,10 +71,10 @@ meth_kernel_ui <- function(id,
 
             tags$label("Log10 sigma minimum:",
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-            sliderInput(ns("svm_log_sig_min"), NULL, min = -5, max = 0,  value = -3, step = 0.5, width = "100%"),
+            sliderInput(ns("svm_log_sig_min"), NULL, min = -5, max = 0,  value = -3, step = 0.1, width = "100%"),
             tags$label("Log10 sigma maximum:",
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-            sliderInput(ns("svm_log_sig_max"), NULL, min = -3, max = 2,  value = -1, step = 0.5, width = "100%"),
+            sliderInput(ns("svm_log_sig_max"), NULL, min = -3, max = 2,  value = -1, step = 0.1, width = "100%"),
             tags$label("Sigma values:",
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
             sliderInput(ns("svm_sig_n"),       NULL, min = 3,  max = 20, value =  5, step = 1,   width = "100%")

@@ -39,7 +39,7 @@ general_initial <- c("impute_bag", "dow",
                      "other", 
                      "YeoJohnson",
                      "dummy", 
-                     # "interact", "lincomb",
+                     "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dow", 
@@ -49,10 +49,11 @@ glmnet_initial <- c("impute_bag", "dow",
                     "interact", "lincomb",
                     "zv", "nzv", "center", "scale")
 
-svmrs_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                    "other", "YeoJohnson", "dummy", 
-                    "interact", "lincomb",
-                    "zv", "nzv", "center", "scale")
+svmrs_initial <- c("impute_bag", "dow", 
+                   "other", 
+                   "dummy", 
+                   "interact", "lincomb",
+                   "zv", "nzv", "center", "scale")
 
 brnn_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
                    "other", "YeoJohnson", "dummy", 
