@@ -483,9 +483,11 @@ meth_kernel_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # NOTE: na.action omitted — KRLS::krls() does not accept na.action argument.
+          # Handle NAs via recipe preprocessing (naomit or imputation).
           caret::train(rec, data = train_df, method = "krlsPoly",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 5)
         },
 
         gaussprRadial = function() {
