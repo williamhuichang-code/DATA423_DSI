@@ -35,11 +35,11 @@ DIGITS = 3
 # Assignment 3 specific starting values, might comment out for general use
 FILE_OF_INTEREST <- "Ass3Data.csv"
 
-general_initial <- c("impute_bag", 
+general_initial <- c("impute_bag", "dow", 
                      "other", 
                      "YeoJohnson",
                      "dummy", 
-                     "interact", "lincomb",
+                     # "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dow", 
@@ -89,7 +89,7 @@ task_specific_roles <- list(
 SPLIT_SEED   <- 199
 MODEL_SEED   <- 673
 AUTO_SPLIT   <- TRUE
-SPLIT_RATIO  <- 0.8
+SPLIT_RATIO  <- 0.3
 
 # Available Methods explorer — tags to exclude from the table/map by default,
 # and tags to highlight as literature-informed choices.
