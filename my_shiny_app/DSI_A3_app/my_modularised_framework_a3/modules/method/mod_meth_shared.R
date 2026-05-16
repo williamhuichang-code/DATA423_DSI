@@ -320,6 +320,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       style = "padding-top:14px;",
       verbatimTextOutput(ns(paste0(m, "_desc"))),
       uiOutput(ns(paste0(m, "_na_hint"))),
+      uiOutput(ns(paste0(m, "_maxit_hint"))),
       hr(),
       tags$h6("Resampled performance",
               style = "font-weight:700; color:#343a40; margin-bottom:8px;"),
@@ -1071,8 +1072,8 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   mlpML          = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
-  monmlp         = list(action = "na.pass",     severity = "info",
-                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  monmlp         = list(action = "omitted",     severity = "warning",
+                        note = "monmlp::monmlp.fit() does not accept a na.action argument. Ensure NAs are handled in your preprocessing pipeline (naomit or imputation)."),
   # na.rpart — model handles NAs natively
   rpart          = list(action = "na.rpart",    severity = "success",
                         note = "rpart handles NAs natively via surrogate splits — no preprocessing required. However, explicit imputation is still recommended for consistency across models."),
@@ -1095,6 +1096,22 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
   # omitted — ranger handles internally
   ranger         = list(action = "omitted",     severity = "warning",
                         note = "ranger handles NA action internally via string comparison and does not accept a function argument. Ensure NAs are handled in your preprocessing pipeline.")
+)
+
+# ── Per-method nnet maxit warnings ───────────────────────────────────────────
+# Only mlpWeightDecay and pcaNNet use nnet::nnet() with its maxit=100 default.
+# mlpML uses RSNNS (different backend); qrnn/brnn/monmlp have their own optimisers.
+.maxit_info <- list(
+  mlpWeightDecay = paste0(
+    "nnet stops training after 100 weight updates by default — on complex data this is rarely enough ",
+    "for convergence, collapsing to near-mean predictions (R² ≈ 0, RMSE worse than null). ",
+    "maxit is hardcoded to 1000 in this app to mitigate this."
+  ),
+  pcaNNet = paste0(
+    "nnet stops training after 100 weight updates by default. pcaNNet applies PCA first then feeds ",
+    "into nnet — but the same maxit limit applies. ",
+    "maxit is hardcoded to 1000 in this app to mitigate this."
+  )
 )
 
 .meth_register_outputs <- function(output, m, models, ns) {
@@ -1131,6 +1148,24 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
         HTML(paste0(
           " <b>", cfg$label, "</b> &nbsp;|&nbsp; <code>na.action = ", info$action, "</code>",
           "<br><span style='color:#6c757d;'>", info$note, "</span>"
+        ))
+      )
+    })
+
+    # nnet maxit iteration-limit hint (mlpWeightDecay / pcaNNet only)
+    output[[paste0(meth, "_maxit_hint")]] <- renderUI({
+      note <- .maxit_info[[meth]]
+      if (is.null(note)) return(NULL)
+      div(
+        style = paste0(
+          "background:#fff9e6; border-left:4px solid #ffc107;",
+          "border-radius:6px; padding:8px 12px; margin:4px 0 4px;",
+          "font-size:12px; color:#343a40;"
+        ),
+        icon("triangle-exclamation", style = "color:#856404;"),
+        HTML(paste0(
+          " <b>nnet iteration limit</b> &nbsp;|&nbsp; <code>maxit = 100</code> (default)",
+          "<br><span style='color:#6c757d;'>", note, "</span>"
         ))
       )
     })

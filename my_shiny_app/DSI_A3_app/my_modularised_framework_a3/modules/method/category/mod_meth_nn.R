@@ -436,22 +436,26 @@ meth_nn_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # maxit hardcoded to 1000 — nnet default of 100 is too low for convergence on complex data
           caret::train(rec, data = train_df, method = "pcaNNet",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass,
+                       maxit = 1000)
         },
 
         mlpWeightDecay = function() {
-          library(RSNNS)
+          library(nnet)
           train_df <- get_train(); req(train_df, nrow(train_df) > 0)
           eseed    <- effective_seed()
           r        <- roles()
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # maxit hardcoded to 1000 — nnet default of 100 is too low for convergence on complex data
           caret::train(rec, data = train_df, method = "mlpWeightDecay",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 5, na.action = na.pass,
+                       maxit = 1000)
         },
 
         mlpML = function() {
@@ -475,9 +479,10 @@ meth_nn_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # NOTE: na.action omitted — monmlp::monmlp.fit() does not accept na.action argument.
           caret::train(rec, data = train_df, method = "monmlp",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 5)
         }
 
       )
