@@ -401,9 +401,11 @@ meth_nn_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # NOTE: na.action omitted — qrnn::qrnn.fit() passes data directly to nlm() which
+          # cannot handle NAs. Ensure NAs are handled in the preprocessing pipeline.
           caret::train(rec, data = train_df, method = "qrnn",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 5)
         },
 
         brnn = function() {
@@ -430,45 +432,47 @@ meth_nn_server <- function(id, get_data, roles,
 
         pcaNNet = function() {
           library(nnet)
-          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
-          eseed    <- effective_seed()
-          r        <- roles()
-          tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
-          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          train_df    <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed       <- effective_seed()
+          r           <- roles()
+          outcome_col <- names(r)[r == "outcome"][1]
+          tr_ctrl     <- .meth_build_tr_control(input, eseed, train_df[[outcome_col]])
+          rec         <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
-          # maxit hardcoded to 1000 — nnet default of 100 is too low for convergence on complex data
-          caret::train(rec, data = train_df, method = "pcaNNet",
-                       metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass,
-                       maxit = 1000)
+          # Response standardised to mean=0, sd=1 — pcaNNet's internal PCA makes the
+          # scale mismatch especially severe without normalisation (predictions → ≈0).
+          .meth_nnet_normalised_train(rec, train_df, outcome_col, "pcaNNet",
+                                      tr_ctrl, input$tune_length %||% 5)
         },
 
         mlpWeightDecay = function() {
           library(nnet)
-          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
-          eseed    <- effective_seed()
-          r        <- roles()
-          tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
-          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          train_df    <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed       <- effective_seed()
+          r           <- roles()
+          outcome_col <- names(r)[r == "outcome"][1]
+          tr_ctrl     <- .meth_build_tr_control(input, eseed, train_df[[outcome_col]])
+          rec         <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
-          # maxit hardcoded to 1000 — nnet default of 100 is too low for convergence on complex data
-          caret::train(rec, data = train_df, method = "mlpWeightDecay",
-                       metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass,
-                       maxit = 1000)
+          # Response standardised to mean=0, sd=1 — nnet's optimizer diverges on
+          # large-scale responses, collapsing predictions to near-zero without normalisation.
+          .meth_nnet_normalised_train(rec, train_df, outcome_col, "mlpWeightDecay",
+                                      tr_ctrl, input$tune_length %||% 5)
         },
 
         mlpML = function() {
           library(RSNNS)
-          train_df <- get_train(); req(train_df, nrow(train_df) > 0)
-          eseed    <- effective_seed()
-          r        <- roles()
-          tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
-          rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+          train_df    <- get_train(); req(train_df, nrow(train_df) > 0)
+          eseed       <- effective_seed()
+          r           <- roles()
+          outcome_col <- names(r)[r == "outcome"][1]
+          tr_ctrl     <- .meth_build_tr_control(input, eseed, train_df[[outcome_col]])
+          rec         <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
-          caret::train(rec, data = train_df, method = "mlpML",
-                       metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+          # Response standardised to mean=0, sd=1 — RSNNS shares the same scale
+          # sensitivity as nnet; predictions collapse to near-zero without normalisation.
+          .meth_nnet_normalised_train(rec, train_df, outcome_col, "mlpML",
+                                      tr_ctrl, input$tune_length %||% 5)
         },
 
         monmlp = function() {

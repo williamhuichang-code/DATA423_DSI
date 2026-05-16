@@ -28,6 +28,11 @@ eda_datatable_ui <- function(id) {
       # ── Raw data toggle ────────────────────────────────────────────────
       checkboxInput(ns("use_raw"), "Show raw data (before pipeline)", value = FALSE),
       hr(),
+
+      # ── NA filter ─────────────────────────────────────────────────────
+      checkboxInput(ns("only_na_rows"), "Show only rows with at least one NA", value = FALSE),
+      uiOutput(ns("na_row_count")),
+      hr(),
       
       # ── Column selection ───────────────────────────────────────────────
       tags$label("Columns to show:",
@@ -123,8 +128,9 @@ eda_datatable_server <- function(id, get_data, get_raw) {
     
     # ── Reset table controls and client-side table state ─────────────────
     observeEvent(input$reset, {
-      updateCheckboxInput(session, "use_raw", value = FALSE)
-      
+      updateCheckboxInput(session, "use_raw",       value = FALSE)
+      updateCheckboxInput(session, "only_na_rows",  value = FALSE)
+
       df <- get_data(); req(df)
       updateSelectizeInput(session, "cols",
                            choices  = names(df),
@@ -142,9 +148,29 @@ eda_datatable_server <- function(id, get_data, get_raw) {
       table_reset_nonce(isolate(table_reset_nonce()) + 1)
     })
     
+    # ── NA row count badge ────────────────────────────────────────────────
+    output$na_row_count <- renderUI({
+      req(isTRUE(input$only_na_rows))
+      df <- active_data(); req(df)
+      n  <- sum(apply(df, 1, anyNA))
+      div(
+        style = "font-size:12px; color:#856404; background:#fff9e6;
+                 border-left:3px solid #ffc107; padding:4px 8px;
+                 border-radius:4px; margin-top:4px;",
+        icon("triangle-exclamation", style = "color:#856404;"),
+        HTML(paste0(" <b>", n, "</b> row", if (n != 1) "s" else "",
+                    " with at least one NA"))
+      )
+    })
+
     # ── Filtered data ─────────────────────────────────────────────────────
     get_display_df <- reactive({
       df   <- active_data(); req(df)
+
+      # NA row filter applied before column selection so anyNA scans all cols
+      if (isTRUE(input$only_na_rows))
+        df <- df[apply(df, 1, anyNA), , drop = FALSE]
+
       cols <- intersect(input$cols, names(df))
       if (length(cols) == 0) return(df)
       df[, cols, drop = FALSE]

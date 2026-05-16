@@ -36,7 +36,7 @@ server <- function(input, output, session) {
   variant      <- miss_variants_server("miss_variants",   config_data)
   shadow       <- miss_shadow_server("miss_shadow",       variant$data)
   napp         <- miss_napp_server("miss_napp",           shadow$data)
-  excessive    <- miss_excessive_server("miss_excessive", napp$data, important_vars)
+  excessive    <- miss_excessive_server("miss_excessive", napp$data, roles)
   out_response <- out_response_server("out_response",     excessive$data, get_raw, roles)
   
   # exploratory diagnostics for imputation and standarisation choices

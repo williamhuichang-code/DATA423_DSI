@@ -66,17 +66,17 @@ miss_excessive_ui <- function(id) {
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 
-miss_excessive_server <- function(id, get_data, important_vars = NULL) {
+miss_excessive_server <- function(id, get_data, roles = NULL) {
   moduleServer(id, function(input, output, session) {
-    
+
     ns <- session$ns
-    
+
     observeEvent(input$reset, {
       updateSliderInput(session, "var_thresh", value = 1)
       updateSliderInput(session, "obs_thresh", value = 1)
       updateSelectizeInput(session, "extra_cols", selected = character(0))
     })
-    
+
     # ── populate extra_cols selector ─────────────────────────────────────
     observe({
       df <- get_data(); req(df)
@@ -85,15 +85,19 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
                            selected = character(0),
                            server   = TRUE)
     }) |> bindEvent(get_data(), once = TRUE)
-    
-    
+
+
     # ── compute exclusions ────────────────────────────────────────────────
-    
+
     result <- reactive({
       df         <- get_data()
       req(df)
-      imp_vars   <- if (!is.null(important_vars)) important_vars() else character(0)
+      r          <- if (!is.null(roles)) roles() else character(0)
+      # Protect outcome variable(s) from variable-level exclusion
+      imp_vars   <- names(r)[r %in% c("outcome")]
       imp_vars   <- imp_vars %||% character(0)
+      # Identify the observation ID column (role == "obs_id") for labelling excluded rows
+      obs_id_col <- { col <- names(r)[r == "obs_id"]; if (length(col) > 0) col[1] else NULL }
       
       # identify shadow columns — exclude from all missingness calculations
       # shadow cols are always 0/1 and never NA, so including them dilutes miss %
@@ -122,7 +126,8 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
         excl_vars  = excl_vars,
         prot_vars  = prot_vars,
         obs_miss   = obs_miss,
-        excl_rows  = excl_rows
+        excl_rows  = excl_rows,
+        obs_id_col = obs_id_col
       )
     })
     
@@ -257,22 +262,32 @@ miss_excessive_server <- function(id, get_data, important_vars = NULL) {
       res <- result()
       req(length(res$excl_rows) > 0)
       df  <- get_data(); req(df)
-      
+
+      # Base columns: row index + missingness %
       tbl <- data.frame(
         Row         = res$excl_rows,
         Missing_Pct = paste0(round(res$obs_miss[res$excl_rows] * 100, 1), "%"),
         stringsAsFactors = FALSE
       )
-      
-      # append any user-selected extra columns
-      extra <- intersect(input$extra_cols, names(df))
+
+      # Prepend obs_id column (from roles) as the first column so excluded
+      # observations are identified by their meaningful ID, not just row numbers
+      obs_id_col <- res$obs_id_col
+      if (!is.null(obs_id_col) && obs_id_col %in% names(df)) {
+        id_vals <- df[res$excl_rows, obs_id_col, drop = FALSE]
+        tbl     <- cbind(id_vals, tbl)
+      }
+
+      # Append any user-selected extra columns (skip obs_id if already shown)
+      extra <- setdiff(intersect(input$extra_cols, names(df)),
+                       if (!is.null(obs_id_col)) obs_id_col else character(0))
       if (length(extra) > 0) {
         extra_df <- df[res$excl_rows, extra, drop = FALSE]
         tbl      <- cbind(tbl, extra_df)
       }
-      
+
       tbl <- tbl[order(-res$obs_miss[res$excl_rows]), ]
-      
+
       DT::datatable(tbl, options = list(pageLength = 10, dom = "tip", scrollX = TRUE),
                     rownames = FALSE) |>
         DT::formatStyle("Missing_Pct", color = "#993556", fontWeight = "bold")

@@ -821,6 +821,72 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
 }
 
 
+# ── Response-normalised training for nnet-family models ──────────────────────
+#
+# nnet (mlpWeightDecay, pcaNNet) and RSNNS (mlpML) are all sensitive to the
+# scale of the response variable. When the response is in the thousands the
+# optimizer diverges and predictions collapse to near-zero (R² ≈ 0).
+# This helper standardises y to mean=0, sd=1 before training and back-scales
+# RMSE/MAE metrics to the original scale afterwards.
+#
+# Arguments
+#   rec         — unprepped recipe object from .meth_build_recipe()
+#   train_df    — training data frame
+#   outcome_col — name of the outcome column
+#   method      — caret method string, e.g. "mlpWeightDecay"
+#   tr_ctrl     — trainControl object from .meth_build_tr_control()
+#   tune_length — integer tuneLength passed to caret::train()
+#   ...         — additional args forwarded to caret::train()
+
+.meth_nnet_normalised_train <- function(rec, train_df, outcome_col, method,
+                                         tr_ctrl, tune_length, ...) {
+  # Prep and bake the recipe
+  prep_rec <- recipes::prep(rec, training = train_df, retain = TRUE)
+  baked    <- recipes::bake(prep_rec, new_data = NULL)
+
+  # Separate predictors and outcome; keep only numeric predictors
+  y <- baked[[outcome_col]]
+  x <- baked[, setdiff(names(baked), outcome_col), drop = FALSE]
+  x <- x[, vapply(x, is.numeric, logical(1)), drop = FALSE]
+
+  # Remove any remaining NA rows
+  ok <- complete.cases(x, y)
+  x  <- as.matrix(x[ok, , drop = FALSE])
+  y  <- y[ok]
+
+  if (nrow(x) <= 5 || ncol(x) == 0)
+    stop("Too few complete cases after preprocessing.")
+
+  # Standardise response to mean = 0, sd = 1
+  y_center <- mean(y, na.rm = TRUE)
+  y_scale  <- stats::sd(y, na.rm = TRUE)
+  if (!is.finite(y_center) || !is.finite(y_scale) || y_scale <= 0)
+    stop("Response normalisation failed: check for constant or all-NA outcome.")
+  y_train <- as.numeric((y - y_center) / y_scale)
+
+  # Train on normalised response (x/y interface — no na.action needed)
+  model <- caret::train(x = x, y = y_train, method = method,
+                        metric = "RMSE", trControl = tr_ctrl,
+                        tuneLength = tune_length, ...)
+
+  # Back-scale RMSE/MAE metrics to the original response scale
+  # (Rsquared is scale-invariant and does not need back-scaling)
+  for (m in c("RMSE", "MAE", "RMSESD", "MAESD")) {
+    if (m %in% names(model$results))
+      model$results[[m]] <- model$results[[m]] * y_scale
+    if (!is.null(model$resample) && m %in% names(model$resample))
+      model$resample[[m]] <- model$resample[[m]] * y_scale
+  }
+
+  # Store normalisation params and prepped recipe for downstream use
+  model$outcomeCenter <- y_center
+  model$outcomeScale  <- y_scale
+  model$recipe        <- prep_rec
+
+  model
+}
+
+
 # ── Common server setup (seed / global_seed_display / get_train / get_test) ───
 #
 # Call once at the top of every category module's moduleServer.
@@ -1062,8 +1128,8 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   M5             = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
-  qrnn           = list(action = "na.pass",     severity = "info",
-                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  qrnn           = list(action = "omitted",     severity = "warning",
+                        note = "qrnn::qrnn.fit() passes data directly to nlm() which cannot handle NAs. Ensure NAs are handled in your preprocessing pipeline (naomit or imputation)."),
   brnn           = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   pcaNNet        = list(action = "na.pass",     severity = "info",
@@ -1098,19 +1164,30 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                         note = "ranger handles NA action internally via string comparison and does not accept a function argument. Ensure NAs are handled in your preprocessing pipeline.")
 )
 
-# ── Per-method nnet maxit warnings ───────────────────────────────────────────
-# Only mlpWeightDecay and pcaNNet use nnet::nnet() with its maxit=100 default.
-# mlpML uses RSNNS (different backend); qrnn/brnn/monmlp have their own optimisers.
+# ── Per-method response-normalisation notes (nnet family) ────────────────────
+# mlpWeightDecay, pcaNNet (nnet::nnet()) and mlpML (RSNNS::mlp()) are all
+# sensitive to the scale of the response. When the response is in the thousands
+# the optimizer diverges and predictions collapse to near-zero (R² ≈ 0).
+# .meth_nnet_normalised_train() standardises y before training and back-scales
+# metrics. This list drives the info box in each model's Summary tab.
 .maxit_info <- list(
   mlpWeightDecay = paste0(
-    "nnet stops training after 100 weight updates by default — on complex data this is rarely enough ",
-    "for convergence, collapsing to near-mean predictions (R² ≈ 0, RMSE worse than null). ",
-    "maxit is hardcoded to 1000 in this app to mitigate this."
+    "nnet's optimizer struggles when the response is on a large scale — gradients become enormous, ",
+    "causing weight divergence and collapse to near-zero predictions (R² ≈ 0, RMSE far worse than null). ",
+    "This app standardises the response to mean = 0, sd = 1 before training and back-transforms ",
+    "RMSE/MAE metrics to the original scale. outcomeCenter and outcomeScale are stored in the model."
   ),
   pcaNNet = paste0(
-    "nnet stops training after 100 weight updates by default. pcaNNet applies PCA first then feeds ",
-    "into nnet — but the same maxit limit applies. ",
-    "maxit is hardcoded to 1000 in this app to mitigate this."
+    "pcaNNet's internal PCA normalises inputs to unit scale, making the mismatch with a large-scale ",
+    "response even more severe — predictions collapse to ≈ 0 for all observations. ",
+    "This app standardises the response to mean = 0, sd = 1 before training and back-transforms ",
+    "RMSE/MAE metrics to the original scale. outcomeCenter and outcomeScale are stored in the model."
+  ),
+  mlpML = paste0(
+    "RSNNS::mlp() shares the same sensitivity to response scale as nnet — when the response is in the ",
+    "thousands the optimizer diverges and predictions collapse to near-zero. ",
+    "This app standardises the response to mean = 0, sd = 1 before training and back-transforms ",
+    "RMSE/MAE metrics to the original scale. outcomeCenter and outcomeScale are stored in the model."
   )
 )
 
@@ -1152,19 +1229,20 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       )
     })
 
-    # nnet maxit iteration-limit hint (mlpWeightDecay / pcaNNet only)
+    # Response normalisation hint (mlpWeightDecay / pcaNNet / mlpML)
     output[[paste0(meth, "_maxit_hint")]] <- renderUI({
       note <- .maxit_info[[meth]]
       if (is.null(note)) return(NULL)
       div(
         style = paste0(
-          "background:#fff9e6; border-left:4px solid #ffc107;",
+          "background:#e8f0fe; border-left:4px solid #0d6efd;",
           "border-radius:6px; padding:8px 12px; margin:4px 0 4px;",
           "font-size:12px; color:#343a40;"
         ),
-        icon("triangle-exclamation", style = "color:#856404;"),
+        icon("circle-info", style = "color:#0d6efd;"),
         HTML(paste0(
-          " <b>nnet iteration limit</b> &nbsp;|&nbsp; <code>maxit = 100</code> (default)",
+          " <b>Response normalisation</b> &nbsp;|&nbsp;",
+          " <code>y → (y − μ) / σ</code>",
           "<br><span style='color:#6c757d;'>", note, "</span>"
         ))
       )
