@@ -36,11 +36,11 @@ DIGITS = 3
 FILE_OF_INTEREST <- "Ass3Data.csv"
 
 general_initial <- c("impute_bag", 
-                     # "dow", 
+                     "dow",
                      "other", 
                      # "YeoJohnson",
                      "dummy", 
-                     "interact", "lincomb",
+                     # "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dow", 
@@ -91,7 +91,7 @@ task_specific_roles <- list(
 SPLIT_SEED   <- 199
 MODEL_SEED   <- 673
 AUTO_SPLIT   <- TRUE
-SPLIT_RATIO  <- 0.3
+SPLIT_RATIO  <- 0.8
 
 # Available Methods explorer — tags to exclude from the table/map by default,
 # and tags to highlight as literature-informed choices.
@@ -110,14 +110,14 @@ av_highlight_tags <- c(
   "Multivariate Adaptive Regression Splines"
 )
 
-A3_omit_ids <- c(
-  "tid-57748", "tid-57237", "tid-57537", "tid-57651",
-  "tid-57689", "tid-57787", "tid-57761", "tid-57431",
-  "tid-57479", "tid-57487", "tid-57600", "tid-57732",
-  "tid-57739", "tid-57808", "tid-57845", "tid-57859",
-  "tid-57921", "tid-57928", "tid-58050", "tid-58055",
-  "tid-57470", "tid-57569", "tid-57580", "tid-57899"
-)
+# A3_omit_ids <- c(
+#   "tid-57748", "tid-57237", "tid-57537", "tid-57651",
+#   "tid-57689", "tid-57787", "tid-57761", "tid-57431",
+#   "tid-57479", "tid-57487", "tid-57600", "tid-57732",
+#   "tid-57739", "tid-57808", "tid-57845", "tid-57859",
+#   "tid-57921", "tid-57928", "tid-58050", "tid-58055",
+#   "tid-57470", "tid-57569", "tid-57580", "tid-57899"
+# )
 
 
 # ── FILE LOADING LOGIC ───────────────────────────────────────────────────────
@@ -530,10 +530,10 @@ server <- function(input, output, session) {
   meth_ensemble <- meth_ensemble_server("meth_ensemble", get_model_data, roles,
                    seed               = seed_in_use,
                    model_seed         = if (exists("MODEL_SEED")) MODEL_SEED else NULL,
-                   general_preprocess = if (exists("general_initial")) general_initial else NULL,
-                   cubist_preprocess  = if (exists("cubist_initial"))  cubist_initial  else NULL,
-                   ranger_preprocess  = if (exists("ranger_initial"))  ranger_initial  else NULL,
-                   pp_choices         = ppchoices)
+                   general_preprocess  = if (exists("general_initial"))   general_initial  else NULL,
+                   ranger_preprocess   = if (exists("ranger_initial"))    ranger_initial   else NULL,
+                   bagearth_preprocess = if (exists("bagearth_initial"))  bagearth_initial else NULL,
+                   pp_choices          = ppchoices)
 
   meth_nn <- meth_nn_server("meth_nn", get_model_data, roles,
                    seed               = seed_in_use,

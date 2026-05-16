@@ -28,14 +28,14 @@ meth_nn_ui <- function(id,
                  .meth_subtabs_ui(ns, "qrnn",          has_tuning = TRUE)),
         tabPanel("brnn",          value = "brnn",          style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "brnn",          has_tuning = TRUE)),
-        tabPanel("pcaNNet",       value = "pcaNNet",       style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "pcaNNet",       has_tuning = TRUE)),
         tabPanel("mlpWeightDecay",value = "mlpWeightDecay",style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "mlpWeightDecay",has_tuning = TRUE)),
+        tabPanel("monmlp",        value = "monmlp",        style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "monmlp",        has_tuning = TRUE)),
         tabPanel("mlpML",         value = "mlpML",         style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "mlpML",         has_tuning = TRUE)),
-        tabPanel("monmlp",        value = "monmlp",        style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "monmlp",        has_tuning = TRUE))
+        tabPanel("pcaNNet",       value = "pcaNNet",       style = "padding-top:12px;",
+                 .meth_subtabs_ui(ns, "pcaNNet",       has_tuning = TRUE))
       )
     ),
     column(3,

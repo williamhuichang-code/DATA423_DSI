@@ -796,13 +796,13 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
   }
 
   sel_fn <- switch(input$selection_fn %||% "best",
-    "oneSE"     = oneSE,
+    "oneSE"     = "oneSE",         # pass as string — caret handles dispatch & edge cases
     "tolerance" = function(x, metric, maximize) {
                     tolerance(x, metric,
                               tol      = input$tol_pct %||% 2,
                               maximize = maximize)
                   },
-    best   # default
+    "best"   # default
   )
 
   trainControl(
@@ -955,7 +955,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
 
     }, error = function(e) {
       msg    <- conditionMessage(e)
-      is_na  <- grepl("NA|missing|na\\.fail|na\\.action", msg, ignore.case = TRUE)
+      is_na  <- grepl("\\bNA\\b|missing value|na\\.fail|na\\.action|NAs present", msg, ignore.case = TRUE)
       hint   <- if (is_na)
         "<br><br><b>Hint:</b> Your data may contain NAs that are not handled in the
          preprocessing pipeline. Add <code>naomit</code>, <code>impute_bag</code>, or
@@ -1035,10 +1035,16 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   pls            = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  svmLinear      = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   svmRadialSigma = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  svmRadial      = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   svmPoly        = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  krlsRadial     = list(action = "omitted",     severity = "warning",
+                        note = "KRLS::krls() does not accept a na.action argument. Ensure NAs are handled in your preprocessing pipeline (naomit or imputation)."),
   krlsPoly       = list(action = "omitted",     severity = "warning",
                         note = "KRLS::krls() does not accept a na.action argument. Ensure NAs are handled in your preprocessing pipeline (naomit or imputation)."),
   gaussprRadial  = list(action = "na.pass",     severity = "info",
@@ -1076,6 +1082,16 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
   # na.fail — NAs will cause an error
   earth          = list(action = "na.fail",     severity = "danger",
                         note = "earth requires zero NAs in the data. Add naomit or an imputation step to your preprocessing — earth will error on every resample if any NAs remain."),
+  gcvEarth       = list(action = "na.fail",     severity = "danger",
+                        note = "gcvEarth uses the earth package internally and shares the same restriction — zero NAs allowed. Add naomit or an imputation step to your preprocessing."),
+  bagEarth       = list(action = "na.fail",     severity = "danger",
+                        note = "bagEarth wraps earth models and shares the same restriction — zero NAs allowed. Add naomit or an imputation step to your preprocessing."),
+  gam            = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  gamSpline      = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  gamboost       = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   # omitted — ranger handles internally
   ranger         = list(action = "omitted",     severity = "warning",
                         note = "ranger handles NA action internally via string comparison and does not accept a function argument. Ensure NAs are handled in your preprocessing pipeline.")
@@ -1238,11 +1254,27 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           # Cubist usage: columns Variable, Conditions, Model (% appearances)
           usg[order(usg$Model + usg$Conditions, decreasing = TRUE), , drop = FALSE]
 
+        } else if (meth == "svmLinear") {
+          fm <- mod$finalModel
+          data.frame(
+            Metric = c("Support vectors", "Best C"),
+            Value  = c(fm@nSV, signif(mod$bestTune$C, 4))
+          )
+
         } else if (meth == "svmRadialSigma") {
           fm <- mod$finalModel
           data.frame(
             Metric = c("Support vectors", "Best C", "Best sigma"),
             Value  = c(fm@nSV, signif(mod$bestTune$C, 4), signif(mod$bestTune$sigma, 4))
+          )
+
+        } else if (meth == "svmRadial") {
+          fm <- mod$finalModel
+          data.frame(
+            Metric = c("Support vectors", "Best C", "Estimated sigma"),
+            Value  = c(fm@nSV,
+                       signif(mod$bestTune$C, 4),
+                       signif(mod$finalModel@kernelf@kpar$sigma, 4))
           )
 
         } else if (meth == "svmPoly") {
@@ -1259,6 +1291,13 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           data.frame(
             Metric = c("Best degree", "Best lambda"),
             Value  = c(as.character(mod$bestTune$degree),
+                       signif(mod$bestTune$lambda, 4))
+          )
+
+        } else if (meth == "krlsRadial") {
+          data.frame(
+            Metric = c("Best sigma", "Best lambda"),
+            Value  = c(signif(mod$bestTune$sigma,  4),
                        signif(mod$bestTune$lambda, 4))
           )
 
@@ -1330,7 +1369,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
             Value  = as.character(mod$bestTune$neurons)
           )
 
-        } else if (meth == "earth") {
+        } else if (meth %in% c("earth", "gcvEarth", "bagEarth")) {
           co <- tryCatch(mod$finalModel$coefficients, error = function(e) NULL)
           if (is.null(co) || length(co) == 0)
             return(data.frame(Note = "No MARS coefficients available."))
@@ -1340,6 +1379,15 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
           int_idx  <- which(df$Term == "(Intercept)")
           rest_idx <- setdiff(order(abs(df$Coefficient), decreasing = TRUE), int_idx)
           df[c(int_idx, rest_idx), , drop = FALSE]
+
+        } else if (meth %in% c("gam", "gamboost")) {
+          data.frame(Note = "GAM/gamboost has no simple linear coefficients. See Model Output tab for the fitted smooth terms.")
+
+        } else if (meth == "gamSpline") {
+          data.frame(
+            Metric = "Best df",
+            Value  = as.character(mod$bestTune$df)
+          )
 
         } else if (meth == "M5") {
           data.frame(
