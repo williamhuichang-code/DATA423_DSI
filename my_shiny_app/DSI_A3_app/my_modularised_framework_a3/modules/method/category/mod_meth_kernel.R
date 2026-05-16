@@ -130,6 +130,70 @@ meth_kernel_ui <- function(id,
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
             sliderInput(ns("svmpoly_c_n"),           NULL, min = 2,  max = 20, value =  3, step = 1,   width = "100%")
           )
+        ),
+
+        # ── gaussprPoly-specific controls ────────────────────────────────────
+        conditionalPanel(
+          condition = sprintf("input['%s'] === 'gaussprPoly'", ns("method_inner")),
+
+          tags$label("Tuning grid:", style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+          selectInput(ns("gaussprpoly_grid_type"), NULL,
+                      choices  = c("Tune length default"      = "tunelength",
+                                   "Custom degree/scale grid" = "custom"),
+                      selected = "tunelength", width = "100%"),
+
+          conditionalPanel(
+            condition = sprintf("input['%s'] === 'custom'", ns("gaussprpoly_grid_type")),
+
+            tags$label("Degree minimum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("gaussprpoly_deg_min"),       NULL, min = 1,  max = 4,  value = 1,  step = 1,   width = "100%"),
+            tags$label("Degree maximum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("gaussprpoly_deg_max"),       NULL, min = 2,  max = 8,  value = 5,  step = 1,   width = "100%"),
+
+            tags$label("Log10 scale minimum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("gaussprpoly_log_scale_min"), NULL, min = -3, max = 0,  value = -2, step = 0.5, width = "100%"),
+            tags$label("Log10 scale maximum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("gaussprpoly_log_scale_max"), NULL, min = -1, max = 2,  value =  0, step = 0.5, width = "100%"),
+            tags$label("Scale values:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("gaussprpoly_scale_n"),       NULL, min = 2,  max = 10, value =  3, step = 1,   width = "100%")
+          )
+        ),
+
+        # ── krlsPoly-specific controls ────────────────────────────────────────
+        conditionalPanel(
+          condition = sprintf("input['%s'] === 'krlsPoly'", ns("method_inner")),
+
+          tags$label("Tuning grid:", style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+          selectInput(ns("krlspoly_grid_type"), NULL,
+                      choices  = c("Tune length default"       = "tunelength",
+                                   "Custom degree/lambda grid" = "custom"),
+                      selected = "custom", width = "100%"),
+
+          conditionalPanel(
+            condition = sprintf("input['%s'] === 'custom'", ns("krlspoly_grid_type")),
+
+            tags$label("Degree minimum (≥ 2 recommended):",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("krlspoly_deg_min"),     NULL, min = 1,  max = 5,  value = 2,  step = 1,   width = "100%"),
+            tags$label("Degree maximum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("krlspoly_deg_max"),     NULL, min = 2,  max = 8,  value = 4,  step = 1,   width = "100%"),
+
+            tags$label("Log10 lambda minimum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("krlspoly_log_lam_min"), NULL, min = -5, max = 0,  value = -3, step = 0.5, width = "100%"),
+            tags$label("Log10 lambda maximum:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("krlspoly_log_lam_max"), NULL, min = -2, max = 4,  value =  1, step = 0.5, width = "100%"),
+            tags$label("Lambda values:",
+                       style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+            sliderInput(ns("krlspoly_lam_n"),       NULL, min = 3,  max = 20, value =  7, step = 1,   width = "100%")
+          )
         )
 
       ))
@@ -597,10 +661,25 @@ meth_kernel_server <- function(id, get_data, roles,
           r        <- roles()
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+
+          build_gaussprpoly_grid <- function() {
+            deg_g   <- seq(input$gaussprpoly_deg_min, input$gaussprpoly_deg_max, by = 1L)
+            scale_g <- 10^seq(input$gaussprpoly_log_scale_min, input$gaussprpoly_log_scale_max,
+                              length.out = input$gaussprpoly_scale_n)
+            expand.grid(degree = deg_g, scale = scale_g)
+          }
+
           set.seed(eseed)
-          caret::train(rec, data = train_df, method = "gaussprPoly",
-                       metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+          if (isTRUE(input$config_mode == "specific") &&
+              isTRUE(input$gaussprpoly_grid_type == "custom")) {
+            caret::train(rec, data = train_df, method = "gaussprPoly",
+                         metric = "RMSE", trControl = tr_ctrl,
+                         tuneGrid = build_gaussprpoly_grid(), na.action = na.pass)
+          } else {
+            caret::train(rec, data = train_df, method = "gaussprPoly",
+                         metric = "RMSE", trControl = tr_ctrl,
+                         tuneLength = input$tune_length %||% 5, na.action = na.pass)
+          }
         },
 
         gaussprRadial = function() {
@@ -623,11 +702,26 @@ meth_kernel_server <- function(id, get_data, roles,
           r        <- roles()
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
+
+          build_krlspoly_grid <- function() {
+            deg_g <- seq(input$krlspoly_deg_min, input$krlspoly_deg_max, by = 1L)
+            lam_g <- 10^seq(input$krlspoly_log_lam_min, input$krlspoly_log_lam_max,
+                            length.out = input$krlspoly_lam_n)
+            expand.grid(degree = deg_g, lambda = lam_g)
+          }
+
           set.seed(eseed)
           # NOTE: na.action omitted — KRLS::krls() does not accept na.action argument.
-          caret::train(rec, data = train_df, method = "krlsPoly",
-                       metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5)
+          if (isTRUE(input$config_mode == "specific") &&
+              isTRUE(input$krlspoly_grid_type == "custom")) {
+            caret::train(rec, data = train_df, method = "krlsPoly",
+                         metric = "RMSE", trControl = tr_ctrl,
+                         tuneGrid = build_krlspoly_grid())
+          } else {
+            caret::train(rec, data = train_df, method = "krlsPoly",
+                         metric = "RMSE", trControl = tr_ctrl,
+                         tuneLength = input$tune_length %||% 5)
+          }
         },
 
         krlsRadial = function() {

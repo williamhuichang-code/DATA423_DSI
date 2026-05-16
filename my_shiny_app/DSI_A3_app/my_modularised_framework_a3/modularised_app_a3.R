@@ -77,9 +77,14 @@ krls_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
                   "zv", "nzv", "center", "scale")
 
 gausspr_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                     "other", "YeoJohnson", "dummy", 
+                     "other", "YeoJohnson", "dummy",
                      "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
+
+# Method-specific initial preprocessing (dedicated vars; set to general_initial for now)
+svmpoly_initial     <- general_initial
+gaussprpoly_initial <- general_initial
+krlspoly_initial    <- general_initial
 
 
 task_specific_roles <- list(
@@ -517,14 +522,14 @@ server <- function(input, output, session) {
 
   meth_kernel <- meth_kernel_server("meth_kernel", get_model_data, roles,
                    seed                     = seed_in_use,
-                   model_seed               = if (exists("MODEL_SEED"))       MODEL_SEED      else NULL,
-                   general_preprocess       = if (exists("general_initial"))  general_initial else NULL,
-                   svm_preprocess           = if (exists("svmrs_initial"))    svmrs_initial   else NULL,
-                   svmpoly_preprocess       = if (exists("svmpl_initial"))    svmpl_initial   else NULL,
-                   krlspoly_preprocess      = if (exists("krls_initial"))     krls_initial    else NULL,
-                   gp_preprocess            = if (exists("gausspr_initial"))  gausspr_initial else NULL,
-                   gaussprpoly_preprocess   = if (exists("gausspr_initial"))  gausspr_initial else NULL,
-                   gaussprlinear_preprocess = if (exists("gausspr_initial"))  gausspr_initial else NULL,
+                   model_seed               = if (exists("MODEL_SEED"))           MODEL_SEED          else NULL,
+                   general_preprocess       = if (exists("general_initial"))      general_initial     else NULL,
+                   svm_preprocess           = if (exists("svmrs_initial"))        svmrs_initial       else NULL,
+                   svmpoly_preprocess       = if (exists("svmpoly_initial"))      svmpoly_initial     else NULL,
+                   krlspoly_preprocess      = if (exists("krlspoly_initial"))     krlspoly_initial    else NULL,
+                   gp_preprocess            = if (exists("gausspr_initial"))      gausspr_initial     else NULL,
+                   gaussprpoly_preprocess   = if (exists("gaussprpoly_initial"))  gaussprpoly_initial else NULL,
+                   gaussprlinear_preprocess = if (exists("gausspr_initial"))      gausspr_initial     else NULL,
                    pp_choices               = ppchoices)
 
   meth_ensemble <- meth_ensemble_server("meth_ensemble", get_model_data, roles,
