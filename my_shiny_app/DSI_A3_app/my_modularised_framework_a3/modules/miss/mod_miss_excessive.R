@@ -35,7 +35,7 @@ miss_excessive_ui <- function(id) {
       tags$label("Max missingness per observation:",
                  style = "font-weight:600; font-size:13px; color:#343a40;"),
       sliderInput(ns("obs_thresh"), label = NULL,
-                  min = 0, max = 1, value = 1, step = 0.05, width = "100%"),
+                  min = 0, max = 1, value = 1, step = 0.01, width = "100%"),
       hr(),
       
       hr(),
