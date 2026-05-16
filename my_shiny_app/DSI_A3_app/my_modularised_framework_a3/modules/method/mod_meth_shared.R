@@ -464,6 +464,21 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                              "Random search" = "random"),
                 selected = "grid", width = "100%"),
 
+    tags$label("Selection function:",
+               style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+    selectInput(ns("selection_fn"), NULL,
+                choices  = c("Best (lowest RMSE)"              = "best",
+                             "One SE (simplest within 1 SE)"   = "oneSE",
+                             "Tolerance (simplest within X %)" = "tolerance"),
+                selected = "best", width = "100%"),
+
+    conditionalPanel(
+      condition = sprintf("input['%s'] === 'tolerance'", ns("selection_fn")),
+      tags$label("Tolerance (%):",
+                 style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
+      numericInput(ns("tol_pct"), NULL, value = 2, min = 0.1, max = 20, step = 0.1, width = "100%")
+    ),
+
     hr(),
 
     # ── Config Mode ───────────────────────────────────────────────────────────
@@ -780,16 +795,27 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     seeds <- .pad_seeds(seeds, n)
   }
 
+  sel_fn <- switch(input$selection_fn %||% "best",
+    "oneSE"     = oneSE,
+    "tolerance" = function(x, metric, maximize) {
+                    tolerance(x, metric,
+                              tol      = input$tol_pct %||% 2,
+                              maximize = maximize)
+                  },
+    best   # default
+  )
+
   trainControl(
-    method          = method,
-    number          = n,
-    repeats         = reps,
-    allowParallel   = isTRUE(input$parallel),
-    search          = search,
-    index           = idx,
-    savePredictions = "final",
-    seeds           = seeds,
-    trim            = TRUE
+    method            = method,
+    number            = n,
+    repeats           = reps,
+    allowParallel     = isTRUE(input$parallel),
+    search            = search,
+    index             = idx,
+    savePredictions   = "final",
+    seeds             = seeds,
+    trim              = TRUE,
+    selectionFunction = sel_fn
   )
 }
 
