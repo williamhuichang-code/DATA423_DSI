@@ -1138,6 +1138,8 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   mlpML          = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  avNNet         = list(action = "na.pass",     severity = "info",
+                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   monmlp         = list(action = "omitted",     severity = "warning",
                         note = "monmlp::monmlp.fit() does not accept a na.action argument. Ensure NAs are handled in your preprocessing pipeline (naomit or imputation)."),
   # na.rpart — model handles NAs natively
@@ -1157,8 +1159,8 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
   gamSpline      = list(action = "na.pass",     severity = "info",
                         note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
-  gamboost       = list(action = "na.pass",     severity = "info",
-                        note = "NAs must be handled in your preprocessing pipeline (naomit or imputation). The recipe processes data before the model sees it."),
+  gamboost       = list(action = "na.omit",     severity = "warning",
+                        note = "mboost cannot handle NAs internally — rows with missing values are dropped before fitting. Handle NAs in the recipe (naomit or imputation) to avoid losing data."),
   # omitted — ranger handles internally
   ranger         = list(action = "omitted",     severity = "warning",
                         note = "ranger handles NA action internally via string comparison and does not accept a function argument. Ensure NAs are handled in your preprocessing pipeline.")
@@ -1186,6 +1188,12 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
   mlpML = paste0(
     "RSNNS::mlp() shares the same sensitivity to response scale as nnet — when the response is in the ",
     "thousands the optimizer diverges and predictions collapse to near-zero. ",
+    "This app standardises the response to mean = 0, sd = 1 before training and back-transforms ",
+    "RMSE/MAE metrics to the original scale. outcomeCenter and outcomeScale are stored in the model."
+  ),
+  avNNet = paste0(
+    "avNNet averages multiple nnet models and shares the same response-scale sensitivity — ",
+    "when the response is in the thousands the optimizer diverges across all ensemble members. ",
     "This app standardises the response to mean = 0, sd = 1 before training and back-transforms ",
     "RMSE/MAE metrics to the original scale. outcomeCenter and outcomeScale are stored in the model."
   )

@@ -538,6 +538,7 @@ server <- function(input, output, session) {
                    general_preprocess  = if (exists("general_initial"))   general_initial  else NULL,
                    ranger_preprocess   = if (exists("ranger_initial"))    ranger_initial   else NULL,
                    bagearth_preprocess = if (exists("bagearth_initial"))  bagearth_initial else NULL,
+                   avnnet_preprocess   = if (exists("avnnet_initial"))    avnnet_initial   else NULL,
                    pp_choices          = ppchoices)
 
   meth_nn <- meth_nn_server("meth_nn", get_model_data, roles,

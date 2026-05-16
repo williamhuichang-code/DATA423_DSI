@@ -393,9 +393,16 @@ meth_wildcard_server <- function(id, get_data, roles,
           tr_ctrl  <- .meth_build_tr_control(input, eseed, train_df[[names(r)[r == "outcome"][1]]])
           rec <- .meth_build_recipe(train_df, input$preprocess, .meth_get_cfg(input), r)
           set.seed(eseed)
+          # NOTE: na.omit required — mboost cannot handle NA rows internally.
+          # baselearner = "bols": bbs() B-spline base learners fail with singular
+          # design matrices on this dataset regardless of resampling method — low-
+          # cardinality predictors don't provide enough unique values for a spline
+          # basis. bols() uses linear base learners; boosting still approximates
+          # nonlinear relationships additively across many iterations.
           caret::train(rec, data = train_df, method = "gamboost",
                        metric = "RMSE", trControl = tr_ctrl,
-                       tuneLength = input$tune_length %||% 5, na.action = na.pass)
+                       tuneLength = input$tune_length %||% 5, na.action = na.omit,
+                       baselearner = "bols")
         },
 
         M5 = function() {

@@ -120,14 +120,24 @@ miss_excessive_server <- function(id, get_data, roles = NULL) {
       
       df_final   <- if (length(excl_rows) > 0) df_after_vars[-excl_rows, , drop = FALSE] else df_after_vars
       
+      step <- 0.01
+      # Rows that would be additionally excluded if threshold tightens by one step
+      marginal_tighter <- which(obs_miss >= max(0, input$obs_thresh - step) &
+                                obs_miss <  input$obs_thresh)
+      # Rows that would be recovered if threshold loosens by one step
+      marginal_looser  <- which(obs_miss >= input$obs_thresh &
+                                obs_miss <  min(1, input$obs_thresh + step))
+
       list(
-        df_final   = df_final,
-        var_miss   = var_miss,
-        excl_vars  = excl_vars,
-        prot_vars  = prot_vars,
-        obs_miss   = obs_miss,
-        excl_rows  = excl_rows,
-        obs_id_col = obs_id_col
+        df_final         = df_final,
+        var_miss         = var_miss,
+        excl_vars        = excl_vars,
+        prot_vars        = prot_vars,
+        obs_miss         = obs_miss,
+        excl_rows        = excl_rows,
+        obs_id_col       = obs_id_col,
+        marginal_tighter = marginal_tighter,
+        marginal_looser  = marginal_looser
       )
     })
     
@@ -233,7 +243,61 @@ miss_excessive_server <- function(id, get_data, roles = NULL) {
           DT::dataTableOutput(ns("excl_obs_tbl"))
       )
       
-      tagList(cards, prot_warn, no_excl_note, var_section, obs_section)
+      # ── marginal observations ─────────────────────────────────────────────
+      fmt_ids <- function(rows) {
+        if (length(rows) == 0) return(tags$span("None", style = "color:#adb5bd;"))
+        ids <- if (!is.null(res$obs_id_col) && res$obs_id_col %in% names(df))
+          as.character(df[[res$obs_id_col]][rows])
+        else
+          as.character(rows)
+        tags$span(paste(ids, collapse = ", "),
+                  style = "font-family:monospace; font-size:12px; color:#495057;")
+      }
+
+      n_tighter <- length(res$marginal_tighter)
+      n_looser  <- length(res$marginal_looser)
+
+      marginal_section <- tags$div(
+        style = "background:white; border-radius:10px; border:0.5px solid #dee2e6;
+                 padding:16px; margin-top:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06);",
+        tags$h5(
+          icon("arrows-up-down", style = "color:#6c757d; margin-right:6px;"),
+          paste0("Marginal Observations (±1 step = ±0.01)"),
+          style = "font-weight:600; color:#343a40; margin-bottom:4px;"
+        ),
+        tags$p(
+          paste0("Current threshold: ", input$obs_thresh),
+          style = "font-size:12px; color:#6c757d; margin-bottom:12px;"
+        ),
+        # Tighter: would be additionally excluded
+        tags$div(
+          style = "background:#fff5f5; border-left:4px solid #993556; border-radius:6px;
+                   padding:10px 14px; margin-bottom:10px; font-size:13px; color:#343a40;",
+          icon("arrow-down", style = "color:#993556;"),
+          HTML(paste0(
+            " <b>Tighten by 0.01 (→ ", round(input$obs_thresh - 0.01, 2), ")</b>",
+            " &nbsp;—&nbsp; <b style='color:#993556;'>", n_tighter, "</b> more row",
+            if (n_tighter != 1) "s" else "", " would be excluded"
+          )),
+          if (n_tighter > 0)
+            tags$div(style = "margin-top:6px;", fmt_ids(res$marginal_tighter))
+        ),
+        # Looser: would be recovered
+        tags$div(
+          style = "background:#f0fff4; border-left:4px solid #0F6E56; border-radius:6px;
+                   padding:10px 14px; font-size:13px; color:#343a40;",
+          icon("arrow-up", style = "color:#0F6E56;"),
+          HTML(paste0(
+            " <b>Loosen by 0.01 (→ ", round(input$obs_thresh + 0.01, 2), ")</b>",
+            " &nbsp;—&nbsp; <b style='color:#0F6E56;'>", n_looser, "</b> row",
+            if (n_looser != 1) "s" else "", " would be recovered"
+          )),
+          if (n_looser > 0)
+            tags$div(style = "margin-top:6px;", fmt_ids(res$marginal_looser))
+        )
+      )
+
+      tagList(cards, prot_warn, no_excl_note, var_section, obs_section, marginal_section)
     })
     
     # ── excluded vars table ───────────────────────────────────────────────
