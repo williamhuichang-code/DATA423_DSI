@@ -40,8 +40,32 @@ general_initial <- c("impute_bag",
                      "other", 
                      # "YeoJohnson",
                      "dummy", 
-                     # "interact", "lincomb",
+                     "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
+
+gaussprpoly_initial <- c("impute_bag", 
+                         "dow",
+                         "other", 
+                         # "YeoJohnson",
+                         "dummy", 
+                         # "interact", "lincomb",
+                         "zv", "nzv", "center", "scale")
+
+svmpoly_initial     <- c("impute_bag", 
+                         "dow",
+                         "other", 
+                         # "YeoJohnson",
+                         "dummy", 
+                         # "interact", "lincomb",
+                         "zv", "nzv", "center", "scale")
+
+krlspoly_initial    <- c("impute_bag", 
+                         "dow",
+                         "other", 
+                         # "YeoJohnson",
+                         "dummy", 
+                         # "interact", "lincomb",
+                         "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dow", 
                     "other", 
@@ -81,10 +105,7 @@ gausspr_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
                      "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
 
-# Method-specific initial preprocessing (dedicated vars; set to general_initial for now)
-svmpoly_initial     <- general_initial
-gaussprpoly_initial <- general_initial
-krlspoly_initial    <- general_initial
+
 
 
 task_specific_roles <- list(
@@ -96,7 +117,7 @@ task_specific_roles <- list(
 SPLIT_SEED   <- 199
 MODEL_SEED   <- 673
 AUTO_SPLIT   <- TRUE
-SPLIT_RATIO  <- 0.3
+SPLIT_RATIO  <- 0.8
 
 # Available Methods explorer — tags to exclude from the table/map by default,
 # and tags to highlight as literature-informed choices.

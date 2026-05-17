@@ -432,7 +432,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
                 choices  = c("Bootstrap"                 = "boot",
                              "Cross-validation"          = "cv",
                              "Repeated cross-validation" = "repeatedcv"),
-                selected = "boot", width = "100%"),
+                selected = "repeatedcv", width = "100%"),
 
     conditionalPanel(
       condition = sprintf("input['%s'] === 'boot'", ns("resample_method")),
@@ -599,7 +599,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
     ),
     conditionalPanel(
       condition = sprintf("(input['%s'] || []).includes('dow')", ns("preprocess")),
-      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = TRUE)
+      checkboxInput(ns("cyclic_dow"),   "Cyclic dow (sin/cos, period = 7)",    value = FALSE)
     ),
 
     tags$label("Tune length:",
