@@ -80,7 +80,7 @@ meth_ols_ui <- function(id,
         sliderInput(ns("glmnet_log_lam_max"), NULL, min = -2, max = 6,   value = -1,  step = 0.5, width = "100%"),
         tags$label("Lambda values:",
                    style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-        sliderInput(ns("glmnet_lam_n"),       NULL, min = 5,  max = 100, value = 5,   step = 5,   width = "100%")
+        sliderInput(ns("glmnet_lam_n"),       NULL, min = 5,  max = 100, value = 5,   step = 1,   width = "100%")
       )
     )
   )
@@ -197,17 +197,25 @@ meth_ols_server <- function(id, get_data, roles,
 
       } else {
         # ── Elastic-net run: facet by λ, colour gradient for α ────────────────
-        # Pick up to 9 representative λ values, log-spaced across the range
+        # Pick up to 9 representative λ values, log-spaced; always include best λ
         lambda_vals <- sort(unique(df$lambda))
+        best_alpha  <- mod$bestTune$alpha
+        best_lam    <- mod$bestTune$lambda
         n_facets    <- min(9, length(lambda_vals))
         idx         <- round(seq(1, length(lambda_vals), length.out = n_facets))
-        lam_sub     <- lambda_vals[idx]
+        lam_sub     <- sort(unique(c(lambda_vals[idx], best_lam)))
 
         df_sub <- df[df$lambda %in% lam_sub, ]
         df_sub$lam_label <- factor(
           paste0("λ = ", signif(df_sub$lambda, 3)),
           levels = paste0("λ = ", signif(lam_sub, 3))
         )
+
+        # Single best row for red circle
+        best_row <- df_sub[abs(df_sub$alpha  - best_alpha) < 1e-9 &
+                           abs(df_sub$lambda - best_lam)   < 1e-9, ]
+        best_row$lam_label <- factor(paste0("λ = ", signif(best_row$lambda, 3)),
+                                     levels = levels(df_sub$lam_label))
 
         has_sd    <- !all(is.na(df_sub$RMSESD))
         y_scales  <- if (isTRUE(input$glmnet_fixed_y)) "fixed" else "free_y"
@@ -223,6 +231,10 @@ meth_ols_server <- function(id, get_data, roles,
         p +
           ggplot2::geom_line(linewidth = 0.9) +
           ggplot2::geom_point(size = 2.5) +
+          ggplot2::geom_point(data   = best_row,
+                              colour = "#dc3545", size = 7, shape = 1, stroke = 1.8,
+                              inherit.aes = FALSE,
+                              ggplot2::aes(x = alpha, y = RMSE)) +
           ggplot2::scale_colour_viridis_c(name = "α", option = "plasma") +
           ggplot2::scale_fill_viridis_c(guide = "none", option = "plasma") +
           ggplot2::facet_wrap(~ lam_label, scales = y_scales) +
@@ -230,7 +242,7 @@ meth_ols_server <- function(id, get_data, roles,
             x        = "Mixing Percentage (α)",
             y        = paste0("RMSE (", .resample_label(mod), ")"),
             title    = "GLMnet tuning: RMSE by α, faceted by λ",
-            subtitle = "Each panel: “under this λ, what α works best?”"
+            subtitle = "Each panel: “under this λ, what α works best?”  |  red circle = best (α, λ)"
           ) +
           ggplot2::theme_bw(base_size = 13) +
           ggplot2::theme(
