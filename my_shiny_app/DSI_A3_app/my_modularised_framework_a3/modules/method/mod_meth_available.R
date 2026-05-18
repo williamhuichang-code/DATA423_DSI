@@ -76,11 +76,12 @@ meth_available_table_ui <- function(id) {
         tags$label("Method type",
                    style = "font-weight:600; font-size:13px; color:#343a40;
                             display:block; margin-bottom:4px; margin-top:10px;"),
-        radioButtons(ns("av_type"), label = NULL,
-                     choices  = c("Regression only"     = "reg",
-                                  "Classification only" = "cls",
-                                  "Both"                = "both"),
-                     selected = "reg"),
+        checkboxInput(ns("av_type_reg"),  "Regression methods",     value = TRUE),
+        checkboxInput(ns("av_type_cls"),  "Classification methods", value = FALSE),
+        div(style = "margin:4px 0 4px 4px; font-size:11px; font-weight:700;
+                     color:#6c757d; letter-spacing:1px;",
+            "── OR ──"),
+        checkboxInput(ns("av_type_both"), "Methods that can handle both", value = FALSE),
 
         tags$label("Exclude tags (ANY disqualifies)",
                    style = "font-weight:600; font-size:13px; color:#343a40;
@@ -200,6 +201,9 @@ meth_available_map_ui <- function(id) {
                         style = "font-weight:600; font-size:13px; color:#d63384;")),
         selectizeInput(ns("av_g6"), label = NULL, choices = NULL, multiple = TRUE,
                        options = list(placeholder = "e.g. anything...")),
+        checkboxInput(ns("av_g6_or"),
+                      "Match ANY tag (OR) — colour methods with at least one matching tag",
+                      value = TRUE),
         hr(),
 
         # ── Map Configs ───────────────────────────────────────────────────────
@@ -219,13 +223,13 @@ meth_available_map_ui <- function(id) {
                    style = "font-weight:600; font-size:13px; color:#343a40;
                             display:block; margin-bottom:4px; margin-top:10px;"),
         sliderInput(ns("av_map_label_size"), label = NULL,
-                    min = 1, max = 5, value = 5, step = 0.5, width = "100%"),
+                    min = 1, max = 5, value = 3, step = 0.5, width = "100%"),
 
         tags$label("Max label overlaps",
                    style = "font-weight:600; font-size:13px; color:#343a40;
                             display:block; margin-bottom:4px; margin-top:10px;"),
         sliderInput(ns("av_map_overlaps"), label = NULL,
-                    min = 10, max = 100, value = 50, step = 5, width = "100%"),
+                    min = 10, max = 100, value = 40, step = 5, width = "100%"),
         hr(),
 
         tags$label("Matching methods (from table filters)",
@@ -333,6 +337,13 @@ meth_available_server <- function(id,
       as.data.frame(cbind(Regression = Reg, Classification = Cls, dat))
     })
 
+    # ── Combine three type checkboxes into a character vector (OR logic) ────────
+    av_type_checked <- reactive({
+      c(if (isTRUE(input$av_type_reg))  "reg",
+        if (isTRUE(input$av_type_cls))  "cls",
+        if (isTRUE(input$av_type_both)) "both")
+    })
+
     # ── Default exclude / highlight — fall back to nothing selected if not supplied
     default_exclude   <- exclude_tags   %||% character(0)
     default_highlight <- highlight_tags %||% character(0)
@@ -373,23 +384,32 @@ meth_available_server <- function(id,
       updateSelectizeInput(session, "av_g5", choices = available_tags, server = TRUE,
                            selected = intersect("Ensemble Model",                       available_tags))
       updateSelectizeInput(session, "av_g6", choices = available_tags, server = TRUE,
-                           selected = intersect("Multivariate Adaptive Regression Splines", available_tags))
+                           selected = intersect(c("Multivariate Adaptive Regression Splines",
+                                                  "Feature Extraction",
+                                                  "Generalized Additive Model"), available_tags))
     }) |> bindEvent(input$av_flt_exclude, ignoreNULL = FALSE)
 
-    # ── Helper: does a Tags_plain string match ALL tags in a group? ───────────
-    .matches_group <- function(tags_plain, group_tags) {
+    # ── Helper: does a Tags_plain string match ALL (or ANY) tags in a group? ──
+    .matches_group <- function(tags_plain, group_tags, any_logic = FALSE) {
       if (length(group_tags) == 0) return(FALSE)
-      all(sapply(group_tags, function(t)
-        grepl(t, tags_plain, ignore.case = TRUE)))
+      hits <- sapply(group_tags, function(t) grepl(t, tags_plain, ignore.case = TRUE))
+      if (any_logic) any(hits) else all(hits)
     }
 
-    # ── Base filter (type + exclude tags) ─────────────────────────────────────
+    # ── Base filter (type checkboxes = OR logic, + exclude tags) ─────────────
     av_base_df <- reactive({
-      df <- av_methods_plain()
-      df <- switch(input$av_type %||% "reg",
-                   "reg"  = df[df$Regression,     ],
-                   "cls"  = df[df$Classification, ],
-                   "both" = df)
+      df      <- av_methods_plain()
+      checked <- av_type_checked()
+      if (length(checked) == 0) {
+        # nothing checked → show all
+        keep <- rep(TRUE, nrow(df))
+      } else {
+        keep <- rep(FALSE, nrow(df))
+        if ("reg"  %in% checked) keep <- keep | df$Regression
+        if ("cls"  %in% checked) keep <- keep | df$Classification
+        if ("both" %in% checked) keep <- keep | (df$Regression & df$Classification)
+      }
+      df <- df[keep, ]
       for (tag in input$av_flt_exclude)
         df <- df[!grepl(tag, df$Tags_plain, ignore.case = TRUE), ]
       df
@@ -398,29 +418,25 @@ meth_available_server <- function(id,
     # ── Assign group membership (first match wins) ────────────────────────────
     av_grouped_df <- reactive({
       df <- av_base_df()
-      g_inputs <- list(
+      g_inputs  <- list(
         "1" = input$av_g1, "2" = input$av_g2, "3" = input$av_g3,
         "4" = input$av_g4, "5" = input$av_g5, "6" = input$av_g6
       )
+      g6_or <- isTRUE(input$av_g6_or)
       df$Group <- sapply(df$Tags_plain, function(tp) {
         matched <- "none"
         for (g in names(g_inputs)) {
-          if (.matches_group(tp, g_inputs[[g]])) { matched <- g; break }
+          any_logic <- (g == "6" && g6_or)
+          if (.matches_group(tp, g_inputs[[g]], any_logic)) { matched <- g; break }
         }
         matched
       })
       df
     })
 
-    # ── Show only grouped methods (or all if no groups active) ───────────────
+    # ── All type/exclude-filtered methods, with group assignments for colouring ─
     av_filtered_df <- reactive({
-      df <- av_grouped_df()
-      any_active <- any(sapply(
-        list(input$av_g1, input$av_g2, input$av_g3,
-             input$av_g4, input$av_g5, input$av_g6),
-        function(x) length(x) > 0
-      ))
-      if (any_active) df[df$Group != "none", ] else df
+      av_grouped_df()
     })
 
     # ── Sidebar count (table tab) ─────────────────────────────────────────────
@@ -469,12 +485,10 @@ meth_available_server <- function(id,
 
     # ── Method map ────────────────────────────────────────────────────────────
     output$av_map_plot <- renderPlot({
-      wide     <- av_wide_matrix()
-      av_type  <- input$av_type %||% "reg"
-      wide_sub <- switch(av_type,
-                         "reg"  = wide[wide$Regression == 1,     ],
-                         "cls"  = wide[wide$Classification == 1, ],
-                         "both" = wide)
+      wide    <- av_wide_matrix()
+      # Restrict map to exactly the same models as the table (type + exclude tags)
+      base_models <- av_base_df()$Model
+      wide_sub    <- wide[rownames(wide) %in% base_models, ]
       req(nrow(wide_sub) >= 3)
 
       lit_boost <- 3
@@ -488,22 +502,14 @@ meth_available_server <- function(id,
       df_map <- merge(df_map, grp_df, by = "Model", all.x = TRUE)
       df_map$Group[is.na(df_map$Group)] <- "none"
 
-      base_models <- av_base_df()$Model
-      df_map$Group[!df_map$Model %in% base_models] <- "none"
-
-      type_label <- switch(av_type,
-                           "reg"  = "Regression",
-                           "cls"  = "Classification",
-                           "both" = "All")
-
       p <- ggplot2::ggplot(mapping = ggplot2::aes(x = X1, y = X2, label = Model)) +
-        ggplot2::ggtitle(paste(type_label, "Methods — coloured by group")) +
+        ggplot2::ggtitle(paste(nrow(wide_sub), "Methods — coloured by group")) +
         ggplot2::xlab("Coordinate 1") + ggplot2::ylab("Coordinate 2") +
         ggplot2::theme_minimal(base_size = 13) +
-        ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5))
+        ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 18))
 
-      label_size <- input$av_map_label_size %||% 5
-      overlaps   <- input$av_map_overlaps   %||% 50
+      label_size <- input$av_map_label_size %||% 3
+      overlaps   <- input$av_map_overlaps   %||% 40
 
       .add_layer <- function(p, df_sub, col, size_pt, size_txt, face) {
         if (nrow(df_sub) == 0) return(p)

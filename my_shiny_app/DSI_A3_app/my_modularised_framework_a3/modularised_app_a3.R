@@ -130,9 +130,8 @@ av_exclude_tags <- c(
 )
 
 av_highlight_tags <- c(
-  "Regularization", "L1 Regularization", "L2 Regularization",
-  "Implicit Feature Selection", "Feature Selection Wrapper",
-  "Handle Missing Predictor Data", "Robust Methods",
+  "Polynomial Model", "Radial Basis Function", "Regularization", 
+  "Partial Least Squares", "Generalized Linear Model", 
   "Multivariate Adaptive Regression Splines"
 )
 
