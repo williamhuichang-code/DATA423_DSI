@@ -43,6 +43,12 @@ general_initial <- c("impute_bag",
                      "interact", "lincomb",
                      "zv", "nzv", "center", "scale")
 
+brnn_initial <- c("impute_bag", "dow", 
+                  "other", 
+                  "dummy", 
+                  "interact", "lincomb",
+                  "zv", "nzv", "center", "scale")
+
 gaussprpoly_initial <- c("impute_bag", 
                          "dow",
                          "other", 
@@ -50,25 +56,16 @@ gaussprpoly_initial <- c("impute_bag",
                          "interact", "lincomb",
                          "zv", "nzv", "center", "scale")
 
-svmpoly_initial     <- c("impute_bag", 
-                         "dow",
-                         "other", 
-                         # "YeoJohnson",
-                         "dummy", 
-                         # "interact", "lincomb",
-                         "zv", "nzv", "center", "scale")
-
-krlspoly_initial    <- c("impute_bag", 
-                         "dow",
-                         "other", 
-                         # "YeoJohnson",
-                         "dummy", 
-                         # "interact", "lincomb",
-                         "zv", "nzv", "center", "scale")
+svmpoly_initial <- c("impute_bag", 
+                     "dow",
+                     "other", 
+                     "dummy", 
+                     "interact", "lincomb",
+                     "zv", "nzv", "center", "scale")
 
 glmnet_initial <- c("impute_bag", "dow", 
                     "other", 
-                    "YeoJohnson", 
+                    "YeoJohnson",  # need transformation
                     "dummy", 
                     "interact", "lincomb",
                     "zv", "nzv", "center", "scale")
@@ -77,35 +74,13 @@ svmrs_initial <- c("impute_bag", "dow",
                    "other", 
                    "dummy", 
                    "interact", "lincomb",
-                   "zv", "nzv", "center", "scale")
+                   "zv", "nzv", "center", "scale") # svmrs means svmRadialSigma
 
-brnn_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                   "other", "YeoJohnson", "dummy", 
-                   "interact", "lincomb",
-                   "zv", "nzv", "center", "scale")
-
-ppr_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                 "other", "YeoJohnson", "dummy", 
+pls_initial <- c("impute_bag", "dow", 
+                 "other", 
+                 "dummy", 
                  "interact", "lincomb",
                  "zv", "nzv", "center", "scale")
-
-svmpl_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                 "other", "YeoJohnson", "dummy", 
-                 "interact", "lincomb",
-                 "zv", "nzv", "center", "scale")
-
-krls_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                  "other", "YeoJohnson", "dummy", 
-                  "interact", "lincomb",
-                  "zv", "nzv", "center", "scale")
-
-gausspr_initial <- c("impute_bag", "dateDecimal", "month", "week", "dow",
-                     "other", "YeoJohnson", "dummy",
-                     "interact", "lincomb",
-                     "zv", "nzv", "center", "scale")
-
-
-
 
 task_specific_roles <- list(
   Patient         = "obs_id",

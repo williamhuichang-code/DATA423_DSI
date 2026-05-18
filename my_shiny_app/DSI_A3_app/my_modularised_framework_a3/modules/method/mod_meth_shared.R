@@ -312,7 +312,8 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
 #   m          — method name string, e.g. "glmnet"
 #   has_tuning — TRUE to include the Tuning tab (defaults to m != "null")
 
-.meth_subtabs_ui <- function(ns, m, has_tuning = (m != "null")) {
+.meth_subtabs_ui <- function(ns, m, has_tuning = (m != "null"),
+                             tuning_controls = NULL) {
 
   tabs <- list(
     tabPanel(
@@ -333,6 +334,7 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
       tabPanel(
         title = tagList(icon("chart-line"), " Tuning"),
         style = "padding-top:14px;",
+        tuning_controls,
         plotOutput(ns(paste0(m, "_tune_plot")), width = "100%", height = "640px")
       )
     ))

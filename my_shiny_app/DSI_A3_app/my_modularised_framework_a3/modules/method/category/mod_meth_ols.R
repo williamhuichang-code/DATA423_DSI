@@ -93,7 +93,13 @@ meth_ols_ui <- function(id,
         tabPanel("rlm",    value = "rlm",    style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "rlm",    has_tuning = TRUE)),
         tabPanel("glmnet", value = "glmnet", style = "padding-top:12px;",
-                 .meth_subtabs_ui(ns, "glmnet")),
+                 .meth_subtabs_ui(ns, "glmnet",
+                   tuning_controls = div(
+                     style = "margin-bottom:6px;",
+                     checkboxInput(ns("glmnet_fixed_y"),
+                                   "Shared y-axis across panels",
+                                   value = FALSE)
+                   ))),
         tabPanel("pls",    value = "pls",    style = "padding-top:12px;",
                  .meth_subtabs_ui(ns, "pls"))
       )
@@ -203,7 +209,8 @@ meth_ols_server <- function(id, get_data, roles,
           levels = paste0("λ = ", signif(lam_sub, 3))
         )
 
-        has_sd <- !all(is.na(df_sub$RMSESD))
+        has_sd    <- !all(is.na(df_sub$RMSESD))
+        y_scales  <- if (isTRUE(input$glmnet_fixed_y)) "fixed" else "free_y"
 
         p <- ggplot2::ggplot(df_sub,
                              ggplot2::aes(x = alpha, y = RMSE,
@@ -218,7 +225,7 @@ meth_ols_server <- function(id, get_data, roles,
           ggplot2::geom_point(size = 2.5) +
           ggplot2::scale_colour_viridis_c(name = "α", option = "plasma") +
           ggplot2::scale_fill_viridis_c(guide = "none", option = "plasma") +
-          ggplot2::facet_wrap(~ lam_label, scales = "free_y") +
+          ggplot2::facet_wrap(~ lam_label, scales = y_scales) +
           ggplot2::labs(
             x        = "Mixing Percentage (α)",
             y        = paste0("RMSE (", .resample_label(mod), ")"),
