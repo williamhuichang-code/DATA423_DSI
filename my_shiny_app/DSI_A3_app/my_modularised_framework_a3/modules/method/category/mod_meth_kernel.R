@@ -86,7 +86,7 @@ meth_kernel_ui <- function(id,
             sliderInput(ns("svm_log_sig_max"), NULL, min = -3, max = 3,  value = -1, step = 0.1, width = "100%"),
             tags$label("Sigma values:",
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-            sliderInput(ns("svm_sig_n"),       NULL, min = 3,  max = 20, value =  5, step = 1,   width = "100%")
+            sliderInput(ns("svm_sig_n"),       NULL, min = 1,  max = 20, value =  5, step = 1,   width = "100%")
           )
         ),
 
