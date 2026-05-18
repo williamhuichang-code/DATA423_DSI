@@ -291,10 +291,13 @@ meth_kernel_server <- function(id, get_data, roles,
       mod    <- models[["svmRadialSigma"]]; req(mod)
       df     <- mod$results
 
+      best_C   <- mod$bestTune$C
+      best_sig <- mod$bestTune$sigma
+
       sigma_vals <- sort(unique(df$sigma))
       n_facets   <- min(9, length(sigma_vals))
       idx        <- round(seq(1, length(sigma_vals), length.out = n_facets))
-      sig_sub    <- sigma_vals[idx]
+      sig_sub    <- sort(unique(c(sigma_vals[idx], best_sig)))
 
       df_sub <- df[df$sigma %in% sig_sub, ]
       df_sub$sig_label <- factor(
@@ -302,9 +305,13 @@ meth_kernel_server <- function(id, get_data, roles,
         levels = paste0("σ = ", signif(sig_sub, 3))
       )
 
-      has_sd   <- !all(is.na(df_sub$RMSESD))
-      best_C   <- mod$bestTune$C
-      best_sig <- mod$bestTune$sigma
+      # Single best row for red circle
+      best_row <- df_sub[abs(df_sub$sigma - best_sig) < 1e-9 &
+                         abs(df_sub$C     - best_C)   < 1e-9, ]
+      best_row$sig_label <- factor(paste0("σ = ", signif(best_row$sigma, 3)),
+                                   levels = levels(df_sub$sig_label))
+
+      has_sd <- !all(is.na(df_sub$RMSESD))
 
       p <- ggplot2::ggplot(df_sub, ggplot2::aes(x = log10(C), y = RMSE,
                                                   colour = log10(C), fill = log10(C)))
@@ -315,19 +322,16 @@ meth_kernel_server <- function(id, get_data, roles,
       p +
         ggplot2::geom_line(linewidth = 0.9) +
         ggplot2::geom_point(size = 2.5) +
-        ggplot2::geom_vline(
-          data = data.frame(sig_label = paste0("σ = ", signif(best_sig, 3)),
-                            xint      = log10(best_C)),
-          ggplot2::aes(xintercept = xint),
-          linetype = "dashed", colour = "#dc3545", linewidth = 0.7,
-          inherit.aes = FALSE
-        ) +
+        ggplot2::geom_point(data = best_row,
+                            colour = "#dc3545", size = 7, shape = 1, stroke = 1.8,
+                            inherit.aes = FALSE,
+                            ggplot2::aes(x = log10(C), y = RMSE)) +
         ggplot2::scale_colour_viridis_c(name = "log₁₀(C)", option = "viridis") +
         ggplot2::scale_fill_viridis_c(guide = "none", option = "viridis") +
         ggplot2::facet_wrap(~ sig_label, scales = "free_y") +
         ggplot2::labs(x = expression(log[10](C)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "SVM Radial Sigma tuning: RMSE by C, faceted by σ",
-                      subtitle = "Each panel: 'under this σ, what C works best?'  |  dashed = best C") +
+                      subtitle = "Each panel: 'under this σ, what C works best?'  |  red circle = best (C, σ)") +
         ggplot2::theme_bw(base_size = 13) +
         ggplot2::theme(strip.text      = ggplot2::element_text(face = "bold", size = 11),
                        legend.position = "right",
