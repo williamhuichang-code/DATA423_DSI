@@ -140,7 +140,7 @@ meth_kernel_ui <- function(id,
           selectInput(ns("gaussprpoly_grid_type"), NULL,
                       choices  = c("Tune length default"      = "tunelength",
                                    "Custom degree/scale grid" = "custom"),
-                      selected = "tunelength", width = "100%"),
+                      selected = "custom", width = "100%"),
 
           conditionalPanel(
             condition = sprintf("input['%s'] === 'custom'", ns("gaussprpoly_grid_type")),
@@ -370,7 +370,7 @@ meth_kernel_server <- function(id, get_data, roles,
         ) +
         ggplot2::scale_colour_viridis_c(name = "log₁₀(scale)", option = "plasma") +
         ggplot2::scale_fill_viridis_c(guide = "none",            option = "plasma") +
-        ggplot2::facet_wrap(~ deg_label, scales = "free_y") +
+        ggplot2::facet_wrap(~ deg_label, scales = "fixed") +
         ggplot2::labs(x = expression(log[10](C)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "SVM Poly tuning: RMSE by C, faceted by degree",
                       subtitle = "Colour = scale parameter  |  dashed = best C") +
