@@ -150,7 +150,7 @@ meth_kernel_ui <- function(id,
             sliderInput(ns("gaussprpoly_deg_min"),       NULL, min = 1,  max = 4,  value = 1,  step = 1,   width = "100%"),
             tags$label("Degree maximum:",
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),
-            sliderInput(ns("gaussprpoly_deg_max"),       NULL, min = 2,  max = 8,  value = 5,  step = 1,   width = "100%"),
+            sliderInput(ns("gaussprpoly_deg_max"),       NULL, min = 1,  max = 8,  value = 5,  step = 1,   width = "100%"),
 
             tags$label("Log10 scale minimum:",
                        style = "font-weight:600; color:#343a40; display:block; margin-bottom:4px;"),

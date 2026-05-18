@@ -46,9 +46,8 @@ general_initial <- c("impute_bag",
 gaussprpoly_initial <- c("impute_bag", 
                          "dow",
                          "other", 
-                         # "YeoJohnson",
                          "dummy", 
-                         # "interact", "lincomb",
+                         "interact", "lincomb",
                          "zv", "nzv", "center", "scale")
 
 svmpoly_initial     <- c("impute_bag", 
