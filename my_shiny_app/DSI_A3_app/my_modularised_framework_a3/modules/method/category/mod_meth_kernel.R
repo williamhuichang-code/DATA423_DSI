@@ -415,27 +415,39 @@ meth_kernel_server <- function(id, get_data, roles,
                        axis.title    = ggplot2::element_text(size = 13, face = "bold"))
     })
 
-    # ── gaussprPoly tuning plot: RMSE vs degree ───────────────────────────────
+    # ── gaussprPoly tuning plot: facet by degree, x = log10(scale) ──────────
     output[["gaussprPoly_tune_plot"]] <- renderPlot({
       mod    <- models[["gaussprPoly"]]; req(mod)
       df     <- mod$results
       has_sd <- !all(is.na(df$RMSESD))
       best_d <- mod$bestTune$degree
+      best_s <- mod$bestTune$scale
 
-      p <- ggplot2::ggplot(df, ggplot2::aes(x = factor(degree), y = RMSE))
+      # Single best row (exact degree + scale match)
+      best_row <- df[abs(df$degree - best_d) < 1e-9 & abs(df$scale - best_s) < 1e-9, ]
+
+      df$deg_label <- paste0("degree = ", df$degree)
+      best_row$deg_label <- paste0("degree = ", best_row$degree)
+
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = log10(scale), y = RMSE))
       if (has_sd)
-        p <- p + ggplot2::geom_errorbar(
+        p <- p + ggplot2::geom_ribbon(
           ggplot2::aes(ymin = RMSE - RMSESD, ymax = RMSE + RMSESD),
-          width = 0.2, colour = "#6610f2")
+          fill = "#6610f2", alpha = 0.2)
       p +
-        ggplot2::geom_point(colour = "#6610f2", size = 4) +
-        ggplot2::geom_point(data = df[df$degree == best_d, ],
+        ggplot2::geom_line(colour = "#6610f2", linewidth = 0.9) +
+        ggplot2::geom_point(colour = "#6610f2", size = 3) +
+        ggplot2::geom_point(data   = best_row,
                             colour = "#dc3545", size = 6, shape = 1, stroke = 1.5) +
-        ggplot2::labs(x = "Polynomial degree", y = paste0("RMSE (", .resample_label(mod), ")"),
-                      title    = "Gaussian Process Poly tuning: degree vs RMSE",
-                      subtitle = "Red circle = best degree  |  error bars = ± 1 SD") +
+        ggplot2::facet_wrap(~ deg_label, scales = "fixed") +
+        ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
+        ggplot2::labs(x        = expression(log[10](scale)),
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
+                      title    = "Gaussian Process Poly tuning: scale vs RMSE, faceted by degree",
+                      subtitle = "Red circle = best (degree, scale)  |  shaded = ± 1 SD") +
         ggplot2::theme_bw(base_size = 13) +
-        ggplot2::theme(plot.title    = ggplot2::element_text(face = "bold", size = 14),
+        ggplot2::theme(strip.text    = ggplot2::element_text(face = "bold", size = 11),
+                       plot.title    = ggplot2::element_text(face = "bold", size = 14),
                        plot.subtitle = ggplot2::element_text(colour = "#6c757d", size = 11),
                        axis.text     = ggplot2::element_text(size = 13),
                        axis.title    = ggplot2::element_text(size = 13, face = "bold"))
