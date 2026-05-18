@@ -121,7 +121,7 @@ meth_wildcard_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ deg_label, scales = "free_y") +
         ggplot2::labs(x        = "Retained terms (nprune)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       subtitle = "degree = max interaction depth  |  dashed = best nprune") +
         ggplot2::theme_bw(base_size = 13) +
         ggplot2::theme(strip.text      = ggplot2::element_text(face = "bold", size = 11),
@@ -171,7 +171,7 @@ meth_wildcard_server <- function(id, get_data, roles,
                           colour = "#dc3545", size = 4, fontface = "bold") +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(x        = "Degrees of freedom (df)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "GAM Spline tuning: df vs RMSE",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best df") +
         ggplot2::theme_bw(base_size = 13) +
@@ -211,7 +211,7 @@ meth_wildcard_server <- function(id, get_data, roles,
         ggplot2::scale_fill_manual(guide = "none", values = c("yes" = "#6f42c1", "no" = "#fd7e14")) +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(x        = "Boosting iterations (mstop)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       colour   = "prune",
                       title    = "gamboost tuning: mstop vs RMSE",
                       subtitle = "Lines = prune (yes/no)  |  dashed = best mstop") +
@@ -254,7 +254,7 @@ meth_wildcard_server <- function(id, get_data, roles,
                             colour = "#dc3545", size = 6, shape = 1, stroke = 1.5) +
         ggplot2::scale_colour_manual(values = c("yes" = "#0d6efd", "no" = "#6c757d")) +
         ggplot2::labs(x        = "Parameter combination",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       colour   = "rules",
                       title    = "M5 tuning: RMSE per pruned × smoothed × rules combination",
                       subtitle = "Red circle = best combination  |  error bars = ± 1 SD") +
@@ -292,7 +292,7 @@ meth_wildcard_server <- function(id, get_data, roles,
                           colour = "#dc3545", size = 4, fontface = "bold") +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(x        = "Number of terms (nterms)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "PPR tuning: nterms vs RMSE",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best nterms") +
         ggplot2::theme_bw(base_size = 13) +

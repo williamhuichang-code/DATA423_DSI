@@ -264,7 +264,7 @@ meth_kernel_server <- function(id, get_data, roles,
                           label = paste0("best C = ", signif(best_C, 3)),
                           hjust = -0.1, vjust = 1,
                           colour = "#dc3545", size = 4, fontface = "bold") +
-        ggplot2::labs(x = expression(log[10](C)), y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = expression(log[10](C)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title = title,
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best C") +
         ggplot2::theme_bw(base_size = 13) +
@@ -325,7 +325,7 @@ meth_kernel_server <- function(id, get_data, roles,
         ggplot2::scale_colour_viridis_c(name = "log₁₀(C)", option = "viridis") +
         ggplot2::scale_fill_viridis_c(guide = "none", option = "viridis") +
         ggplot2::facet_wrap(~ sig_label, scales = "free_y") +
-        ggplot2::labs(x = expression(log[10](C)), y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = expression(log[10](C)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "SVM Radial Sigma tuning: RMSE by C, faceted by σ",
                       subtitle = "Each panel: 'under this σ, what C works best?'  |  dashed = best C") +
         ggplot2::theme_bw(base_size = 13) +
@@ -371,7 +371,7 @@ meth_kernel_server <- function(id, get_data, roles,
         ggplot2::scale_colour_viridis_c(name = "log₁₀(scale)", option = "plasma") +
         ggplot2::scale_fill_viridis_c(guide = "none",            option = "plasma") +
         ggplot2::facet_wrap(~ deg_label, scales = "free_y") +
-        ggplot2::labs(x = expression(log[10](C)), y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = expression(log[10](C)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "SVM Poly tuning: RMSE by C, faceted by degree",
                       subtitle = "Colour = scale parameter  |  dashed = best C") +
         ggplot2::theme_bw(base_size = 13) +
@@ -405,7 +405,7 @@ meth_kernel_server <- function(id, get_data, roles,
                           label = paste0("best σ = ", signif(best_sigma, 3)),
                           hjust = -0.1, vjust = 1,
                           colour = "#dc3545", size = 4, fontface = "bold") +
-        ggplot2::labs(x = "Length-scale parameter (σ)", y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = "Length-scale parameter (σ)", y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "Gaussian Process Radial tuning: σ vs RMSE",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best σ") +
         ggplot2::theme_bw(base_size = 13) +
@@ -431,7 +431,7 @@ meth_kernel_server <- function(id, get_data, roles,
         ggplot2::geom_point(colour = "#6610f2", size = 4) +
         ggplot2::geom_point(data = df[df$degree == best_d, ],
                             colour = "#dc3545", size = 6, shape = 1, stroke = 1.5) +
-        ggplot2::labs(x = "Polynomial degree", y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = "Polynomial degree", y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "Gaussian Process Poly tuning: degree vs RMSE",
                       subtitle = "Red circle = best degree  |  error bars = ± 1 SD") +
         ggplot2::theme_bw(base_size = 13) +
@@ -468,7 +468,7 @@ meth_kernel_server <- function(id, get_data, roles,
           inherit.aes = FALSE
         ) +
         ggplot2::facet_wrap(~ deg_label, scales = "free_y") +
-        ggplot2::labs(x = expression(log[10](lambda)), y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = expression(log[10](lambda)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "KRLS Poly tuning: RMSE by lambda, faceted by degree",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed = best lambda") +
         ggplot2::theme_bw(base_size = 13) +
@@ -515,7 +515,7 @@ meth_kernel_server <- function(id, get_data, roles,
           inherit.aes = FALSE
         ) +
         ggplot2::facet_wrap(~ sig_label, scales = "free_y") +
-        ggplot2::labs(x = expression(log[10](lambda)), y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = expression(log[10](lambda)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "KRLS Radial tuning: RMSE by lambda, faceted by sigma",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed = best lambda") +
         ggplot2::theme_bw(base_size = 13) +

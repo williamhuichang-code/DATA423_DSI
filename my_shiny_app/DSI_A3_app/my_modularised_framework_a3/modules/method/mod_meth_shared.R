@@ -838,6 +838,20 @@ dynamicSteps <- function(recipe, preprocess, cfg = list()) {
 #   tune_length — integer tuneLength passed to caret::train()
 #   ...         — additional args forwarded to caret::train()
 
+# Returns a human-readable resampling label from a trained caret model,
+# used as the y-axis title in all tuning plots.
+.resample_label <- function(mod) {
+  method <- tryCatch(mod$control$method, error = function(e) "boot") %||% "boot"
+  switch(method,
+    "boot"       = "Bootstrap",
+    "boot632"    = "Bootstrap (632)",
+    "cv"         = "Cross-Validation",
+    "repeatedcv" = "Repeated CV",
+    "LOOCV"      = "LOOCV",
+    "timeslice"  = "Time Slice",
+    method)
+}
+
 .meth_nnet_normalised_train <- function(rec, train_df, outcome_col, method,
                                          tr_ctrl, tune_length, ...) {
   # Prep and bake the recipe

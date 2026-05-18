@@ -149,7 +149,7 @@ meth_nn_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ bag_label) +
         ggplot2::labs(x        = "Hidden units (n.hidden)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "QRNN tuning: hidden units vs RMSE, faceted by bagging",
                       subtitle = "Colour = weight-decay penalty  |  dashed = best n.hidden") +
         ggplot2::theme_bw(base_size = 13) +
@@ -186,7 +186,7 @@ meth_nn_server <- function(id, get_data, roles,
                           colour = "#dc3545", size = 4, fontface = "bold") +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(x        = "Number of neurons",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "BRNN tuning: neurons vs RMSE",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best neurons") +
         ggplot2::theme_bw(base_size = 13) +
@@ -225,7 +225,7 @@ meth_nn_server <- function(id, get_data, roles,
         ggplot2::scale_fill_viridis_c(guide = "none",            option = "magma") +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(x        = "Hidden units (size)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "pcaNNet tuning: size vs RMSE",
                       subtitle = "Colour = weight decay  |  dashed = best size") +
         ggplot2::theme_bw(base_size = 13) +
@@ -265,7 +265,7 @@ meth_nn_server <- function(id, get_data, roles,
         ggplot2::scale_fill_viridis_c(guide = "none",            option = "inferno") +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(x        = "Hidden units (size)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "MLP Weight Decay tuning: size vs RMSE",
                       subtitle = "Colour = weight decay  |  dashed = best size") +
         ggplot2::theme_bw(base_size = 13) +
@@ -313,7 +313,7 @@ meth_nn_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ l3_label, scales = "free_y") +
         ggplot2::labs(x        = "Neurons in layer 1",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "MLP Multi-Layer tuning: layer1 vs RMSE, faceted by layer3",
                       subtitle = "Colour = layer2 neurons  |  dashed = best layer1") +
         ggplot2::theme_bw(base_size = 13) +
@@ -354,7 +354,7 @@ meth_nn_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ ens_label, scales = "free_y") +
         ggplot2::labs(x        = "Hidden units in layer 1 (hidden1)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "monmlp tuning: hidden1 vs RMSE, faceted by n.ensemble",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed = best hidden1") +
         ggplot2::theme_bw(base_size = 13) +

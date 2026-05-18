@@ -104,7 +104,7 @@ meth_ensemble_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ splitrule) +
         ggplot2::labs(x        = "Variables per split (mtry)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "Ranger tuning: mtry vs RMSE, faceted by split rule",
                       subtitle = "Lines = min.node.size levels  |  dashed = best mtry") +
         ggplot2::theme_bw(base_size = 13) +
@@ -151,7 +151,7 @@ meth_ensemble_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ deg_label, scales = "free_y") +
         ggplot2::labs(x        = "Retained terms (nprune)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "bagEarth tuning: nprune vs RMSE, faceted by degree",
                       subtitle = "degree = max interaction depth  |  dashed = best nprune") +
         ggplot2::theme_bw(base_size = 13) +
@@ -201,7 +201,7 @@ meth_ensemble_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ bag_label) +
         ggplot2::labs(x        = "Hidden units (size)",
-                      y        = "RMSE (Bootstrap)",
+                      y        = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "avNNet tuning: size vs RMSE, faceted by bagging",
                       subtitle = "Colour = weight decay  |  dashed = best size") +
         ggplot2::theme_bw(base_size = 13) +

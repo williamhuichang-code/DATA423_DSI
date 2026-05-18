@@ -93,7 +93,7 @@ meth_tree_server <- function(id, get_data, roles,
         ggplot2::annotate("text", x = log10(best_cp), y = max(df$RMSE, na.rm = TRUE),
                           label = paste0("best cp = ", signif(best_cp, 3)),
                           hjust = -0.1, vjust = 1, colour = "#dc3545", size = 4, fontface = "bold") +
-        ggplot2::labs(x = expression(log[10](cp)), y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = expression(log[10](cp)), y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "Rpart tuning: complexity parameter vs RMSE",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best cp") +
         ggplot2::theme_bw(base_size = 13) +
@@ -141,7 +141,7 @@ meth_tree_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::facet_wrap(~ comm_label, scales = "free_y") +
         ggplot2::labs(x = "Neighbors (k for instance correction)",
-                      y = "RMSE (Bootstrap)",
+                      y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "Cubist tuning: neighbors vs RMSE, faceted by committees",
                       subtitle = "Each panel: 'under this ensemble size, how many neighbors?'  |  dashed = best") +
         ggplot2::theme_bw(base_size = 13) +
@@ -172,7 +172,7 @@ meth_tree_server <- function(id, get_data, roles,
         ggplot2::annotate("text", x = best_alpha, y = max(df$RMSE, na.rm = TRUE),
                           label = paste0("best α = ", signif(best_alpha, 3)),
                           hjust = -0.1, vjust = 1, colour = "#dc3545", size = 4, fontface = "bold") +
-        ggplot2::labs(x = "Complexity parameter (α)", y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = "Complexity parameter (α)", y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "EVTree tuning: complexity parameter vs RMSE",
                       subtitle = "Higher α penalises tree size more  |  dashed line = best α") +
         ggplot2::theme_bw(base_size = 13) +
@@ -203,7 +203,7 @@ meth_tree_server <- function(id, get_data, roles,
                           label = paste0("best mtry = ", best_mtry),
                           hjust = -0.1, vjust = 1, colour = "#dc3545", size = 4, fontface = "bold") +
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
-        ggplot2::labs(x = "Variables per split (mtry)", y = "RMSE (Bootstrap)",
+        ggplot2::labs(x = "Variables per split (mtry)", y = paste0("RMSE (", .resample_label(mod), ")"),
                       title    = "Random Forest tuning: mtry vs RMSE",
                       subtitle = "Resampled RMSE ± 1 SD  |  dashed line = best mtry") +
         ggplot2::theme_bw(base_size = 13) +

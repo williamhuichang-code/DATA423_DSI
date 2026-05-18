@@ -177,7 +177,7 @@ meth_ols_server <- function(id, get_data, roles,
           ggplot2::geom_point(colour = "#185FA5", size = 2) +
           ggplot2::labs(
             x        = expression(log[10](lambda)),
-            y        = "RMSE (Bootstrap)",
+            y        = paste0("RMSE (", .resample_label(mod), ")"),
             title    = paste0("GLMnet tuning  (α = ", unique(df$alpha), ")"),
             subtitle = "Regularisation strength vs resampled RMSE"
           ) +
@@ -221,7 +221,7 @@ meth_ols_server <- function(id, get_data, roles,
           ggplot2::facet_wrap(~ lam_label, scales = "free_y") +
           ggplot2::labs(
             x        = "Mixing Percentage (α)",
-            y        = "RMSE (Bootstrap)",
+            y        = paste0("RMSE (", .resample_label(mod), ")"),
             title    = "GLMnet tuning: RMSE by α, faceted by λ",
             subtitle = "Each panel: “under this λ, what α works best?”"
           ) +
@@ -255,7 +255,7 @@ meth_ols_server <- function(id, get_data, roles,
         ggplot2::scale_x_continuous(breaks = scales::pretty_breaks()) +
         ggplot2::labs(
           x        = "Number of Components",
-          y        = "RMSE (Bootstrap)",
+          y        = paste0("RMSE (", .resample_label(mod), ")"),
           title    = "PLS tuning: components vs RMSE",
           subtitle = "Resampled RMSE ± 1 SD across bootstrap resamples"
         ) +
@@ -302,7 +302,7 @@ meth_ols_server <- function(id, get_data, roles,
         ) +
         ggplot2::labs(
           x        = "Intercept setting",
-          y        = "RMSE (Bootstrap)",
+          y        = paste0("RMSE (", .resample_label(mod), ")"),
           title    = "LM tuning: intercept TRUE vs FALSE",
           subtitle = "Red circle = selected best  |  error bars = ± 1 SD"
         ) +
@@ -349,7 +349,7 @@ meth_ols_server <- function(id, get_data, roles,
         ) +
         ggplot2::labs(
           x        = "Psi function",
-          y        = "RMSE (Bootstrap)",
+          y        = paste0("RMSE (", .resample_label(mod), ")"),
           colour   = "psi",
           title    = "RLM tuning: RMSE per intercept × psi combination",
           subtitle = "Red circle = best combination  |  error bars = ± 1 SD"
